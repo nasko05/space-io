@@ -1,0 +1,270 @@
+.scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: rgba(31, 26, 20, 0.35);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  font-family: var(--font-sans);
+}
+
+.panel {
+  width: 440px;
+  max-width: 100%;
+  max-height: 80vh;
+  overflow: auto;
+  background: var(--paper);
+  border-radius: 14px;
+  box-shadow:
+    0 30px 80px var(--shadow-strong),
+    0 0 0 1px rgba(40, 25, 10, 0.06);
+  padding: 24px 26px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.title {
+  font-family: var(--font-serif);
+  font-size: 20px;
+  font-weight: 500;
+  margin: 0;
+  letter-spacing: -0.015em;
+}
+
+.subtitle {
+  font-size: 12.5px;
+  color: var(--mute);
+  margin-top: 2px;
+}
+
+.close {
+  margin-left: auto;
+  width: 24px;
+  height: 24px;
+  color: var(--mute);
+  border-radius: 5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.close:hover {
+  color: var(--ink-2);
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.label {
+  font-size: 10.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--mute);
+  font-weight: 600;
+  margin-bottom: 6px;
+  display: block;
+}
+
+.field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 38px;
+  padding: 0 12px;
+  background: var(--surface);
+  border: 1px solid var(--accent-soft);
+  border-radius: 8px;
+}
+
+.fieldInput {
+  flex: 1;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-family: var(--font-serif);
+  font-size: 15px;
+  color: var(--ink);
+}
+
+.fieldInput::placeholder {
+  color: var(--mute);
+  font-style: italic;
+}
+
+.error {
+  color: #c44a2a;
+  font-size: 12px;
+  font-family: var(--font-serif);
+  font-style: italic;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 4px;
+}
+
+.cancelBtn,
+.submitBtn,
+.destructiveBtn {
+  height: 34px;
+  padding: 0 16px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.cancelBtn {
+  background: transparent;
+  border: 1px solid var(--rule);
+  color: var(--ink-2);
+}
+
+.cancelBtn:hover {
+  background: rgba(0, 0, 0, 0.03);
+}
+
+.submitBtn {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.submitBtn:hover:not(:disabled) {
+  filter: brightness(0.85);
+}
+
+.submitBtn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.destructiveBtn {
+  background: var(--accent);
+  color: #fff;
+}
+
+.destructiveBtn:hover:not(:disabled) {
+  filter: brightness(0.93);
+}
+
+/* Folder picker (MoveDialog, NewFolderDialog parent select). */
+.folderList {
+  max-height: 220px;
+  overflow: auto;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  padding: 4px;
+  background: var(--paper-warm);
+}
+
+.folderItem {
+  width: 100%;
+  text-align: left;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: transparent;
+  border: none;
+  font: inherit;
+  color: var(--ink-2);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.folderItem:hover {
+  background: var(--warm);
+  color: var(--ink);
+}
+
+.folderItemActive {
+  background: var(--warm);
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.folderItemNew {
+  color: var(--accent);
+  font-style: italic;
+}
+
+/* Tag chips. */
+.chipRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px;
+  background: var(--paper-warm);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  min-height: 38px;
+  align-items: center;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--warm);
+  color: var(--ink);
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: 13px;
+  padding: 3px 8px 3px 10px;
+  border-radius: 999px;
+}
+
+.chipRemove {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.08);
+  color: var(--ink-2);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  line-height: 1;
+}
+
+.chipRemove:hover {
+  background: var(--accent);
+  color: #fff;
+}
+
+.chipInput {
+  flex: 1;
+  min-width: 100px;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: 14px;
+  color: var(--ink);
+}
+
+.chipInput::placeholder {
+  color: var(--mute);
+}
+
+.body {
+  font-family: var(--font-serif);
+  font-size: 14.5px;
+  color: var(--ink-2);
+  line-height: 1.55;
+}
+
+.body em {
+  color: var(--accent);
+  font-style: italic;
+}

@@ -119,6 +119,94 @@
   padding: 8px 44px 32px;
 }
 
+.bulkBar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 44px;
+  border-bottom: 1px solid var(--rule);
+  background: linear-gradient(180deg, var(--warm), var(--paper));
+  font-family: var(--font-sans);
+  font-size: 12px;
+}
+
+.bulkCount {
+  color: var(--accent);
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.bulkBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 12px;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  background: var(--paper);
+  color: var(--ink-2);
+  font: inherit;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+
+.bulkBtn:hover {
+  border-color: var(--accent-soft);
+  background: var(--paper-warm);
+  color: var(--ink);
+}
+
+.bulkBtnDestructive {
+  color: var(--accent);
+}
+
+.bulkBtnDestructive:hover {
+  background: rgba(178, 90, 58, 0.08);
+  border-color: var(--accent);
+}
+
+.bulkClear {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--mute);
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+
+.bulkClear:hover {
+  color: var(--ink-2);
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.shelfDrop {
+  position: relative;
+}
+
+.shelfDrop::before {
+  content: '';
+  position: absolute;
+  inset: -4px -16px;
+  border: 2px dashed var(--accent);
+  border-radius: 12px;
+  background: rgba(178, 90, 58, 0.05);
+  pointer-events: none;
+}
+
+.shelfEmpty {
+  padding: 18px 0;
+  font-family: var(--font-serif);
+  font-style: italic;
+  color: var(--mute);
+  font-size: 13px;
+}
+
+.shelfEmpty em {
+  color: var(--accent);
+}
+
 .empty {
   font-family: var(--font-serif);
   font-style: italic;

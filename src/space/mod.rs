@@ -1,11 +1,15 @@
 pub mod create;
+pub mod delete;
 pub mod download;
 pub mod excerpt;
 pub mod git;
 pub mod history;
 pub mod init;
+pub mod meta;
+pub mod mkdir;
 pub mod paths;
 pub mod read;
+pub mod rename;
 pub mod search;
 pub mod session;
 pub mod tree;
