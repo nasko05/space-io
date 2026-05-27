@@ -1,8 +1,8 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: >
-  SpaceIO Hearth — single-instance deployment.
+  SpaceIO Hearth -- single-instance deployment.
   Resources: one EC2 instance, one security group, one EBS volume for /data,
-  one Elastic IP. Total monthly cost ≈ $4 (t4g.nano in us-east-1, on-demand)
+  one Elastic IP. Total monthly cost ~$4 (t4g.nano in us-east-1, on-demand)
   plus EBS storage. No load balancer, no Route53, no certificates.
 
 Parameters:
@@ -14,7 +14,7 @@ Parameters:
     Type: String
     Description: >
       CIDR allowed to reach SSH (22) and Hearth (7777). Restrict to your own
-      IP (e.g. 203.0.113.5/32). 0.0.0.0/0 opens the world — not recommended.
+      IP (e.g. 203.0.113.5/32). 0.0.0.0/0 opens the world -- not recommended.
     Default: 0.0.0.0/0
     AllowedPattern: '^(?:\d{1,3}\.){3}\d{1,3}/\d{1,2}$'
 
@@ -51,7 +51,7 @@ Resources:
   HearthSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: SpaceIO Hearth — SSH + Hearth web port
+      GroupDescription: SpaceIO Hearth -- SSH + Hearth web port
       SecurityGroupIngress:
         - IpProtocol: tcp
           FromPort: 22
@@ -62,7 +62,7 @@ Resources:
           FromPort: 7777
           ToPort: 7777
           CidrIp: !Ref AllowedCidr
-          Description: Hearth (HTTP — terminate TLS yourself behind a tunnel or reverse proxy)
+          Description: Hearth (HTTP -- terminate TLS yourself behind a tunnel or reverse proxy)
       Tags:
         - Key: Name
           Value: hearth-sg
@@ -71,7 +71,7 @@ Resources:
     Type: AWS::EC2::Instance
     Properties:
       # Always resolves to the latest Amazon Linux 2023 AMI in the deploying
-      # region — no static map to keep up to date.
+      # region -- no static map to keep up to date.
       ImageId: !If
         - UseArm
         - '{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64}}'
@@ -135,7 +135,7 @@ Resources:
           EOF
 
           systemctl daemon-reload
-          # Service is enabled but NOT started — wait for an `init`.
+          # Service is enabled but NOT started -- wait for an `init`.
           systemctl enable hearth.service
 
           # First-run helper.
