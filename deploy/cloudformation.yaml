@@ -21,7 +21,19 @@ Parameters:
   InstanceType:
     Type: String
     Default: t4g.nano
-    AllowedValues: [t4g.nano, t4g.micro, t4g.small, t3.nano, t3.micro, t3.small]
+    AllowedValues:
+      - t4g.nano
+      - t4g.micro
+      - t4g.small
+      - t4g.medium
+      - t4g.large
+      - t4g.xlarge
+      - t3.nano
+      - t3.micro
+      - t3.small
+      - t3.medium
+      - t3.large
+      - t3.xlarge
     Description: t4g.* (ARM) is cheapest; t3.* (x86) if you need x86.
 
   DataVolumeGiB:
@@ -46,6 +58,9 @@ Conditions:
     - !Equals [!Ref InstanceType, t4g.nano]
     - !Equals [!Ref InstanceType, t4g.micro]
     - !Equals [!Ref InstanceType, t4g.small]
+    - !Equals [!Ref InstanceType, t4g.medium]
+    - !Equals [!Ref InstanceType, t4g.large]
+    - !Equals [!Ref InstanceType, t4g.xlarge]
 
 Resources:
   HearthSecurityGroup:
