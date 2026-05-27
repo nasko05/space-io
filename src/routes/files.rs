@@ -29,10 +29,7 @@ struct TreeResponse {
     tree: Vec<tree::TreeNode>,
 }
 
-async fn get_tree(
-    State(state): State<AppState>,
-    jar: CookieJar,
-) -> AppResult<Json<TreeResponse>> {
+async fn get_tree(State(state): State<AppState>, jar: CookieJar) -> AppResult<Json<TreeResponse>> {
     require_passphrase(&state, &jar)?;
     let tree = tree::build_tree(&state.space)?;
     Ok(Json(TreeResponse { tree }))
@@ -237,10 +234,7 @@ async fn get_download(
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or(&file.path);
-    let content_disposition = format!(
-        "attachment; filename=\"{}\"",
-        base_name.replace('"', "")
-    );
+    let content_disposition = format!("attachment; filename=\"{}\"", base_name.replace('"', ""));
     Ok((
         StatusCode::OK,
         [

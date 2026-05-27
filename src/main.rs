@@ -17,7 +17,11 @@ use crate::space::Space;
 use crate::state::AppState;
 
 #[derive(Parser, Debug)]
-#[command(name = "hearth", version, about = "SpaceIO · Hearth — self-hosted personal repository")]
+#[command(
+    name = "hearth",
+    version,
+    about = "SpaceIO · Hearth — self-hosted personal repository"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -68,8 +72,8 @@ fn cmd_init(space_dir: PathBuf, passphrase: Option<String>, owner: String) -> an
     let passphrase = match passphrase {
         Some(p) => p,
         None => {
-            let p1 = rpassword::prompt_password("Choose a passphrase: ")
-                .context("read passphrase")?;
+            let p1 =
+                rpassword::prompt_password("Choose a passphrase: ").context("read passphrase")?;
             let p2 = rpassword::prompt_password("Confirm: ").context("read passphrase confirm")?;
             if p1 != p2 {
                 anyhow::bail!("passphrases do not match");
@@ -102,7 +106,9 @@ async fn cmd_serve(space_dir: PathBuf, listen: SocketAddr) -> anyhow::Result<()>
     let app = routes::build_router(state);
 
     tracing::info!("Listening on http://{listen}");
-    let listener = tokio::net::TcpListener::bind(listen).await.context("bind")?;
+    let listener = tokio::net::TcpListener::bind(listen)
+        .await
+        .context("bind")?;
     axum::serve(listener, app).await.context("serve")?;
     Ok(())
 }

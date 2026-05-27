@@ -76,7 +76,9 @@ fn sanitise_filename(input: &str) -> AppResult<String> {
         out.push(ch);
     }
     if out.starts_with('.') {
-        return Err(AppError::BadRequest("filename cannot start with '.'".into()));
+        return Err(AppError::BadRequest(
+            "filename cannot start with '.'".into(),
+        ));
     }
     if out.len() > MAX_FILENAME {
         out.truncate(MAX_FILENAME);
@@ -86,7 +88,9 @@ fn sanitise_filename(input: &str) -> AppResult<String> {
 
 fn split_stem_ext(name: &str) -> (String, String) {
     match name.rfind('.') {
-        Some(i) if i > 0 && i < name.len() - 1 => (name[..i].to_string(), name[i + 1..].to_string()),
+        Some(i) if i > 0 && i < name.len() - 1 => {
+            (name[..i].to_string(), name[i + 1..].to_string())
+        }
         _ => (name.to_string(), String::new()),
     }
 }

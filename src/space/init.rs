@@ -75,8 +75,7 @@ pub fn init_space(opts: InitOptions) -> AppResult<()> {
     };
     cfg.save(space_dir)?;
 
-    git2::Repository::init(&root)
-        .map_err(|e| AppError::Internal(format!("git init: {e}")))?;
+    git2::Repository::init(&root).map_err(|e| AppError::Internal(format!("git init: {e}")))?;
 
     let seed_full_rel = format!("{SEED_REL_PATH}.age");
     let seed_path = root.join(&seed_full_rel);
