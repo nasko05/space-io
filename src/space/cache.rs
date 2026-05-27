@@ -44,11 +44,7 @@ impl DecryptedCache {
     /// Look up cached plaintext plus its ASCII-lowercased mirror. The
     /// lowered string is computed on first request and reused until the
     /// underlying file changes.
-    pub fn get_with_lowered(
-        &self,
-        key: &str,
-        mtime: SystemTime,
-    ) -> Option<(Arc<str>, Arc<str>)> {
+    pub fn get_with_lowered(&self, key: &str, mtime: SystemTime) -> Option<(Arc<str>, Arc<str>)> {
         let mut guard = self.inner.lock().ok()?;
         let entry = guard.get_mut(key)?;
         if entry.mtime != mtime {

@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::sync::{Arc, Mutex};
 
 use age::secrecy::SecretString;
 use serde::{Deserialize, Serialize};
@@ -24,25 +25,67 @@ pub struct MetaIndex {
     pub paths: BTreeMap<String, FileMeta>,
 }
 
+/// In-memory cache for the decrypted meta index. The meta file is read on
+/// every tag edit, every search, and on every rename/delete to update path
+/// keys. Each load pays a full age-passphrase decrypt (scrypt-derived KDF,
+/// deliberately slow), so caching the parsed index avoids hundreds of
+/// milliseconds of CPU per request.
+///
+/// The cache stays consistent with disk because every successful `save`
+/// replaces the cached value with the freshly-persisted index.
+#[derive(Clone, Default)]
+pub struct MetaCache {
+    inner: Arc<Mutex<Option<Arc<MetaIndex>>>>,
+}
+
+impl MetaCache {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn read(&self) -> Option<Arc<MetaIndex>> {
+        self.inner.lock().ok().and_then(|g| g.clone())
+    }
+
+    pub fn replace(&self, idx: Arc<MetaIndex>) {
+        if let Ok(mut g) = self.inner.lock() {
+            *g = Some(idx);
+        }
+    }
+}
+
 const META_REL: &str = ".space-meta.toml";
 
 fn index_path(space: &Space) -> std::path::PathBuf {
     with_age_suffix(&space.root().join(META_REL))
 }
 
-pub fn load(space: &Space, passphrase: &SecretString) -> AppResult<MetaIndex> {
-    let p = index_path(space);
-    if !p.is_file() {
-        return Ok(MetaIndex::default());
+/// Load the meta index. First call after a lock pays the age decrypt; later
+/// calls return the cached `Arc<MetaIndex>` until a `save` replaces it.
+pub fn load(space: &Space, passphrase: &SecretString) -> AppResult<Arc<MetaIndex>> {
+    if let Some(cached) = space.meta_cache().read() {
+        return Ok(cached);
     }
-    let bytes = std::fs::read(&p)?;
-    let plaintext = age_io::decrypt_bytes(&bytes, passphrase)?;
-    let text =
-        String::from_utf8(plaintext).map_err(|_| AppError::Internal("non-utf8 meta".into()))?;
-    toml::from_str(&text).map_err(|e| AppError::Internal(format!("parse meta: {e}")))
+    let p = index_path(space);
+    let idx = if !p.is_file() {
+        MetaIndex::default()
+    } else {
+        let bytes = std::fs::read(&p)?;
+        let plaintext = age_io::decrypt_bytes(&bytes, passphrase)?;
+        let text =
+            String::from_utf8(plaintext).map_err(|_| AppError::Internal("non-utf8 meta".into()))?;
+        toml::from_str(&text).map_err(|e| AppError::Internal(format!("parse meta: {e}")))?
+    };
+    let arc = Arc::new(idx);
+    space.meta_cache().replace(arc.clone());
+    Ok(arc)
 }
 
-pub fn save(space: &Space, passphrase: &SecretString, index: &MetaIndex) -> AppResult<()> {
+/// Encrypt + write the index to disk and refresh the cache. Does NOT
+/// commit. Use this when the caller wants to bundle the meta change with
+/// another filesystem change (e.g. a file rename) into a single commit;
+/// otherwise prefer `save`.
+pub fn write_index(space: &Space, passphrase: &SecretString, index: &MetaIndex) -> AppResult<()> {
     let p = index_path(space);
     let text = toml::to_string_pretty(index)
         .map_err(|e| AppError::Internal(format!("serialize meta: {e}")))?;
@@ -51,7 +94,53 @@ pub fn save(space: &Space, passphrase: &SecretString, index: &MetaIndex) -> AppR
         std::fs::create_dir_all(parent)?;
     }
     std::fs::write(&p, &ciphertext)?;
-    space.with_repo(|repo| commit_all(repo, "meta: update"))?;
+    space.meta_cache().replace(Arc::new(index.clone()));
+    Ok(())
+}
+
+/// Write the index to disk, commit "meta: update", and refresh the cache.
+/// The default save path for tag operations where the meta change is the
+/// only thing happening.
+pub fn save(space: &Space, passphrase: &SecretString, index: &MetaIndex) -> AppResult<()> {
+    write_index(space, passphrase, index)?;
+    space.with_repo(|repo| commit_all(repo, "meta: update"))
+}
+
+/// Apply a sequence of `(path, tags)` updates atomically: one load, one
+/// save, one commit, regardless of how many files are touched. Empty tags
+/// removes the entry for that path. Whitespace-only tags are dropped.
+pub fn set_tags_bulk(
+    space: &Space,
+    passphrase: &SecretString,
+    updates: Vec<(String, Vec<String>)>,
+) -> AppResult<()> {
+    if updates.is_empty() {
+        return Ok(());
+    }
+    let cached = load(space, passphrase)?;
+    let mut idx: MetaIndex = (*cached).clone();
+    let mut changed = false;
+    for (path, tags) in updates {
+        let trimmed: Vec<String> = tags
+            .into_iter()
+            .map(|t| t.trim().to_string())
+            .filter(|t| !t.is_empty())
+            .collect();
+        if trimmed.is_empty() {
+            if idx.paths.remove(&path).is_some() {
+                changed = true;
+            }
+        } else {
+            let entry = idx.paths.entry(path).or_default();
+            if entry.tags != trimmed {
+                entry.tags = trimmed;
+                changed = true;
+            }
+        }
+    }
+    if changed {
+        save(space, passphrase, &idx)?;
+    }
     Ok(())
 }
 
@@ -62,55 +151,7 @@ pub fn set_tags(
     path: &str,
     tags: Vec<String>,
 ) -> AppResult<()> {
-    let mut idx = load(space, passphrase)?;
-    let trimmed: Vec<String> = tags
-        .into_iter()
-        .map(|t| t.trim().to_string())
-        .filter(|t| !t.is_empty())
-        .collect();
-    if trimmed.is_empty() {
-        idx.paths.remove(path);
-    } else {
-        idx.paths.entry(path.to_string()).or_default().tags = trimmed;
-    }
-    save(space, passphrase, &idx)
-}
-
-/// Rewrite the index so any path under `from_prefix` (or equal to `from`)
-/// migrates to `to_prefix` (resp. `to`). Used by rename/move/delete.
-pub fn rewrite_paths(
-    space: &Space,
-    passphrase: &SecretString,
-    from: &str,
-    to: &str,
-    is_directory: bool,
-) -> AppResult<()> {
-    let mut idx = load(space, passphrase)?;
-    let mut changed = false;
-    if is_directory {
-        let from_prefix = format!("{from}/");
-        let to_prefix = format!("{to}/");
-        let keys: Vec<String> = idx
-            .paths
-            .keys()
-            .filter(|k| k.starts_with(&from_prefix))
-            .cloned()
-            .collect();
-        for old_key in keys {
-            let new_key = old_key.replacen(&from_prefix, &to_prefix, 1);
-            if let Some(entry) = idx.paths.remove(&old_key) {
-                idx.paths.insert(new_key, entry);
-                changed = true;
-            }
-        }
-    } else if let Some(entry) = idx.paths.remove(from) {
-        idx.paths.insert(to.to_string(), entry);
-        changed = true;
-    }
-    if changed {
-        save(space, passphrase, &idx)?;
-    }
-    Ok(())
+    set_tags_bulk(space, passphrase, vec![(path.to_string(), tags)])
 }
 
 #[cfg(test)]
@@ -152,24 +193,82 @@ mod tests {
     }
 
     #[test]
-    fn rewrite_paths_renames_a_single_file() {
-        let (_d, s, p) = make_space("p");
-        set_tags(&s, &p, "a.md", vec!["t".into()]).unwrap();
-        rewrite_paths(&s, &p, "a.md", "b.md", false).unwrap();
+    fn set_tags_bulk_applies_all_updates_in_one_commit() {
+        let (d, s, p) = make_space("p");
+        crate::space::write::write_file(&s, &p, "a.md", "x", None).unwrap();
+        crate::space::write::write_file(&s, &p, "b.md", "y", None).unwrap();
+        crate::space::write::write_file(&s, &p, "c.md", "z", None).unwrap();
+
+        let commits_before = count_commits(&d.path().join("space"));
+        set_tags_bulk(
+            &s,
+            &p,
+            vec![
+                ("a.md".into(), vec!["one".into()]),
+                ("b.md".into(), vec!["two".into()]),
+                ("c.md".into(), vec!["three".into()]),
+            ],
+        )
+        .unwrap();
+        let commits_after = count_commits(&d.path().join("space"));
+        assert_eq!(
+            commits_after - commits_before,
+            1,
+            "bulk set_tags should produce exactly one commit",
+        );
+
         let idx = load(&s, &p).unwrap();
-        assert!(!idx.paths.contains_key("a.md"));
-        assert_eq!(idx.paths["b.md"].tags, vec!["t"]);
+        assert_eq!(idx.paths["a.md"].tags, vec!["one"]);
+        assert_eq!(idx.paths["b.md"].tags, vec!["two"]);
+        assert_eq!(idx.paths["c.md"].tags, vec!["three"]);
     }
 
     #[test]
-    fn rewrite_paths_migrates_folder_subtree() {
+    fn set_tags_bulk_empty_input_is_a_noop() {
+        let (d, s, p) = make_space("p");
+        let before = count_commits(&d.path().join("space"));
+        set_tags_bulk(&s, &p, vec![]).unwrap();
+        assert_eq!(count_commits(&d.path().join("space")), before);
+    }
+
+    #[test]
+    fn set_tags_bulk_skips_commit_when_nothing_changed() {
+        let (d, s, p) = make_space("p");
+        set_tags(&s, &p, "a.md", vec!["same".into()]).unwrap();
+        let before = count_commits(&d.path().join("space"));
+        set_tags_bulk(&s, &p, vec![("a.md".into(), vec!["same".into()])]).unwrap();
+        assert_eq!(count_commits(&d.path().join("space")), before);
+    }
+
+    #[test]
+    fn cache_makes_repeated_loads_return_same_arc() {
         let (_d, s, p) = make_space("p");
-        set_tags(&s, &p, "Old/a.md", vec!["t1".into()]).unwrap();
-        set_tags(&s, &p, "Old/sub/b.md", vec!["t2".into()]).unwrap();
-        rewrite_paths(&s, &p, "Old", "New", true).unwrap();
-        let idx = load(&s, &p).unwrap();
-        assert!(!idx.paths.iter().any(|(k, _)| k.starts_with("Old/")));
-        assert_eq!(idx.paths["New/a.md"].tags, vec!["t1"]);
-        assert_eq!(idx.paths["New/sub/b.md"].tags, vec!["t2"]);
+        set_tags(&s, &p, "a.md", vec!["t".into()]).unwrap();
+        let a = load(&s, &p).unwrap();
+        let b = load(&s, &p).unwrap();
+        assert!(
+            Arc::ptr_eq(&a, &b),
+            "cached load should return the same Arc",
+        );
+    }
+
+    #[test]
+    fn save_invalidates_cache_with_new_value() {
+        let (_d, s, p) = make_space("p");
+        set_tags(&s, &p, "a.md", vec!["one".into()]).unwrap();
+        let first = load(&s, &p).unwrap();
+        set_tags(&s, &p, "a.md", vec!["two".into()]).unwrap();
+        let second = load(&s, &p).unwrap();
+        assert!(!Arc::ptr_eq(&first, &second));
+        assert_eq!(second.paths["a.md"].tags, vec!["two"]);
+    }
+
+    fn count_commits(repo_path: &std::path::Path) -> usize {
+        let repo = git2::Repository::open(repo_path).unwrap();
+        let mut walk = repo.revwalk().unwrap();
+        if walk.push_head().is_err() {
+            return 0;
+        }
+        walk.filter_map(Result::ok).count()
     }
 }

@@ -28,6 +28,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use crate::config::{PasskeyConfig, SpaceConfig};
 use crate::error::{AppError, AppResult};
 use crate::space::cache::DecryptedCache;
+use crate::space::meta::MetaCache;
 
 #[derive(Clone)]
 pub struct Space {
@@ -45,6 +46,10 @@ struct SpaceInner {
     /// here so it's tied to the unlocked vault and dropped when `Space`
     /// is dropped.
     decrypted: DecryptedCache,
+    /// In-memory mirror of the meta index. The on-disk file is age-encrypted
+    /// with a scrypt-derived key; caching the parsed tree avoids paying that
+    /// KDF cost on every tag edit, search, rename, and delete.
+    meta_cache: MetaCache,
 }
 
 impl Space {
@@ -64,6 +69,7 @@ impl Space {
                 config: RwLock::new(config),
                 repo: Mutex::new(repo),
                 decrypted: DecryptedCache::new(),
+                meta_cache: MetaCache::new(),
             }),
         })
     }
@@ -72,6 +78,11 @@ impl Space {
     /// `excerpt`; invalidated by `write` / `delete` / `rename`.
     pub fn cache(&self) -> &DecryptedCache {
         &self.inner.decrypted
+    }
+
+    /// Cached parsed meta index. Read/written by `space::meta`.
+    pub fn meta_cache(&self) -> &MetaCache {
+        &self.inner.meta_cache
     }
 
     pub fn root(&self) -> PathBuf {

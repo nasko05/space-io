@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { Close, FolderOpen, HardDrive, Pencil } from '../icons/Icon';
 import { CalendarView, TodayEntry } from '../../lib/calendar';
 import styles from './HearthRail.module.css';
@@ -27,7 +28,7 @@ const WEEKDAYS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 // - Calendar dots reflect days with .md updates in the current month.
 // - Today list shows files updated today, sorted newest first.
 // - "my space" badge in the brand row navigates to the Vault surface.
-export function HearthRail({
+function HearthRailImpl({
   calendar,
   entries,
   entriesLabel,
@@ -188,3 +189,8 @@ export function HearthRail({
     </aside>
   );
 }
+
+// Memoized so the rail (with its 30+ day buttons and today list) doesn't
+// re-render on every keystroke in the Reader. Callers need to keep callback
+// props stable for the memo to hit.
+export const HearthRail = memo(HearthRailImpl);

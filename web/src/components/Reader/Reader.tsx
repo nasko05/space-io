@@ -305,6 +305,20 @@ export function Reader({
     [flush, onSelectFile, onWikilinkMiss, titleToPath],
   );
 
+  // The rail is memoized — keep these callbacks referentially stable so it
+  // doesn't re-render on every keystroke.
+  const railSelectFile = useCallback(
+    (p: string) => {
+      void flush();
+      onSelectFile(p);
+    },
+    [flush, onSelectFile],
+  );
+  const railOpenVault = useCallback(() => {
+    void flush();
+    onOpenVault();
+  }, [flush, onOpenVault]);
+
   const { fileName, folderSegments } = useMemo(() => {
     const segments = path.split('/');
     return {
@@ -349,15 +363,9 @@ export function Reader({
           selectedDay={selectedDay}
           onClearSelectedDay={onClearSelectedDay}
           onNewEntry={onNewEntry}
-          onSelectFile={(p) => {
-            void flush();
-            onSelectFile(p);
-          }}
+          onSelectFile={railSelectFile}
           onSelectDay={onSelectDay}
-          onOpenVault={() => {
-            void flush();
-            onOpenVault();
-          }}
+          onOpenVault={railOpenVault}
           onOpenPasskey={onOpenPasskey}
           hasPasskey={hasPasskey}
           activeSurface="reader"

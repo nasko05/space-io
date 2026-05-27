@@ -47,7 +47,8 @@ pub fn search(space: &Space, passphrase: &SecretString, query: &str) -> AppResul
 
     // Tags live in a single encrypted index at the root; load it once so each
     // per-file tag check is an in-memory lookup, not another decrypt.
-    let meta_index = crate::space::meta::load(space, passphrase).unwrap_or_default();
+    let meta_index = crate::space::meta::load(space, passphrase)
+        .unwrap_or_else(|_| std::sync::Arc::new(crate::space::meta::MetaIndex::default()));
 
     let mut hits: Vec<SearchHit> = Vec::new();
 
