@@ -38,7 +38,8 @@ pub fn write_file(
         .ok()
         .and_then(|t| {
             let dt: time::OffsetDateTime = t.into();
-            dt.format(&time::format_description::well_known::Rfc3339).ok()
+            dt.format(&time::format_description::well_known::Rfc3339)
+                .ok()
         })
         .unwrap_or_default();
 
