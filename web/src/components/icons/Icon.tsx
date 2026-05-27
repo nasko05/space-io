@@ -241,6 +241,17 @@ export const Pencil = (p: IconProps) =>
 
 export const Close = (p: IconProps) => wrap(<path d="M6 6l12 12M18 6 6 18" />, 1.8, p);
 
+export const MoreHorizontal = (p: IconProps) =>
+  wrap(
+    <>
+      <circle cx="5" cy="12" r="1.4" fill="currentColor" />
+      <circle cx="12" cy="12" r="1.4" fill="currentColor" />
+      <circle cx="19" cy="12" r="1.4" fill="currentColor" />
+    </>,
+    0,
+    p,
+  );
+
 export const Download = (p: IconProps) => wrap(<path d="M12 4v12M7 11l5 5 5-5M4 20h16" />, 1.6, p);
 
 export const Pin = (p: IconProps) => wrap(<path d="M12 17v5M8 3h8l-1 6 3 3H6l3-3-1-6Z" />, 1.6, p);

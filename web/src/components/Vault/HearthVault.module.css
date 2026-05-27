@@ -256,6 +256,25 @@
   color: var(--ink-2);
 }
 
+.shelfMenuBtn {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--mute);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  padding: 0;
+  transition: background 0.12s, color 0.12s;
+}
+
+.shelfMenuBtn:hover {
+  background: rgba(0, 0, 0, 0.05);
+  color: var(--ink);
+}
+
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
