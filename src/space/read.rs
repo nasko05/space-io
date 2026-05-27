@@ -40,6 +40,8 @@ fn systemtime_iso8601(t: SystemTime) -> Option<String> {
     let dt: OffsetDateTime = t.into();
     dt.format(&time::format_description::well_known::Rfc3339)
         .ok()
+<<<<<<< claude/qa-fixes
+=======
 }
 
 #[cfg(test)]
@@ -87,4 +89,5 @@ mod tests {
         // RFC3339 has at least the form YYYY-MM-DDTHH:MM:SS+TZ
         assert!(updated.contains('T'), "iso8601: {updated}");
     }
+>>>>>>> main
 }

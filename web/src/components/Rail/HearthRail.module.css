@@ -58,6 +58,12 @@
   font-weight: 600;
 }
 
+.primaryActions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
 .newEntry {
   height: 36px;
   border-radius: 999px;
@@ -72,7 +78,34 @@
 }
 
 .newEntry:hover {
-  background: #0f0a04;
+  filter: brightness(0.85);
+}
+
+.vaultBtn {
+  height: 32px;
+  border-radius: 999px;
+  background: transparent;
+  border: 1px solid var(--rule);
+  color: var(--ink-2);
+  font-size: 12.5px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: center;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+
+.vaultBtn:hover {
+  background: var(--warm);
+  color: var(--ink);
+  border-color: var(--accent-soft);
+}
+
+.vaultBtnActive {
+  background: var(--warm);
+  color: var(--ink);
+  border-color: var(--accent);
 }
 
 .sectionLabel {

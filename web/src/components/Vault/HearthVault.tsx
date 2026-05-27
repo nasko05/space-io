@@ -1,6 +1,7 @@
 import { WindowChrome } from '../WindowChrome/WindowChrome';
 import { HearthRail } from '../Rail/HearthRail';
 import { HearthCard } from './HearthCard';
+import { Moon, Sun } from '../icons/Icon';
 import { ExcerptMap, TreeFile, TreeFolder, TreeNode } from '../../api/client';
 import { CalendarView, TodayEntry } from '../../lib/calendar';
 import styles from './HearthVault.module.css';
@@ -16,6 +17,8 @@ interface Props {
   onBackToReader: () => void;
   onOpenPasskey?: () => void;
   hasPasskey?: boolean;
+  theme?: 'light' | 'dark';
+  onToggleTheme?: () => void;
 }
 
 // Ported from dir-1-hearth.jsx:670-765 (HearthVault).
@@ -32,6 +35,8 @@ export function HearthVault({
   onBackToReader,
   onOpenPasskey,
   hasPasskey,
+  theme,
+  onToggleTheme,
 }: Props) {
   const folders: TreeFolder[] = tree.filter((n): n is TreeFolder => n.type === 'folder');
   const totalFiles = countFiles(tree);
@@ -40,7 +45,22 @@ export function HearthVault({
     <div className={styles.root}>
       <WindowChrome
         title="SpaceIO · my space"
-        right={<span className={styles.chromeCount}>{totalFiles} items</span>}
+        right={
+          <>
+            <span className={styles.chromeCount}>{totalFiles} items</span>
+            {onToggleTheme && (
+              <button
+                type="button"
+                className={styles.themeBtn}
+                onClick={onToggleTheme}
+                aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+                title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+              >
+                {theme === 'dark' ? <Moon size={13} /> : <Sun size={13} />}
+              </button>
+            )}
+          </>
+        }
       />
       <div className={styles.layout}>
         <HearthRail

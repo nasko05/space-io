@@ -48,6 +48,20 @@ export function App() {
   const [downloadFile, setDownloadFile] = useState<TreeFile | null>(null);
   const [passkeyOpen, setPasskeyOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+    const stored = typeof window !== 'undefined' ? window.localStorage.getItem('hearth.theme') : null;
+    return stored === 'dark' ? 'dark' : 'light';
+  });
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    document.documentElement.dataset.theme = theme;
+    window.localStorage.setItem('hearth.theme', theme);
+  }, [theme]);
+
+  const toggleTheme = useCallback(() => {
+    setTheme((t) => (t === 'dark' ? 'light' : 'dark'));
+  }, []);
 
   useEffect(() => {
     const t = window.setInterval(() => setNow(new Date()), 60_000);
@@ -258,9 +272,24 @@ export function App() {
   const saveFile = useCallback(
     async (path: string, content: string) => {
       await api.write(path, content);
-      void refreshExcerpts();
+      // Locally patch the title/excerpt so wikilink autocomplete + the Today
+      // list reflect the latest content without a full server walk-and-
+      // decrypt on every keystroke (the prior implementation made the UI
+      // very slow as the corpus grew).
+      const titleMatch = /^# (.+)$/m.exec(content);
+      const title = titleMatch ? titleMatch[1].trim() : null;
+      const bodyLines = content
+        .split('\n')
+        .filter((l) => !l.startsWith('#') && l.trim().length > 0)
+        .slice(0, 3)
+        .join(' ');
+      const excerpt = bodyLines
+        .replace(/[*_`]/g, '')
+        .replace(/\[\[|\]\]/g, '')
+        .slice(0, 180);
+      setExcerpts((cur) => ({ ...cur, [path]: { title, excerpt } }));
     },
-    [refreshExcerpts],
+    [],
   );
 
   const onSelectVaultFile = useCallback(
@@ -392,6 +421,8 @@ export function App() {
           onWikilinkMiss={onWikilinkMiss}
           onOpenPasskey={() => setPasskeyOpen(true)}
           hasPasskey={hasPasskey}
+          theme={theme}
+          onToggleTheme={toggleTheme}
         />
       )}
       {surface.kind === 'vault' && (
@@ -410,6 +441,8 @@ export function App() {
           onBackToReader={backFromVault}
           onOpenPasskey={() => setPasskeyOpen(true)}
           hasPasskey={hasPasskey}
+          theme={theme}
+          onToggleTheme={toggleTheme}
         />
       )}
       {surface.kind === 'preview' && (
@@ -425,6 +458,8 @@ export function App() {
           onDownload={(f) => setDownloadFile(f)}
           onOpenPasskey={() => setPasskeyOpen(true)}
           hasPasskey={hasPasskey}
+          theme={theme}
+          onToggleTheme={toggleTheme}
         />
       )}
 

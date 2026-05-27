@@ -47,6 +47,8 @@ interface Props {
   onWikilinkMiss?: (title: string) => void;
   onOpenPasskey?: () => void;
   hasPasskey?: boolean;
+  theme?: 'light' | 'dark';
+  onToggleTheme?: () => void;
 }
 
 const WIKILINK_MAX_SUGGESTIONS = 6;
@@ -85,6 +87,8 @@ export function Reader({
   onWikilinkMiss,
   onOpenPasskey,
   hasPasskey,
+  theme,
+  onToggleTheme,
 }: Props) {
   const [content, setContent] = useState(initialContent);
   const [mode, setMode] = useState<'preview' | 'edit'>(initialMode);
@@ -116,6 +120,71 @@ export function Reader({
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [flush]);
+
+  // Editor-side formatting helpers. They mutate the textarea content
+  // through state + caret restoration on the next frame so React's
+  // controlled input doesn't fight us.
+  const applyToSelection = useCallback(
+    (transform: (value: string, start: number, end: number) => { text: string; selStart: number; selEnd: number }) => {
+      const ta = textareaRef.current;
+      if (!ta) return;
+      const { selectionStart, selectionEnd, value } = ta;
+      const { text, selStart, selEnd } = transform(value, selectionStart, selectionEnd);
+      setContent(text);
+      markDirty(text);
+      window.requestAnimationFrame(() => {
+        ta.focus();
+        ta.setSelectionRange(selStart, selEnd);
+      });
+    },
+    [markDirty],
+  );
+
+  const wrapSelection = useCallback(
+    (marker: string) =>
+      applyToSelection((value, start, end) => {
+        const before = value.slice(0, start);
+        const sel = value.slice(start, end);
+        const after = value.slice(end);
+        const text = `${before}${marker}${sel}${marker}${after}`;
+        return {
+          text,
+          selStart: start + marker.length,
+          selEnd: end + marker.length,
+        };
+      }),
+    [applyToSelection],
+  );
+
+  const prefixLine = useCallback(
+    (prefix: string) =>
+      applyToSelection((value, start, end) => {
+        // Find the start of the current line.
+        let lineStart = start;
+        while (lineStart > 0 && value[lineStart - 1] !== '\n') lineStart -= 1;
+        const before = value.slice(0, lineStart);
+        const rest = value.slice(lineStart);
+        const text = `${before}${prefix}${rest}`;
+        return {
+          text,
+          selStart: start + prefix.length,
+          selEnd: end + prefix.length,
+        };
+      }),
+    [applyToSelection],
+  );
+
+  const insertAtCursor = useCallback(
+    (snippet: string, caretOffset?: number) =>
+      applyToSelection((value, start, end) => {
+        const before = value.slice(0, start);
+        const after = value.slice(end);
+        const text = `${before}${snippet}${after}`;
+        const caret = start + (caretOffset ?? snippet.length);
+        return { text, selStart: caret, selEnd: caret };
+      }),
+    [applyToSelection],
+  );
 
   useEffect(() => {
     if (mode === 'edit') textareaRef.current?.focus();
@@ -186,6 +255,20 @@ export function Reader({
   }
 
   function onTextareaKeyDown(e: ReactKeyboardEvent<HTMLTextAreaElement>) {
+    // Formatting shortcuts work whether or not autocomplete is open.
+    if (e.metaKey || e.ctrlKey) {
+      const key = e.key.toLowerCase();
+      if (key === 'b') {
+        e.preventDefault();
+        wrapSelection('**');
+        return;
+      }
+      if (key === 'i') {
+        e.preventDefault();
+        wrapSelection('*');
+        return;
+      }
+    }
     if (!ac.open) return;
     if (e.key === 'ArrowDown') {
       e.preventDefault();
@@ -230,7 +313,12 @@ export function Reader({
   const saveLabel = saveStatusLabel(status);
 
   return (
-    <HearthShell mode={mode === 'edit' ? 'editing' : 'reading'} onLock={onLock}>
+    <HearthShell
+      mode={mode === 'edit' ? 'editing' : 'reading'}
+      onLock={onLock}
+      theme={theme}
+      onToggleTheme={onToggleTheme}
+    >
       <div className={styles.layout}>
         <HearthRail
           calendar={calendar}
@@ -281,6 +369,15 @@ export function Reader({
               <span className={styles.meta}>{wordCount} words</span>
               <button
                 type="button"
+                className={styles.toolBtn}
+                onClick={onOpenSearch}
+                aria-label="Search"
+                title="Search (⌘K)"
+              >
+                <Search size={12} /> <kbd className={styles.kbd}>⌘K</kbd>
+              </button>
+              <button
+                type="button"
                 className={`${styles.toolBtn} ${historyOpen ? styles.toolBtnActive : ''}`}
                 onClick={() => setHistoryOpen((v) => !v)}
                 title="Version history"
@@ -306,19 +403,6 @@ export function Reader({
               </button>
             </div>
           </div>
-
-          {mode === 'preview' && (
-            <button
-              type="button"
-              className={styles.searchPill}
-              onClick={onOpenSearch}
-              aria-label="Open search"
-            >
-              <Search size={12} />
-              <span>Search the whole diary…</span>
-              <kbd>⌘K</kbd>
-            </button>
-          )}
 
           <div className={styles.contentRow}>
             <div className={styles.column}>
@@ -435,20 +519,102 @@ export function Reader({
           </div>
 
           {mode === 'edit' && (
-            <div className={styles.inkBar} aria-hidden>
-              <span className={styles.inkH1}>H1</span>
-              <span className={styles.inkH2}>H2</span>
+            <div className={styles.inkBar}>
+              <button
+                type="button"
+                className={styles.inkBtn}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  prefixLine('# ');
+                }}
+                title="Heading 1"
+              >
+                <span className={styles.inkH1}>H1</span>
+              </button>
+              <button
+                type="button"
+                className={styles.inkBtn}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  prefixLine('## ');
+                }}
+                title="Heading 2"
+              >
+                <span className={styles.inkH2}>H2</span>
+              </button>
               <span className={styles.inkSep} />
-              <strong className={styles.inkStrong}>B</strong>
-              <em className={styles.inkEm}>I</em>
-              <span className={styles.inkU}>U</span>
+              <button
+                type="button"
+                className={styles.inkBtn}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  wrapSelection('**');
+                }}
+                title="Bold (⌘B)"
+              >
+                <strong className={styles.inkStrong}>B</strong>
+              </button>
+              <button
+                type="button"
+                className={styles.inkBtn}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  wrapSelection('*');
+                }}
+                title="Italic (⌘I)"
+              >
+                <em className={styles.inkEm}>I</em>
+              </button>
               <span className={styles.inkSep} />
-              <span className={styles.inkMute}>“ ”</span>
-              <span className={`${styles.inkMute} ${styles.inkMono}`}>{'</>'}</span>
-              <ImageIcon size={13} />
-              <Link size={13} />
+              <button
+                type="button"
+                className={styles.inkBtn}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  prefixLine('> ');
+                }}
+                title="Quote"
+              >
+                <span className={styles.inkMute}>“ ”</span>
+              </button>
+              <button
+                type="button"
+                className={styles.inkBtn}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  wrapSelection('`');
+                }}
+                title="Inline code"
+              >
+                <span className={`${styles.inkMute} ${styles.inkMono}`}>{'</>'}</span>
+              </button>
+              <button
+                type="button"
+                className={styles.inkBtn}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  insertAtCursor('![](url)', 2);
+                }}
+                title="Image"
+              >
+                <ImageIcon size={13} />
+              </button>
+              <button
+                type="button"
+                className={styles.inkBtn}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  insertAtCursor('[](url)', 1);
+                }}
+                title="Link"
+              >
+                <Link size={13} />
+              </button>
               <span className={styles.inkSep} />
-              <span className={styles.inkSparkle}>
+              <span
+                className={`${styles.inkBtn} ${styles.inkSparkle}`}
+                title="AI-improve (coming soon)"
+              >
                 <Sparkle size={12} /> Improve
               </span>
             </div>

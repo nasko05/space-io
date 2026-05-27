@@ -21,6 +21,8 @@ interface Props {
   onDownload: (file: TreeFile) => void;
   onOpenPasskey?: () => void;
   hasPasskey?: boolean;
+  theme?: 'light' | 'dark';
+  onToggleTheme?: () => void;
 }
 
 type FetchState =
@@ -40,6 +42,8 @@ export function Preview({
   onDownload,
   onOpenPasskey,
   hasPasskey,
+  theme,
+  onToggleTheme,
 }: Props) {
   const needsBinary = file.kind === 'pdf' || file.kind === 'docx';
   const [state, setState] = useState<FetchState>({ kind: 'loading' });
@@ -78,7 +82,12 @@ export function Preview({
   const folderSegments = segments.slice(0, -1);
 
   return (
-    <HearthShell mode={kindLabel(file.kind)} onLock={onLock}>
+    <HearthShell
+      mode={kindLabel(file.kind)}
+      onLock={onLock}
+      theme={theme}
+      onToggleTheme={onToggleTheme}
+    >
       <div className={styles.layout}>
         <HearthRail
           calendar={calendar}
