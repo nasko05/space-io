@@ -1,12 +1,13 @@
 use axum::extract::State;
 use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
 use axum::response::IntoResponse;
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::config::PasskeyConfig;
 use crate::crypto::kdf;
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
@@ -18,12 +19,16 @@ pub fn router() -> Router<AppState> {
         .route("/auth/status", get(status))
         .route("/auth/unlock", post(unlock))
         .route("/auth/lock", post(lock))
+        .route("/auth/passkey/info", get(passkey_info))
+        .route("/auth/passkey/register", post(passkey_register))
+        .route("/auth/passkey", delete(passkey_delete))
 }
 
 #[derive(Serialize)]
 struct StatusResponse {
     unlocked: bool,
     owner: String,
+    has_passkey: bool,
 }
 
 async fn status(State(state): State<AppState>, jar: CookieJar) -> Json<StatusResponse> {
@@ -32,9 +37,11 @@ async fn status(State(state): State<AppState>, jar: CookieJar) -> Json<StatusRes
         .and_then(|c| Uuid::parse_str(c.value()).ok())
         .map(|id| state.sessions.get(&id).is_some())
         .unwrap_or(false);
+    let cfg = state.space.config();
     Json(StatusResponse {
         unlocked,
-        owner: state.space.config().owner.clone(),
+        owner: cfg.owner.clone(),
+        has_passkey: cfg.passkey.is_some(),
     })
 }
 
@@ -99,6 +106,58 @@ async fn lock(State(state): State<AppState>, jar: CookieJar) -> impl IntoRespons
         }
     }
     (StatusCode::NO_CONTENT, headers)
+}
+
+#[derive(Serialize)]
+struct PasskeyInfoResponse {
+    credential_id_b64: String,
+    prf_salt_b64: String,
+    wrapped_passphrase_b64: String,
+}
+
+/// Returns the registered passkey's public material. Requires NO auth — it's
+/// what the browser needs to drive a WebAuthn authentication. The wrapped
+/// passphrase is opaque to the server; only the passkey holder can decrypt it.
+async fn passkey_info(State(state): State<AppState>) -> AppResult<Json<PasskeyInfoResponse>> {
+    let cfg = state.space.config();
+    let pk = cfg.passkey.ok_or(AppError::NotFound)?;
+    Ok(Json(PasskeyInfoResponse {
+        credential_id_b64: pk.credential_id_b64,
+        prf_salt_b64: pk.prf_salt_b64,
+        wrapped_passphrase_b64: pk.wrapped_passphrase_b64,
+    }))
+}
+
+#[derive(Deserialize)]
+struct RegisterPasskeyRequest {
+    credential_id_b64: String,
+    prf_salt_b64: String,
+    wrapped_passphrase_b64: String,
+}
+
+/// Persist the passkey wrapping material. Requires an active session so
+/// only an already-unlocked user can register a new passkey for this space.
+async fn passkey_register(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Json(req): Json<RegisterPasskeyRequest>,
+) -> AppResult<StatusCode> {
+    require_passphrase(&state, &jar)?;
+    state.space.set_passkey(Some(PasskeyConfig {
+        credential_id_b64: req.credential_id_b64,
+        prf_salt_b64: req.prf_salt_b64,
+        wrapped_passphrase_b64: req.wrapped_passphrase_b64,
+    }))?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn passkey_delete(
+    State(state): State<AppState>,
+    jar: CookieJar,
+) -> AppResult<StatusCode> {
+    require_passphrase(&state, &jar)?;
+    state.space.set_passkey(None)?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 /// Resolve the active session's passphrase or return Unauthorized.

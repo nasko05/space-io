@@ -1,0 +1,238 @@
+.scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 45;
+  background: rgba(246, 241, 231, 0.7);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.panel {
+  width: 460px;
+  max-width: 100%;
+  max-height: 90vh;
+  overflow: auto;
+  background: var(--paper);
+  border-radius: 18px;
+  box-shadow:
+    0 20px 60px rgba(60, 40, 20, 0.18),
+    0 0 0 1px rgba(60, 40, 20, 0.06);
+  padding: 32px;
+  font-family: var(--font-sans);
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  margin-bottom: 22px;
+}
+
+.title {
+  font-family: var(--font-serif);
+  font-size: 24px;
+  font-weight: 500;
+  margin: 0 0 8px;
+  letter-spacing: -0.015em;
+}
+
+.sub {
+  font-size: 12.5px;
+  color: var(--mute);
+  line-height: 1.5;
+  max-width: 360px;
+}
+
+.close {
+  margin-left: auto;
+  width: 28px;
+  height: 28px;
+  color: var(--mute);
+  border-radius: 6px;
+}
+
+.close:hover {
+  color: var(--ink-2);
+  background: rgba(0, 0, 0, 0.03);
+}
+
+.warn {
+  margin-top: 4px;
+  padding: 12px 16px;
+  border-radius: 10px;
+  background: rgba(201, 165, 90, 0.12);
+  border: 1px solid var(--pin);
+  color: var(--ink-2);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.state {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  background: rgba(178, 90, 58, 0.06);
+  border: 1px solid var(--accent-soft);
+  border-radius: 10px;
+}
+
+.dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
+}
+
+.stateText {
+  flex: 1;
+}
+
+.stateTitle {
+  font-family: var(--font-serif);
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ink);
+}
+
+.stateSub {
+  font-size: 11.5px;
+  color: var(--mute);
+  margin-top: 2px;
+}
+
+.removeBtn {
+  padding: 6px 14px;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+.removeBtn:hover:not(:disabled) {
+  background: rgba(0, 0, 0, 0.03);
+  border-color: var(--accent-soft);
+}
+
+.removeBtn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.label {
+  font-size: 10.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--mute);
+  font-weight: 600;
+}
+
+.passWrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 42px;
+  padding: 0 14px;
+  background: #fff;
+  border: 1.5px solid var(--accent);
+  border-radius: 8px;
+  box-shadow: 0 0 0 4px rgba(178, 90, 58, 0.08);
+}
+
+.passInput {
+  flex: 1;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: 17px;
+  letter-spacing: 0.04em;
+  color: var(--ink);
+}
+
+.eyeBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--mute);
+  padding: 4px;
+  border-radius: 4px;
+}
+
+.eyeBtn:hover {
+  color: var(--ink-2);
+}
+
+.actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 8px;
+  justify-content: flex-end;
+}
+
+.cancel,
+.submit {
+  height: 36px;
+  padding: 0 16px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.cancel {
+  background: transparent;
+  border: 1px solid var(--rule);
+  color: var(--ink-2);
+}
+
+.cancel:hover {
+  background: rgba(0, 0, 0, 0.03);
+}
+
+.submit {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.submit:hover:not(:disabled) {
+  background: #0f0a04;
+}
+
+.submit:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.error {
+  margin-top: 14px;
+  padding: 10px 14px;
+  background: rgba(196, 74, 42, 0.08);
+  border: 1px solid rgba(196, 74, 42, 0.35);
+  border-radius: 8px;
+  color: #c44a2a;
+  font-size: 12.5px;
+  font-family: var(--font-serif);
+  font-style: italic;
+}
+
+.success {
+  margin-top: 14px;
+  padding: 10px 14px;
+  background: rgba(178, 90, 58, 0.06);
+  border: 1px solid var(--accent-soft);
+  border-radius: 8px;
+  color: var(--accent);
+  font-size: 12.5px;
+  font-family: var(--font-serif);
+  font-style: italic;
+}

@@ -9,6 +9,8 @@ interface Props {
   onSelectFile: (path: string) => void;
   onSelectDay?: (day: number) => void;
   onOpenVault: () => void;
+  onOpenPasskey?: () => void;
+  hasPasskey?: boolean;
   activeSurface: 'reader' | 'vault' | 'new';
 }
 
@@ -25,6 +27,8 @@ export function HearthRail({
   onSelectFile,
   onSelectDay,
   onOpenVault,
+  onOpenPasskey,
+  hasPasskey,
   activeSurface,
 }: Props) {
   const days = Array.from({ length: calendar.daysInMonth }, (_, i) => i + 1);
@@ -130,6 +134,12 @@ export function HearthRail({
         <HardDrive size={12} />
         <div>self-hosted · encrypted</div>
       </div>
+      {onOpenPasskey && (
+        <button type="button" className={styles.passkeyLink} onClick={onOpenPasskey}>
+          <span className={`${styles.passkeyDot} ${hasPasskey ? styles.passkeyDotOn : ''}`} />
+          {hasPasskey ? 'passkey active' : 'register a passkey →'}
+        </button>
+      )}
     </aside>
   );
 }

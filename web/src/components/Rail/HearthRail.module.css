@@ -254,3 +254,38 @@
   font-size: 11px;
   align-items: center;
 }
+
+.passkeyLink {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 8px;
+  padding: 4px 0;
+  font-size: 11px;
+  color: var(--mute);
+  font-family: var(--font-serif);
+  font-style: italic;
+  letter-spacing: 0;
+  background: transparent;
+  border: none;
+  text-align: left;
+  transition: color 0.12s;
+}
+
+.passkeyLink:hover {
+  color: var(--accent);
+}
+
+.passkeyDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  border: 1px solid var(--mute);
+  background: transparent;
+  flex-shrink: 0;
+}
+
+.passkeyDotOn {
+  background: var(--accent);
+  border-color: var(--accent);
+}

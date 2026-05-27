@@ -1,0 +1,40 @@
+.root {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.pages {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  padding: 16px 0 32px;
+  width: 100%;
+  align-items: center;
+}
+
+.page {
+  background: #fff;
+  box-shadow:
+    0 6px 24px rgba(40, 25, 10, 0.12),
+    0 0 0 1px rgba(40, 25, 10, 0.06);
+  border-radius: 4px;
+  max-width: 880px;
+}
+
+.footer {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--mute);
+  padding-bottom: 32px;
+}
+
+.error {
+  font-family: var(--font-serif);
+  color: #c44a2a;
+  padding: 24px;
+  font-style: italic;
+}

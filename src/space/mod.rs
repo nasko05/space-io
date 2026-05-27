@@ -13,9 +13,9 @@ pub mod upload;
 pub mod write;
 
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
-use crate::config::SpaceConfig;
+use crate::config::{PasskeyConfig, SpaceConfig};
 use crate::error::{AppError, AppResult};
 
 #[derive(Clone)]
@@ -25,7 +25,7 @@ pub struct Space {
 
 struct SpaceInner {
     space_dir: PathBuf,
-    config: SpaceConfig,
+    config: RwLock<SpaceConfig>,
 }
 
 impl Space {
@@ -39,7 +39,10 @@ impl Space {
             )));
         }
         Ok(Self {
-            inner: Arc::new(SpaceInner { space_dir, config }),
+            inner: Arc::new(SpaceInner {
+                space_dir,
+                config: RwLock::new(config),
+            }),
         })
     }
 
@@ -47,7 +50,24 @@ impl Space {
         SpaceConfig::space_root(&self.inner.space_dir)
     }
 
-    pub fn config(&self) -> &SpaceConfig {
-        &self.inner.config
+    /// Cheap snapshot of the current on-disk config — clone so callers can
+    /// read fields without holding the lock.
+    pub fn config(&self) -> SpaceConfig {
+        self.inner
+            .config
+            .read()
+            .expect("config rwlock poisoned")
+            .clone()
+    }
+
+    pub fn set_passkey(&self, passkey: Option<PasskeyConfig>) -> AppResult<()> {
+        let mut guard = self
+            .inner
+            .config
+            .write()
+            .map_err(|_| AppError::Internal("config rwlock poisoned".into()))?;
+        guard.passkey = passkey;
+        guard.save(&self.inner.space_dir)?;
+        Ok(())
     }
 }
