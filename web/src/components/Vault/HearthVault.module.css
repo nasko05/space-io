@@ -1,0 +1,176 @@
+.root {
+  position: absolute;
+  inset: 0;
+  background: var(--paper);
+  font-family: var(--font-sans);
+  color: var(--ink);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.chromeCount {
+  font-size: 11px;
+  color: var(--mute);
+}
+
+.layout {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+.main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.header {
+  padding: 32px 44px 18px;
+  border-bottom: 1px solid var(--rule);
+  display: flex;
+  align-items: flex-end;
+  gap: 24px;
+}
+
+.headerText {
+  flex: 1;
+}
+
+.eyebrow {
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--mute);
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.title {
+  font-family: var(--font-serif);
+  font-size: 42px;
+  font-weight: 500;
+  margin: 0;
+  letter-spacing: -0.025em;
+  line-height: 1.05;
+}
+
+.title em {
+  font-style: italic;
+  color: var(--accent);
+  font-weight: 400;
+}
+
+.views {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.viewBtn {
+  padding: 6px 12px;
+  font-size: 12px;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ink-2);
+  border: 1px solid var(--rule);
+  transition: background 0.12s, color 0.12s;
+}
+
+.viewBtn:not(:disabled):hover {
+  background: rgba(0, 0, 0, 0.03);
+}
+
+.viewBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.viewBtnActive {
+  background: var(--ink);
+  color: var(--paper);
+  border-color: transparent;
+}
+
+.viewBtnActive:not(:disabled):hover {
+  background: #0f0a04;
+}
+
+.shelves {
+  flex: 1;
+  overflow: auto;
+  padding: 8px 44px 32px;
+}
+
+.empty {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: 17px;
+  color: var(--mute);
+  padding: 40px 0;
+  text-align: center;
+}
+
+.empty em {
+  color: var(--accent);
+}
+
+.shelf {
+  padding-top: 28px;
+}
+
+.shelfHead {
+  display: flex;
+  align-items: baseline;
+  margin-bottom: 14px;
+  gap: 14px;
+}
+
+.shelfTitle {
+  font-family: var(--font-serif);
+  font-size: 22px;
+  font-weight: 500;
+  margin: 0;
+  letter-spacing: -0.015em;
+  color: var(--ink);
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.shelfRoman {
+  color: var(--accent);
+}
+
+.shelfMeta {
+  color: var(--mute);
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: 13px;
+}
+
+.shelfRule {
+  flex: 1;
+  height: 1px;
+  background: var(--rule);
+  align-self: center;
+}
+
+.shelfMore {
+  color: var(--mute);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+}
+
+.shelfMore:hover {
+  color: var(--ink-2);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 14px;
+}

@@ -29,12 +29,14 @@
   gap: 6px;
   min-width: 0;
   overflow: hidden;
+  flex: 1;
 }
 
 .crumbSeg {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  flex-shrink: 0;
 }
 
 .crumbFile {
@@ -50,12 +52,37 @@
   display: flex;
   align-items: center;
   gap: 14px;
+  flex-shrink: 0;
 }
 
 .meta {
   display: inline-flex;
   align-items: center;
   gap: 5px;
+}
+
+.saveStatus {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--mute);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+
+.saveStatusOk {
+  color: var(--accent);
+}
+
+.saveStatusError {
+  color: #c44a2a;
+}
+
+.saveDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
 }
 
 .toolBtn {
@@ -69,6 +96,10 @@
   gap: 5px;
   font-size: 11px;
   letter-spacing: 0.02em;
+}
+
+.toolBtn:hover {
+  background: rgba(0, 0, 0, 0.03);
 }
 
 .toolBtnActive {
@@ -119,7 +150,7 @@
 .article {
   width: 100%;
   max-width: 680px;
-  padding: 52px 48px 80px;
+  padding: 52px 48px 96px;
   font-family: var(--font-serif);
   color: var(--ink);
   line-height: 1.6;
@@ -167,6 +198,83 @@
   font-weight: 400;
 }
 
+.placeholderTitle {
+  font-family: var(--font-serif);
+  font-size: 46px;
+  line-height: 1.05;
+  font-weight: 500;
+  color: var(--mute);
+  letter-spacing: -0.025em;
+  margin: 0 0 28px;
+  font-style: italic;
+  opacity: 0.55;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.cursor {
+  display: inline-block;
+  width: 2px;
+  height: 0.9em;
+  background: var(--accent);
+  animation: hearthBlink 1s steps(2) infinite;
+}
+
+.prompts {
+  background: rgba(178, 90, 58, 0.05);
+  border: 1px solid var(--accent-soft);
+  border-radius: 10px;
+  padding: 18px 22px;
+  margin-bottom: 26px;
+}
+
+.promptsLabel {
+  font-family: var(--font-sans);
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--accent);
+  font-weight: 700;
+  margin-bottom: 10px;
+}
+
+.prompt {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: 15px;
+  color: var(--ink-2);
+  padding: 5px 0;
+  display: flex;
+  gap: 10px;
+}
+
+.promptIndex {
+  color: var(--accent);
+  font-family: var(--font-serif);
+  font-weight: 600;
+}
+
+.editor {
+  width: 100%;
+  min-height: 60vh;
+  border: none;
+  outline: none;
+  resize: vertical;
+  background: transparent;
+  font-family: var(--font-serif);
+  font-size: 17px;
+  line-height: 1.65;
+  color: var(--ink);
+  padding: 0;
+}
+
+.editor::placeholder {
+  color: var(--mute);
+  font-style: italic;
+  opacity: 0.55;
+}
+
 .linkedFrom {
   margin-top: 56px;
   padding-top: 26px;
@@ -190,4 +298,71 @@
   color: var(--ink-2);
   border-bottom: 1px solid var(--accent-soft);
   cursor: pointer;
+}
+
+/* Floating ink bar — visual only for v1 (dir-1-hearth.jsx:356-377). */
+.inkBar {
+  position: absolute;
+  bottom: 28px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--ink);
+  color: var(--paper);
+  border-radius: 999px;
+  padding: 8px 14px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18);
+  pointer-events: none;
+}
+
+.inkH1 {
+  font-family: var(--font-serif);
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.inkH2 {
+  font-family: var(--font-serif);
+  font-size: 13px;
+  opacity: 0.7;
+}
+
+.inkSep {
+  width: 1px;
+  height: 14px;
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.inkStrong {
+  font-weight: 700;
+}
+
+.inkEm {
+  font-style: italic;
+  opacity: 0.8;
+}
+
+.inkU {
+  text-decoration: underline;
+  opacity: 0.7;
+}
+
+.inkMute {
+  opacity: 0.7;
+}
+
+.inkMono {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.inkSparkle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--accent-soft);
 }

@@ -1,64 +1,86 @@
 import { HardDrive, Pencil } from '../icons/Icon';
+import { CalendarView, TodayEntry } from '../../lib/calendar';
 import styles from './HearthRail.module.css';
 
-// Visual-only mock data for the slice — Phase 2 wires this to real data.
-const TODAY_ENTRIES = [
-  {
-    time: '08:14',
-    title: 'Sunday morning, 27 May',
-    current: true,
-  },
-  { time: '10:32', title: 'Idea — book club at home' },
-  { time: '12:08', title: 'Lunch with Ada · scratch' },
-  { time: '13:45', title: 'Sourdough — tweaked hydration' },
-];
+interface Props {
+  calendar: CalendarView;
+  today: TodayEntry[];
+  onNewEntry: () => void;
+  onSelectFile: (path: string) => void;
+  onSelectDay?: (day: number) => void;
+  onOpenVault: () => void;
+  activeSurface: 'reader' | 'vault' | 'new';
+}
 
-const FILLED_DAYS = new Set([3, 5, 8, 12, 13, 18, 20, 23, 26, 27]);
-const TODAY = 27;
-const DAYS = Array.from({ length: 31 }, (_, i) => i + 1);
+const WEEKDAYS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 
-// Ported from dir-1-hearth.jsx:52-153. Slice: visual only; no click handlers.
-export function HearthRail() {
+// Ported from dir-1-hearth.jsx:52-153. Phase 2 wires real tree data:
+// - Calendar dots reflect days with .md updates in the current month.
+// - Today list shows files updated today, sorted newest first.
+// - "my space" badge in the brand row navigates to the Vault surface.
+export function HearthRail({
+  calendar,
+  today,
+  onNewEntry,
+  onSelectFile,
+  onSelectDay,
+  onOpenVault,
+  activeSurface,
+}: Props) {
+  const days = Array.from({ length: calendar.daysInMonth }, (_, i) => i + 1);
   return (
     <aside className={styles.rail}>
       <div className={styles.brandRow}>
         <div className={styles.brandMark}>D</div>
         <div className={styles.brandName}>SpaceIO</div>
-        <div className={styles.brandLabel}>my space</div>
+        <button
+          type="button"
+          className={`${styles.brandLabel} ${activeSurface === 'vault' ? styles.brandLabelActive : ''}`}
+          onClick={onOpenVault}
+        >
+          my space
+        </button>
       </div>
 
-      <button type="button" className={styles.newEntry}>
+      <button type="button" className={styles.newEntry} onClick={onNewEntry}>
         <Pencil size={13} /> New entry
       </button>
 
       <div>
-        <div className={styles.sectionLabel}>May 2026</div>
+        <div className={styles.sectionLabel}>{calendar.monthLabel}</div>
         <div className={styles.calendar}>
-          {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((d, i) => (
+          {WEEKDAYS.map((d, i) => (
             <div key={`h${i}`} className={styles.calHead}>
               {d}
             </div>
           ))}
-          {Array.from({ length: 5 }, (_, i) => (
+          {Array.from({ length: calendar.startWeekday }, (_, i) => (
             <div key={`e${i}`} />
           ))}
-          {DAYS.map((d) => {
-            const has = FILLED_DAYS.has(d);
-            const cur = d === TODAY;
+          {days.map((d) => {
+            const has = calendar.filled.has(d);
+            const cur = d === calendar.today;
+            const className = [
+              styles.calCell,
+              cur ? styles.calCellCurrent : '',
+              has && !cur ? styles.calCellHas : '',
+              (has || cur) && onSelectDay ? styles.calCellClickable : '',
+            ]
+              .filter(Boolean)
+              .join(' ');
+            const clickable = (has || cur) && onSelectDay;
             return (
-              <div
+              <button
                 key={d}
-                className={[
-                  styles.calCell,
-                  cur ? styles.calCellCurrent : '',
-                  has && !cur ? styles.calCellHas : '',
-                ]
-                  .filter(Boolean)
-                  .join(' ')}
+                type="button"
+                className={className}
+                onClick={clickable ? () => onSelectDay?.(d) : undefined}
+                disabled={!clickable}
+                aria-label={clickable ? `Notes from day ${d}` : undefined}
               >
                 {d}
                 {has && !cur && <span className={styles.calDot} />}
-              </div>
+              </button>
             );
           })}
         </div>
@@ -68,26 +90,45 @@ export function HearthRail() {
         <div className={styles.todayHead}>
           <span>Today</span>
           <span className={styles.todayRule} />
-          <span className={styles.todayCount}>{TODAY_ENTRIES.length} notes</span>
+          <span className={styles.todayCount}>
+            {today.length === 0
+              ? 'nothing yet'
+              : `${today.length} note${today.length === 1 ? '' : 's'}`}
+          </span>
         </div>
-        <ul className={styles.todayList}>
-          {TODAY_ENTRIES.map((it, i) => (
-            <li
-              key={i}
-              className={[styles.todayItem, it.current ? styles.todayItemCurrent : '']
-                .filter(Boolean)
-                .join(' ')}
-            >
-              <span className={styles.todayTime}>{it.time}</span>
-              <span className={styles.todayTitle}>{it.title}</span>
-            </li>
-          ))}
-        </ul>
+        {today.length === 0 ? (
+          <div className={styles.todayEmpty}>
+            Begin where you are. Press <em>New entry</em>.
+          </div>
+        ) : (
+          <ul className={styles.todayList}>
+            {today.map((it) => (
+              <li
+                key={it.path}
+                className={[
+                  styles.todayItem,
+                  it.current ? styles.todayItemCurrent : '',
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
+              >
+                <button
+                  type="button"
+                  className={styles.todayBtn}
+                  onClick={() => onSelectFile(it.path)}
+                >
+                  <span className={styles.todayTime}>{it.time}</span>
+                  <span className={styles.todayTitle}>{it.title}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
 
       <div className={styles.storage}>
         <HardDrive size={12} />
-        <div>2.4 GB used · 47.6 free</div>
+        <div>self-hosted · encrypted</div>
       </div>
     </aside>
   );

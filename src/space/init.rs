@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use age::secrecy::SecretString;
 use rand::RngCore;
@@ -6,6 +6,7 @@ use rand::RngCore;
 use crate::config::SpaceConfig;
 use crate::crypto::{age_io, kdf};
 use crate::error::{AppError, AppResult};
+use crate::space::git::commit_all;
 
 const SEED_REL_PATH: &str = "Journal/2026/welcome.md";
 const SEED_CONTENT: &str = "# Welcome to your space
@@ -53,7 +54,6 @@ pub fn init_space(opts: InitOptions) -> AppResult<()> {
     let root = SpaceConfig::space_root(space_dir);
     std::fs::create_dir_all(&root)?;
 
-    // 1. Derive verifier hash.
     let mut salt_verify = [0u8; 16];
     rand::thread_rng().fill_bytes(&mut salt_verify);
     let verifier = kdf::derive_verifier(
@@ -64,7 +64,6 @@ pub fn init_space(opts: InitOptions) -> AppResult<()> {
         kdf::DEFAULT_P,
     )?;
 
-    // 2. Write config.
     let cfg = SpaceConfig {
         owner: opts.owner,
         salt_verify_hex: hex::encode(salt_verify),
@@ -75,11 +74,9 @@ pub fn init_space(opts: InitOptions) -> AppResult<()> {
     };
     cfg.save(space_dir)?;
 
-    // 3. git init the space root.
-    let _repo = git2::Repository::init(&root)
+    git2::Repository::init(&root)
         .map_err(|e| AppError::Internal(format!("git init: {e}")))?;
 
-    // 4. Seed note.
     let seed_full_rel = format!("{SEED_REL_PATH}.age");
     let seed_path = root.join(&seed_full_rel);
     if let Some(parent) = seed_path.parent() {
@@ -88,42 +85,7 @@ pub fn init_space(opts: InitOptions) -> AppResult<()> {
     let ciphertext = age_io::encrypt_bytes(SEED_CONTENT.as_bytes(), &opts.passphrase)?;
     std::fs::write(&seed_path, &ciphertext)?;
 
-    // 5. First commit.
     commit_all(&root, "Initial commit — welcome note")?;
 
-    Ok(())
-}
-
-fn commit_all(repo_path: &Path, message: &str) -> AppResult<()> {
-    let repo = git2::Repository::open(repo_path)
-        .map_err(|e| AppError::Internal(format!("git open: {e}")))?;
-    let mut index = repo
-        .index()
-        .map_err(|e| AppError::Internal(format!("git index: {e}")))?;
-    index
-        .add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None)
-        .map_err(|e| AppError::Internal(format!("git add: {e}")))?;
-    index
-        .write()
-        .map_err(|e| AppError::Internal(format!("git index write: {e}")))?;
-    let tree_oid = index
-        .write_tree()
-        .map_err(|e| AppError::Internal(format!("git write_tree: {e}")))?;
-    let tree = repo
-        .find_tree(tree_oid)
-        .map_err(|e| AppError::Internal(format!("git find_tree: {e}")))?;
-    let sig = git2::Signature::now("hearth", "hearth@local")
-        .map_err(|e| AppError::Internal(format!("git signature: {e}")))?;
-    let parents: Vec<git2::Commit> = match repo.head() {
-        Ok(head) => head
-            .peel_to_commit()
-            .ok()
-            .map(|c| vec![c])
-            .unwrap_or_default(),
-        Err(_) => vec![],
-    };
-    let parent_refs: Vec<&git2::Commit> = parents.iter().collect();
-    repo.commit(Some("HEAD"), &sig, &sig, message, &tree, &parent_refs)
-        .map_err(|e| AppError::Internal(format!("git commit: {e}")))?;
     Ok(())
 }

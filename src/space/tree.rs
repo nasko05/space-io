@@ -5,6 +5,7 @@ use serde::Serialize;
 use time::OffsetDateTime;
 
 use crate::error::{AppError, AppResult};
+use crate::space::paths::ENC_EXT;
 use crate::space::Space;
 
 /// Mirrors the shape used by the UI mock (diary-data.js fileTree).
@@ -24,8 +25,6 @@ pub enum TreeNode {
         size: u64,
     },
 }
-
-const ENC_EXT: &str = ".age";
 
 pub fn build_tree(space: &Space) -> AppResult<Vec<TreeNode>> {
     let root = space.root();
