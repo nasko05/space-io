@@ -236,3 +236,24 @@
   font-family: var(--font-serif);
   font-style: italic;
 }
+
+.diagnostic {
+  margin-top: 18px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--rule);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 10.5px;
+  color: var(--mute);
+  align-items: baseline;
+}
+
+.diagnostic code {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-2);
+  background: var(--warm);
+  padding: 1px 5px;
+  border-radius: 3px;
+}

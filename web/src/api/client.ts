@@ -236,6 +236,16 @@ export const api = {
       }),
     );
   },
+  async rollback(path: string, commit: string): Promise<WriteResult> {
+    return json(
+      await fetch('/api/files/rollback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ path, commit }),
+      }),
+    );
+  },
   async passkeyInfo(email: string): Promise<PasskeyInfo | null> {
     const res = await fetch(`/api/auth/passkey/info?email=${encodeURIComponent(email)}`, {
       credentials: 'same-origin',
