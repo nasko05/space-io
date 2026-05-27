@@ -43,6 +43,24 @@ export interface ExcerptItem {
 
 export type ExcerptMap = Record<string, ExcerptItem>;
 
+export interface SearchHit {
+  path: string;
+  title: string | null;
+  snippet: string;
+}
+
+export interface UploadResultItem {
+  path: string;
+  size: number;
+}
+
+export interface HistoryEntry {
+  commit: string;
+  message: string;
+  author: string;
+  when: string;
+}
+
 export class ApiError extends Error {
   constructor(public readonly status: number, public readonly code: string, message: string) {
     super(message);
@@ -121,6 +139,74 @@ export const api = {
   },
   async excerpts(): Promise<{ excerpts: ExcerptMap }> {
     return json(await fetch('/api/files/excerpts', { credentials: 'same-origin' }));
+  },
+  async search(q: string): Promise<{ hits: SearchHit[] }> {
+    return json(
+      await fetch(`/api/search?q=${encodeURIComponent(q)}`, {
+        credentials: 'same-origin',
+      }),
+    );
+  },
+  async upload(
+    folder: string,
+    files: File[],
+    onProgress?: (loaded: number, total: number) => void,
+  ): Promise<{ files: UploadResultItem[] }> {
+    const body = new FormData();
+    body.append('folder', folder);
+    for (const f of files) {
+      body.append('file', f, f.name);
+    }
+    if (onProgress) {
+      return new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', '/api/files/upload', true);
+        xhr.withCredentials = true;
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable) onProgress(e.loaded, e.total);
+        };
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            try {
+              resolve(JSON.parse(xhr.responseText));
+            } catch (e) {
+              reject(e);
+            }
+          } else {
+            try {
+              const body = JSON.parse(xhr.responseText);
+              reject(
+                new ApiError(
+                  xhr.status,
+                  body?.error?.code ?? 'unknown',
+                  body?.error?.message ?? xhr.statusText,
+                ),
+              );
+            } catch {
+              reject(new ApiError(xhr.status, 'unknown', xhr.statusText));
+            }
+          }
+        };
+        xhr.onerror = () => reject(new ApiError(0, 'network', 'upload failed'));
+        xhr.send(body);
+      });
+    }
+    const res = await fetch('/api/files/upload', {
+      method: 'POST',
+      credentials: 'same-origin',
+      body,
+    });
+    return json(res);
+  },
+  downloadUrl(path: string): string {
+    return `/api/files/download?path=${encodeURIComponent(path)}`;
+  },
+  async history(path: string): Promise<{ entries: HistoryEntry[] }> {
+    return json(
+      await fetch(`/api/files/history?path=${encodeURIComponent(path)}`, {
+        credentials: 'same-origin',
+      }),
+    );
   },
 };
 

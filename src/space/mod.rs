@@ -1,11 +1,15 @@
 pub mod create;
+pub mod download;
 pub mod excerpt;
 pub mod git;
+pub mod history;
 pub mod init;
 pub mod paths;
 pub mod read;
+pub mod search;
 pub mod session;
 pub mod tree;
+pub mod upload;
 pub mod write;
 
 use std::path::PathBuf;

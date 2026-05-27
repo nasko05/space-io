@@ -84,6 +84,13 @@
   text-decoration: none;
   border-bottom: 1px dashed var(--accent-soft);
   font-style: italic;
+  cursor: pointer;
+  transition: border-color 0.12s;
+}
+
+.body :global(.wikilink:hover) {
+  border-bottom-color: var(--accent);
+  border-bottom-style: solid;
 }
 
 .body hr {
