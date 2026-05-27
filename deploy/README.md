@@ -14,15 +14,49 @@ Monthly cost on `us-east-1` runs about **\$4–\$5** depending on volume size.
 
 ## Prereqs
 
-- `aws` CLI installed and authenticated (`aws sts get-caller-identity` should work)
+- `aws` CLI installed and able to authenticate (see below)
 - An existing EC2 key pair in the target region
+
+## Authentication
+
+The script doesn't bake any credentials in — every `aws` call goes
+through the standard AWS credential chain. Pick whichever fits your
+setup:
+
+| Setup | What to do |
+|---|---|
+| **Named profile** (most common) | `deploy/deploy.sh --profile work up` or `export AWS_PROFILE=work` |
+| **AWS SSO / IAM Identity Center** | `aws sso login --profile work`, then as above |
+| **Default profile** (single account) | `aws configure` once, then run with no flag |
+| **Static access keys** | `export AWS_ACCESS_KEY_ID=… AWS_SECRET_ACCESS_KEY=…` |
+| **GitHub Actions** | `aws-actions/configure-aws-credentials@v4` with OIDC |
+| **CI runner with an instance role** | Nothing — the SDK chain picks it up |
+
+The script accepts both `--profile NAME` and `--region NAME` flags
+*before* the subcommand, and equivalent env vars
+(`HEARTH_AWS_PROFILE`, standard `AWS_PROFILE`, `AWS_REGION`).
+The flag wins over the env var.
+
+Sanity-check the resolved identity before you spend any AWS dollars:
+
+```sh
+deploy/deploy.sh --profile work whoami
+# Authenticated as arn:aws:iam::123456789012:user/ada (account 123456789012)
+#   profile: work
+#   region:  us-east-1
+```
+
+If creds are missing or expired, `whoami` (and every other command)
+fails early with a friendly message and the most likely fix.
 
 ## Bring it up
 
 ```sh
-export HEARTH_KEYPAIR=my-key            # required
-export AWS_REGION=us-east-1             # optional, default us-east-1
-deploy/deploy.sh up
+export HEARTH_KEYPAIR=my-key                     # required
+deploy/deploy.sh --profile work --region eu-west-1 up
+# or, equivalently, with env vars:
+AWS_PROFILE=work AWS_REGION=eu-west-1 \
+  HEARTH_KEYPAIR=my-key deploy/deploy.sh up
 ```
 
 The script auto-detects your public IP and locks the security group to it.
@@ -51,14 +85,17 @@ or instance metadata, by design.
 ## Day-2 ops
 
 ```sh
-deploy/deploy.sh status        # show outputs (IP, SSH command, URL)
-deploy/deploy.sh ssh           # SSH in
-deploy/deploy.sh logs          # tail bootstrap log
+deploy/deploy.sh --profile work whoami     # identity / profile / region
+deploy/deploy.sh --profile work status     # outputs (IP, SSH cmd, URL)
+deploy/deploy.sh --profile work ssh        # SSH in
+deploy/deploy.sh --profile work logs       # tail bootstrap log
 
 # on the instance
-sudo systemctl status hearth   # service health
-sudo journalctl -u hearth -f   # live server logs
+sudo systemctl status hearth               # service health
+sudo journalctl -u hearth -f               # live server logs
 ```
+
+Drop `--profile work` if you've exported `AWS_PROFILE`.
 
 ## Updating
 
