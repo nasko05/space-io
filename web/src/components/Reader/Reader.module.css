@@ -102,6 +102,17 @@
   background: rgba(0, 0, 0, 0.03);
 }
 
+.kbd {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+  color: var(--mute);
+  padding: 0 4px;
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  margin-left: 2px;
+}
+
 .toolBtnActive {
   color: var(--ink);
   background: var(--warm);
@@ -373,7 +384,7 @@
   border-bottom-color: var(--accent);
 }
 
-/* Floating ink bar — visual only for v1 (dir-1-hearth.jsx:356-377). */
+/* Floating ink bar — now functional. Buttons wrap selection / prefix lines. */
 .inkBar {
   position: absolute;
   bottom: 28px;
@@ -389,7 +400,24 @@
   font-family: var(--font-sans);
   font-size: 12px;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18);
-  pointer-events: none;
+}
+
+.inkBtn {
+  background: transparent;
+  border: none;
+  color: var(--paper);
+  padding: 2px 4px;
+  border-radius: 4px;
+  font: inherit;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.inkBtn:hover {
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .inkH1 {

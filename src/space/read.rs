@@ -37,5 +37,6 @@ pub fn read_file(space: &Space, passphrase: &SecretString, rel_path: &str) -> Ap
 
 fn systemtime_iso8601(t: SystemTime) -> Option<String> {
     let dt: OffsetDateTime = t.into();
-    dt.format(&time::format_description::well_known::Rfc3339).ok()
+    dt.format(&time::format_description::well_known::Rfc3339)
+        .ok()
 }

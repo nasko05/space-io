@@ -188,7 +188,7 @@
   gap: 10px;
   height: 44px;
   padding: 0 14px;
-  background: #fff;
+  background: var(--surface);
   border: 1.5px solid var(--accent);
   border-radius: 8px;
   box-shadow: 0 0 0 4px rgba(178, 90, 58, 0.08);

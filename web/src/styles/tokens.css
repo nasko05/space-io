@@ -13,7 +13,36 @@
   --blue: #3a5d7a;
   --margin: rgba(178, 90, 58, 0.06);
 
+  /* Higher-contrast surface used by inputs / cards / modals. In dark mode
+     this becomes a near-paper-warm shade so a "white box" doesn't punch
+     a hole through the page. */
+  --surface: #ffffff;
+  --shadow-strong: rgba(60, 40, 20, 0.18);
+  --shadow-soft: rgba(60, 40, 20, 0.06);
+
   --font-serif: 'Fraunces', 'Iowan Old Style', Charter, Georgia, serif;
   --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+}
+
+:root[data-theme='dark'] {
+  --paper: #1a1612;
+  --paper-edge: #221d17;
+  --paper-warm: #1f1a14;
+  --ink: #ede4d0;
+  --ink-2: #c8bea8;
+  --mute: #8a8073;
+  --rule: #3a322a;
+  --accent: #d97757;
+  --accent-soft: #6b3a2a;
+  --warm: #2a2218;
+  --pin: #d4b572;
+  --blue: #6a8aaa;
+  --margin: rgba(217, 119, 87, 0.08);
+
+  --surface: #25201a;
+  --shadow-strong: rgba(0, 0, 0, 0.55);
+  --shadow-soft: rgba(0, 0, 0, 0.25);
+
+  color-scheme: dark;
 }

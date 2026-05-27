@@ -1,4 +1,4 @@
-import { HardDrive, Pencil } from '../icons/Icon';
+import { FolderOpen, HardDrive, Pencil } from '../icons/Icon';
 import { CalendarView, TodayEntry } from '../../lib/calendar';
 import styles from './HearthRail.module.css';
 
@@ -46,9 +46,19 @@ export function HearthRail({
         </button>
       </div>
 
-      <button type="button" className={styles.newEntry} onClick={onNewEntry}>
-        <Pencil size={13} /> New entry
-      </button>
+      <div className={styles.primaryActions}>
+        <button type="button" className={styles.newEntry} onClick={onNewEntry}>
+          <Pencil size={13} /> New entry
+        </button>
+        <button
+          type="button"
+          className={`${styles.vaultBtn} ${activeSurface === 'vault' ? styles.vaultBtnActive : ''}`}
+          onClick={onOpenVault}
+          title="Browse everything in this space"
+        >
+          <FolderOpen size={13} /> My space
+        </button>
+      </div>
 
       <div>
         <div className={styles.sectionLabel}>{calendar.monthLabel}</div>

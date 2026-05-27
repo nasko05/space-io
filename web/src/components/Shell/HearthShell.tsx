@@ -1,16 +1,25 @@
 import { ReactNode } from 'react';
 import { WindowChrome } from '../WindowChrome/WindowChrome';
-import { Sun } from '../icons/Icon';
+import { Moon, Sun } from '../icons/Icon';
 import styles from './HearthShell.module.css';
 
 interface Props {
   children: ReactNode;
   mode?: string;
+  theme?: 'light' | 'dark';
   onLock?: () => void;
+  onToggleTheme?: () => void;
 }
 
-// Ported from dir-1-hearth.jsx:26-43. The Sun icon is decorative in the slice.
-export function HearthShell({ children, mode = 'reading', onLock }: Props) {
+// Ported from dir-1-hearth.jsx:26-43. The Sun/Moon icon now toggles the
+// stored theme (Phase 3 QA fix); previously decorative.
+export function HearthShell({
+  children,
+  mode = 'reading',
+  theme = 'light',
+  onLock,
+  onToggleTheme,
+}: Props) {
   return (
     <div className={styles.root}>
       <WindowChrome
@@ -20,9 +29,15 @@ export function HearthShell({ children, mode = 'reading', onLock }: Props) {
             <button type="button" className={styles.modeBtn} onClick={onLock}>
               {mode}
             </button>
-            <span className={`${styles.modeBtn} ${styles.muted}`}>
-              <Sun size={13} />
-            </span>
+            <button
+              type="button"
+              className={`${styles.modeBtn} ${styles.muted}`}
+              onClick={onToggleTheme}
+              aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+              title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+            >
+              {theme === 'dark' ? <Moon size={13} /> : <Sun size={13} />}
+            </button>
           </>
         }
       />

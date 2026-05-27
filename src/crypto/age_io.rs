@@ -31,8 +31,14 @@ pub fn decrypt_bytes(ciphertext: &[u8], passphrase: &SecretString) -> AppResult<
         Err(e) => return Err(AppError::Internal(format!("age decryptor: {e}"))),
     };
 
+    // `None` caps the accepted work factor at ~16 seconds of CPU. age's
+    // encryption side auto-tunes to ~1 second on the writer's hardware, so
+    // a note written on a fast box may legitimately need 30s+ to decrypt on
+    // a slow one. Allow up to log_n=22 (~2 minutes on a modern CPU) — this
+    // still rejects pathologically high work factors that would constitute
+    // a DoS, but it accepts every file we produce ourselves.
     let mut reader = decryptor
-        .decrypt(passphrase, None)
+        .decrypt(passphrase, Some(22))
         .map_err(|e| AppError::Internal(format!("age decrypt: {e}")))?;
     let mut out = Vec::new();
     reader

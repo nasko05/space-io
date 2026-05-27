@@ -43,7 +43,12 @@ fn walk_dir(root: &Path, dir: &Path) -> AppResult<Vec<TreeNode>> {
         })
         .collect();
 
-    entries.sort_by_key(|e| (e.file_type().map(|t| !t.is_dir()).unwrap_or(false), e.file_name()));
+    entries.sort_by_key(|e| {
+        (
+            e.file_type().map(|t| !t.is_dir()).unwrap_or(false),
+            e.file_name(),
+        )
+    });
 
     let mut out = Vec::with_capacity(entries.len());
     for e in entries {
@@ -106,5 +111,6 @@ fn classify(name: &str) -> String {
 
 fn systemtime_iso8601(t: SystemTime) -> Option<String> {
     let dt: OffsetDateTime = t.into();
-    dt.format(&time::format_description::well_known::Rfc3339).ok()
+    dt.format(&time::format_description::well_known::Rfc3339)
+        .ok()
 }

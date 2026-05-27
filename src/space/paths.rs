@@ -25,9 +25,8 @@ pub fn resolve_under(root: &Path, rel: &str) -> AppResult<PathBuf> {
             Err(_) => {
                 if let Some(parent) = out.parent() {
                     if parent.exists() {
-                        let canonical_parent = parent
-                            .canonicalize()
-                            .map_err(|_| AppError::Forbidden)?;
+                        let canonical_parent =
+                            parent.canonicalize().map_err(|_| AppError::Forbidden)?;
                         if !canonical_parent.starts_with(&canonical_root) {
                             return Err(AppError::Forbidden);
                         }

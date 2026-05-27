@@ -64,14 +64,17 @@ async fn unlock(
         return Err(AppError::Internal("verifier length mismatch".into()));
     }
 
-    let derived = kdf::derive_verifier(&req.passphrase, &salt, cfg.kdf_log_n, cfg.kdf_r, cfg.kdf_p)?;
+    let derived =
+        kdf::derive_verifier(&req.passphrase, &salt, cfg.kdf_log_n, cfg.kdf_r, cfg.kdf_p)?;
     let mut expected_arr = [0u8; kdf::VERIFIER_LEN];
     expected_arr.copy_from_slice(&expected);
     if !kdf::verify(&derived, &expected_arr) {
         return Err(AppError::WrongPassphrase);
     }
 
-    let id = state.sessions.create(age::secrecy::SecretString::from(req.passphrase));
+    let id = state
+        .sessions
+        .create(age::secrecy::SecretString::from(req.passphrase));
 
     let mut cookie = Cookie::new(SESSION_COOKIE, id.to_string());
     cookie.set_http_only(true);
@@ -151,10 +154,7 @@ async fn passkey_register(
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn passkey_delete(
-    State(state): State<AppState>,
-    jar: CookieJar,
-) -> AppResult<StatusCode> {
+async fn passkey_delete(State(state): State<AppState>, jar: CookieJar) -> AppResult<StatusCode> {
     require_passphrase(&state, &jar)?;
     state.space.set_passkey(None)?;
     Ok(StatusCode::NO_CONTENT)

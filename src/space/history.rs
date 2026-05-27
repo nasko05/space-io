@@ -34,11 +34,7 @@ pub fn file_history(space: &Space, rel_path: &str) -> AppResult<Vec<HistoryEntry
             continue;
         }
         let when = format_git_time(commit.time());
-        let author = commit
-            .author()
-            .name()
-            .unwrap_or("unknown")
-            .to_string();
+        let author = commit.author().name().unwrap_or("unknown").to_string();
         out.push(HistoryEntry {
             commit: oid.to_string(),
             message: commit.message().unwrap_or("").trim().to_string(),
