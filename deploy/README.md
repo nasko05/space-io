@@ -49,14 +49,30 @@ deploy/deploy.sh --profile work whoami
 If creds are missing or expired, `whoami` (and every other command)
 fails early with a friendly message and the most likely fix.
 
+## Config file (recommended)
+
+Copy the example and edit:
+
+```sh
+cp deploy/.env.example deploy/.env
+$EDITOR deploy/.env
+```
+
+`deploy/.env` is **gitignored** and auto-sourced by `deploy/deploy.sh`
+on every run. Put your profile name, region, key-pair name, and any
+other `HEARTH_*` settings in there once and forget them. Override with
+`--env-file PATH` (or `HEARTH_ENV_FILE`), or skip with `--no-env-file`
+for a clean run from pure CLI flags + env.
+
 ## Bring it up
 
 ```sh
-export HEARTH_KEYPAIR=my-key                     # required
-deploy/deploy.sh --profile work --region eu-west-1 up
-# or, equivalently, with env vars:
-AWS_PROFILE=work AWS_REGION=eu-west-1 \
-  HEARTH_KEYPAIR=my-key deploy/deploy.sh up
+# After deploy/.env is filled in:
+deploy/deploy.sh up
+
+# Or fully explicit, no .env file:
+deploy/deploy.sh --no-env-file --profile work --region eu-west-1 up
+# (with HEARTH_KEYPAIR set in your shell env)
 ```
 
 The script auto-detects your public IP and locks the security group to it.
@@ -85,17 +101,18 @@ or instance metadata, by design.
 ## Day-2 ops
 
 ```sh
-deploy/deploy.sh --profile work whoami     # identity / profile / region
-deploy/deploy.sh --profile work status     # outputs (IP, SSH cmd, URL)
-deploy/deploy.sh --profile work ssh        # SSH in
-deploy/deploy.sh --profile work logs       # tail bootstrap log
+deploy/deploy.sh whoami        # identity / profile / region
+deploy/deploy.sh status        # outputs (IP, SSH cmd, URL)
+deploy/deploy.sh ssh           # SSH in
+deploy/deploy.sh logs          # tail bootstrap log
 
 # on the instance
-sudo systemctl status hearth               # service health
-sudo journalctl -u hearth -f               # live server logs
+sudo systemctl status hearth   # service health
+sudo journalctl -u hearth -f   # live server logs
 ```
 
-Drop `--profile work` if you've exported `AWS_PROFILE`.
+All of the above pull profile/region from `deploy/.env`; add
+`--profile NAME` or `--region NAME` to override for a single call.
 
 ## Updating
 
