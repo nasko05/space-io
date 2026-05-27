@@ -134,18 +134,6 @@ Watch progress:
 deploy/deploy.sh logs
 ```
 
-## Initialise the space (one-time, interactive)
-
-```sh
-deploy/deploy.sh ssh
-# on the instance:
-/opt/space-io/init-space.sh        # prompts for a passphrase
-sudo systemctl start hearth
-```
-
-The passphrase is **only** typed during init and at unlock — it never
-lives in CloudFormation parameters or instance metadata, by design.
-
 ## Open the app
 
 ```sh
@@ -156,6 +144,15 @@ Opens an SSH tunnel (local `7777` → instance `7777`) and pops a
 browser tab at `http://127.0.0.1:7777`. The tunnel stays alive until
 you Ctrl-C the terminal — close the tab any time, the connection
 re-opens with the next click.
+
+**First connect** lands you on a "Make your space" registration page.
+Pick an email + passphrase there and the browser drops you straight
+into the Reader; no SSH-in / init-script dance. The email labels your
+vault (it's mapped to a UUID-named folder on disk via `.users.toml`,
+which survives restarts). The passphrase is **only** typed during
+registration and at unlock — it never lives in CloudFormation
+parameters, instance metadata, or the systemd unit. Additional users
+can register from the login screen via the "Register" link.
 
 > 🔐 Why a tunnel? Hearth serves plain HTTP on port 7777. Without the
 > tunnel, your **passphrase travels in cleartext** over the public
