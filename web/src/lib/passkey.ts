@@ -15,23 +15,24 @@ const HKDF_INFO = 'hearth-passkey-wrap';
 const IV_LENGTH = 12;
 
 /**
- * Determine the effective RP ID for WebAuthn operations.
+ * WebAuthn cannot work on IP-addressed origins — `rp.id` must be a
+ * registrable domain suffix of the origin, and IPs never qualify.
+ * The only usable loopback origin is `localhost`.
  *
- * WebAuthn requires `rp.id` to be a "registrable domain suffix" of the
- * origin. IP addresses (including 127.0.0.1) are NEVER valid RP IDs — not
- * even when omitted (the browser still derives one from the origin and
- * rejects it). The only loopback address that works is `localhost`, which
- * has a spec-level exemption.
- *
- * Returns 'localhost' for any loopback address so the credential can be
- * created/retrieved. For production domains, returns the hostname as-is.
+ * Call this before any passkey operation; if we're on 127.0.0.1 or ::1 it
+ * redirects to localhost (same port) so WebAuthn will succeed.
  */
-function getEffectiveRpId(): string {
+function ensureLocalhostOrigin(): void {
   const host = window.location.hostname;
   if (host === '127.0.0.1' || host === '::1') {
-    return 'localhost';
+    const url = new URL(window.location.href);
+    url.hostname = 'localhost';
+    window.location.replace(url.toString());
   }
-  return host;
+}
+
+function getEffectiveRpId(): string {
+  return window.location.hostname;
 }
 
 export interface RegisterResult {
@@ -64,6 +65,7 @@ export type WebAuthnStatus =
         | 'insecure-context'
         | 'ip-host'
         | 'cross-origin-frame'
+        | 'redirecting'
         | 'ssr';
       message: string;
     };
@@ -111,8 +113,12 @@ export function webauthnStatus(): WebAuthnStatus {
   }
   const host = window.location.hostname;
   const origin = window.location.origin;
-  if (host === 'localhost' || host === '127.0.0.1' || host === '::1') {
-    return { ok: true, origin, rpId: getEffectiveRpId(), isLoopback: true };
+  if (host === '127.0.0.1' || host === '::1') {
+    ensureLocalhostOrigin();
+    return { ok: false, reason: 'redirecting', message: 'Redirecting to localhost for WebAuthn compatibility…' };
+  }
+  if (host === 'localhost') {
+    return { ok: true, origin, rpId: host, isLoopback: true };
   }
   const isIpV4 = /^\d{1,3}(\.\d{1,3}){3}$/.test(host);
   const isIpV6 = host.includes(':') || host.startsWith('[');
@@ -182,6 +188,7 @@ export async function registerPasskey(
   owner: string,
   passphrase: string,
 ): Promise<RegisterResult> {
+  ensureLocalhostOrigin();
   if (!isPasskeySupported()) {
     throw new Error('Passkeys are not available in this browser.');
   }
@@ -238,6 +245,7 @@ export async function registerPasskey(
 
 /** Use an existing passkey to recover the stored passphrase. */
 export async function unlockWithPasskey(input: AuthenticateInput): Promise<string> {
+  ensureLocalhostOrigin();
   if (!isPasskeySupported()) {
     throw new Error('Passkeys are not available in this browser.');
   }
