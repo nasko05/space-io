@@ -143,9 +143,32 @@ deploy/deploy.sh ssh
 sudo systemctl start hearth
 ```
 
-Then open the URL from `deploy/deploy.sh status`. The passphrase is **only**
-typed during init and at unlock — it never lives in CloudFormation parameters
-or instance metadata, by design.
+The passphrase is **only** typed during init and at unlock — it never
+lives in CloudFormation parameters or instance metadata, by design.
+
+## Open the app
+
+```sh
+deploy/deploy.sh open
+```
+
+Opens an SSH tunnel (local `7777` → instance `7777`) and pops a
+browser tab at `http://127.0.0.1:7777`. The tunnel stays alive until
+you Ctrl-C the terminal — close the tab any time, the connection
+re-opens with the next click.
+
+> 🔐 Why a tunnel? Hearth serves plain HTTP on port 7777. Without the
+> tunnel, your **passphrase travels in cleartext** over the public
+> internet on every unlock. The tunnel routes it through SSH instead,
+> so it's encrypted end-to-end without needing TLS certs.
+
+If you've already set up TLS (Caddy on the box, CloudFront, etc.) and
+want the public URL, opt out:
+
+```sh
+deploy/deploy.sh open --no-tunnel
+# (script prompts you to confirm because the default is insecure)
+```
 
 ## Day-2 ops
 
@@ -191,16 +214,17 @@ if you want it back.
 
 ## TLS
 
-The default deployment serves plain HTTP on port 7777. Three paths to TLS,
-from cheapest to nicest:
+The default deployment serves plain HTTP on port 7777. Three paths to
+end-to-end encryption, from cheapest to nicest:
 
-1. **SSH tunnel** — `ssh -L 7777:127.0.0.1:7777 ec2-user@<ip>` and open
-   `http://127.0.0.1:7777` locally. No DNS, no certs, no extra resources.
+1. **SSH tunnel** (built in — `deploy/deploy.sh open`). Already
+   documented above. No DNS, no certs, no extra AWS resources.
 2. **Caddy on the instance** — point a domain at the Elastic IP, then
    `sudo dnf install caddy && sudo caddy reverse-proxy --from your.domain --to localhost:7777`.
-   Auto Let's Encrypt.
-3. **CloudFront + ACM** — adds resources (and cost). Not minimal; left as an
-   exercise.
+   Auto Let's Encrypt. After this, `deploy/deploy.sh open --no-tunnel`
+   gets you to the real domain.
+3. **CloudFront + ACM** — adds resources (and cost). Not minimal; left
+   as an exercise.
 
 ## Security notes
 
