@@ -305,17 +305,33 @@ export function Reader({
     [flush, onSelectFile, onWikilinkMiss, titleToPath],
   );
 
-  const segments = path.split('/');
-  const fileName = segments[segments.length - 1] ?? path;
-  const folderSegments = segments.slice(0, -1);
+  const { fileName, folderSegments } = useMemo(() => {
+    const segments = path.split('/');
+    return {
+      fileName: segments[segments.length - 1] ?? path,
+      folderSegments: segments.slice(0, -1),
+    };
+  }, [path]);
 
-  const titleFromContent = extractTitle(content);
+  // Derived values from `content` re-run on every keystroke. The regex and
+  // tokenization passes are cheap individually but compound as the note
+  // grows; memoizing trims a few ms off the typing-latency budget.
+  const titleFromContent = useMemo(() => extractTitle(content), [content]);
+  const wordCount = useMemo(() => countWords(content), [content]);
+  const bodySource = useMemo(
+    () => (mode === 'preview' ? stripFirstH1(content) : ''),
+    [content, mode],
+  );
+  const linkedTitles = useMemo(
+    () =>
+      mode === 'preview' ? backlinkableTitles(titleFromContent, content, titleToPath) : [],
+    [content, mode, titleFromContent, titleToPath],
+  );
+
   const headlineTitle = titleFromContent ?? fileNameToTitle(fileName);
   const titleParts = splitTitle(headlineTitle);
-  const bodySource = stripFirstH1(content);
-  const wordCount = countWords(content);
   const readMin = Math.max(1, Math.round(wordCount / 220));
-  const isEmpty = content.trim().length === 0;
+  const isEmpty = content.length === 0 || content.trim().length === 0;
   const saveLabel = saveStatusLabel(status);
 
   return (
@@ -499,11 +515,11 @@ export function Reader({
                   </div>
                 )}
 
-                {mode === 'preview' && !isEmpty && backlinkableTitles(titleFromContent, content, titleToPath).length > 0 && (
+                {mode === 'preview' && !isEmpty && linkedTitles.length > 0 && (
                   <div className={styles.linkedFrom}>
                     <Link size={12} />
                     <span className={styles.linkedLabel}>Linked notes</span>
-                    {backlinkableTitles(titleFromContent, content, titleToPath).map((t) => (
+                    {linkedTitles.map((t) => (
                       <button
                         key={t}
                         type="button"

@@ -1,4 +1,12 @@
-import { DragEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  DragEvent,
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { WindowChrome } from '../WindowChrome/WindowChrome';
 import { HearthRail } from '../Rail/HearthRail';
 import { HearthCard } from './HearthCard';
@@ -24,6 +32,7 @@ import { CalendarView, TodayEntry } from '../../lib/calendar';
 import styles from './HearthVault.module.css';
 
 const DRAG_MIME = 'application/x-hearth-path';
+const SHELF_VISIBLE_LIMIT = 12;
 
 interface Props {
   tree: TreeNode[];
@@ -67,6 +76,12 @@ interface MenuState {
 }
 
 const EMPTY_MENU: MenuState = { open: false, x: 0, y: 0, items: [] };
+const EMPTY_SELECTION: ReadonlySet<string> = new Set<string>();
+
+interface Shelf {
+  folder: TreeFolder;
+  files: TreeFile[];
+}
 
 export function HearthVault({
   tree,
@@ -92,39 +107,49 @@ export function HearthVault({
   theme,
   onToggleTheme,
 }: Props) {
-  const folders: TreeFolder[] = tree.filter((n): n is TreeFolder => n.type === 'folder');
-  const totalFiles = countFiles(tree);
-
-  const [selection, setSelection] = useState<Set<string>>(new Set());
+  const [selection, setSelection] = useState<ReadonlySet<string>>(EMPTY_SELECTION);
   const [anchor, setAnchor] = useState<string | null>(null);
   const [menu, setMenu] = useState<MenuState>(EMPTY_MENU);
   const [dialog, setDialog] = useState<DialogState>({ kind: 'none' });
-  const [dropTarget, setDropTarget] = useState<string | null>(null);
 
-  // Build an ordered list of all visible file paths so shift-select can
-  // resolve a range using a stable index.
-  const shelfFiles = useMemo(() => {
-    const out: { folderPath: string; files: TreeFile[] }[] = [];
-    for (const f of folders) {
-      out.push({ folderPath: f.path, files: collectFilesUnder(f) });
+  // Single tree walk produces both the shelf list (top-level folder → sorted
+  // files) and a totalled count. Doing this in one pass on the tree input
+  // instead of three separate full walks per render was the dominant cost
+  // when the vault held more than a couple hundred files.
+  const { shelves, totalFiles, knownPaths } = useMemo(() => {
+    const shelves: Shelf[] = [];
+    let totalFiles = 0;
+    const knownPaths = new Set<string>();
+    for (const node of tree) {
+      if (node.type !== 'folder') continue;
+      const files = collectFilesUnder(node);
+      totalFiles += files.length;
+      for (const f of files) knownPaths.add(f.path);
+      shelves.push({ folder: node, files });
     }
-    return out;
-  }, [folders]);
+    return { shelves, totalFiles, knownPaths };
+  }, [tree]);
 
   const orderedPaths = useMemo(() => {
     const list: string[] = [];
-    for (const shelf of shelfFiles) for (const f of shelf.files) list.push(f.path);
+    for (const shelf of shelves) for (const f of shelf.files) list.push(f.path);
     return list;
-  }, [shelfFiles]);
+  }, [shelves]);
 
   // If files disappear (deleted / moved), drop them from the selection.
+  // Using the prebuilt Set keeps this O(n) instead of O(n*m).
   useEffect(() => {
     setSelection((cur) => {
+      if (cur.size === 0) return cur;
+      let changed = false;
       const next = new Set<string>();
-      for (const p of cur) if (orderedPaths.includes(p)) next.add(p);
-      return next.size === cur.size ? cur : next;
+      for (const p of cur) {
+        if (knownPaths.has(p)) next.add(p);
+        else changed = true;
+      }
+      return changed ? next : cur;
     });
-  }, [orderedPaths]);
+  }, [knownPaths]);
 
   const knownTags = useMemo(() => {
     const set = new Set<string>();
@@ -132,139 +157,147 @@ export function HearthVault({
     return Array.from(set).sort((a, b) => a.localeCompare(b));
   }, [meta]);
 
-  const onToggleSelect = useCallback(
-    (path: string, mods: { shift?: boolean; cmd?: boolean }) => {
-      setSelection((cur) => {
-        const next = new Set(cur);
-        if (mods.shift && anchor) {
-          const a = orderedPaths.indexOf(anchor);
-          const b = orderedPaths.indexOf(path);
-          if (a >= 0 && b >= 0) {
-            const [lo, hi] = a < b ? [a, b] : [b, a];
-            for (let i = lo; i <= hi; i += 1) next.add(orderedPaths[i]);
-            return next;
-          }
-        }
-        if (next.has(path)) next.delete(path);
-        else next.add(path);
-        return next;
-      });
-      if (!mods.shift) setAnchor(path);
-    },
-    [anchor, orderedPaths],
-  );
+  // Refs let the card callbacks remain referentially stable across renders
+  // (and thus play nicely with React.memo on HearthCard) while still reading
+  // the latest values.
+  const selectionRef = useRef(selection);
+  selectionRef.current = selection;
+  const anchorRef = useRef(anchor);
+  anchorRef.current = anchor;
+  const orderedPathsRef = useRef(orderedPaths);
+  orderedPathsRef.current = orderedPaths;
 
   const clearSelection = useCallback(() => {
-    setSelection(new Set());
+    setSelection(EMPTY_SELECTION);
     setAnchor(null);
   }, []);
 
-  // ---- Context menu ----
+  const onCardToggleSelect = useCallback(
+    (file: TreeFile, mods: { shift?: boolean; cmd?: boolean }) => {
+      const path = file.path;
+      const cur = selectionRef.current;
+      const next = new Set(cur);
+      if (mods.shift && anchorRef.current) {
+        const paths = orderedPathsRef.current;
+        const a = paths.indexOf(anchorRef.current);
+        const b = paths.indexOf(path);
+        if (a >= 0 && b >= 0) {
+          const [lo, hi] = a < b ? [a, b] : [b, a];
+          for (let i = lo; i <= hi; i += 1) next.add(paths[i]);
+          setSelection(next);
+          return;
+        }
+      }
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      setSelection(next);
+      if (!mods.shift) setAnchor(path);
+    },
+    [],
+  );
 
-  function fileContextItems(file: TreeFile): MenuItem[] {
-    const selected = selection.has(file.path);
-    const targets = selected && selection.size > 1 ? Array.from(selection) : [file.path];
-    const multi = targets.length > 1;
+  const onCardOpen = useCallback(
+    (file: TreeFile) => {
+      onSelectFile(file.path);
+    },
+    [onSelectFile],
+  );
 
-    const items: MenuItem[] = [];
-    if (!multi) {
+  const buildFileMenu = useCallback(
+    (file: TreeFile): MenuItem[] => {
+      const sel = selectionRef.current;
+      const selected = sel.has(file.path);
+      const targets = selected && sel.size > 1 ? Array.from(sel) : [file.path];
+      const multi = targets.length > 1;
+
+      const items: MenuItem[] = [];
+      if (!multi) {
+        items.push({
+          label: file.kind === 'md' ? 'Open' : 'Preview',
+          icon: <FolderOpen size={13} />,
+          onClick: () => onSelectFile(file.path),
+        });
+        items.push({
+          label: 'Rename…',
+          icon: <Pencil size={13} />,
+          onClick: () => setDialog({ kind: 'rename', file }),
+        });
+      }
       items.push({
-        label: file.kind === 'md' ? 'Open' : 'Preview',
+        label: multi ? `Move ${targets.length} items…` : 'Move to…',
         icon: <FolderOpen size={13} />,
-        onClick: () => onSelectFile(file.path),
+        onClick: () => setDialog({ kind: 'move', paths: targets }),
       });
       items.push({
-        label: 'Rename…',
-        icon: <Pencil size={13} />,
-        onClick: () => setDialog({ kind: 'rename', file }),
+        label: multi ? `Edit tags on ${targets.length} items…` : 'Edit tags…',
+        icon: <Tag size={13} />,
+        onClick: () => setDialog({ kind: 'tags', paths: targets }),
       });
-    }
-    items.push({
-      label: multi ? `Move ${targets.length} items…` : 'Move to…',
-      icon: <FolderOpen size={13} />,
-      onClick: () => setDialog({ kind: 'move', paths: targets }),
-    });
-    items.push({
-      label: multi ? `Edit tags on ${targets.length} items…` : 'Edit tags…',
-      icon: <Tag size={13} />,
-      onClick: () => setDialog({ kind: 'tags', paths: targets }),
-    });
-    if (!multi) {
+      if (!multi) {
+        items.push({
+          label: 'Save to disk',
+          icon: <DownloadIcon size={13} />,
+          onClick: () => onDownloadFile(file),
+        });
+      }
+      items.push({ divider: true, label: '', onClick: () => {} });
       items.push({
-        label: 'Save to disk',
-        icon: <DownloadIcon size={13} />,
-        onClick: () => onDownloadFile(file),
-      });
-    }
-    items.push({ divider: true, label: '', onClick: () => {} });
-    items.push({
-      label: multi ? `Delete ${targets.length} items` : 'Delete',
-      icon: <Close size={13} />,
-      destructive: true,
-      onClick: () => setDialog({ kind: 'delete', paths: targets }),
-    });
-    return items;
-  }
-
-  function openCardMenu(file: TreeFile, x: number, y: number) {
-    // Right-click on a card that isn't part of the selection moves the
-    // anchor onto it but doesn't change selection.
-    setMenu({ open: true, x, y, items: fileContextItems(file) });
-  }
-
-  function folderMenuItems(folder: TreeFolder): MenuItem[] {
-    return [
-      {
-        label: 'Rename folder…',
-        icon: <Pencil size={13} />,
-        onClick: () => setDialog({ kind: 'rename-folder', folder }),
-      },
-      {
-        label: 'Move folder to…',
-        icon: <FolderOpen size={13} />,
-        onClick: () => setDialog({ kind: 'move', paths: [folder.path] }),
-      },
-      { divider: true, label: '', onClick: () => {} },
-      {
-        label: 'Delete folder',
+        label: multi ? `Delete ${targets.length} items` : 'Delete',
         icon: <Close size={13} />,
         destructive: true,
-        onClick: () => setDialog({ kind: 'delete', paths: [folder.path] }),
-      },
-    ];
-  }
+        onClick: () => setDialog({ kind: 'delete', paths: targets }),
+      });
+      return items;
+    },
+    [onDownloadFile, onSelectFile],
+  );
 
-  function openFolderMenu(folder: TreeFolder, x: number, y: number) {
-    setMenu({ open: true, x, y, items: folderMenuItems(folder) });
-  }
+  const onCardContextMenu = useCallback(
+    (file: TreeFile, x: number, y: number) => {
+      setMenu({ open: true, x, y, items: buildFileMenu(file) });
+    },
+    [buildFileMenu],
+  );
 
-  // ---- Drag-and-drop on shelves ----
+  const onShelfDrop = useCallback(
+    (folderPath: string, droppedPath: string) => {
+      if (!droppedPath) return;
+      const sel = selectionRef.current;
+      const targets = sel.has(droppedPath) ? Array.from(sel) : [droppedPath];
+      // Anything already inside the target subtree would be a no-op move.
+      const prefix = `${folderPath}/`;
+      const movable = targets.filter((p) => !p.startsWith(prefix));
+      if (movable.length === 0) return;
+      void onMoveFiles(movable, folderPath).then(clearSelection);
+    },
+    [clearSelection, onMoveFiles],
+  );
 
-  function onShelfDragOver(e: DragEvent<HTMLElement>, folderPath: string) {
-    if (!e.dataTransfer.types.includes(DRAG_MIME)) return;
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-    if (dropTarget !== folderPath) setDropTarget(folderPath);
-  }
-
-  function onShelfDragLeave(folderPath: string) {
-    if (dropTarget === folderPath) setDropTarget(null);
-  }
-
-  function onShelfDrop(e: DragEvent<HTMLElement>, folderPath: string) {
-    e.preventDefault();
-    setDropTarget(null);
-    const droppedPath = e.dataTransfer.getData(DRAG_MIME);
-    if (!droppedPath) return;
-    // If the dropped file is part of the current selection, move all
-    // selected items; otherwise just the dropped one.
-    const targets = selection.has(droppedPath) ? Array.from(selection) : [droppedPath];
-    // Filter out files already in this folder (avoids no-op moves and
-    // self-move attempts).
-    const movable = targets.filter((p) => !p.startsWith(`${folderPath}/`));
-    if (movable.length === 0) return;
-    void onMoveFiles(movable, folderPath).then(clearSelection);
-  }
+  const onShelfFolderMenu = useCallback(
+    (folder: TreeFolder, x: number, y: number) => {
+      const items: MenuItem[] = [
+        {
+          label: 'Rename folder…',
+          icon: <Pencil size={13} />,
+          onClick: () => setDialog({ kind: 'rename-folder', folder }),
+        },
+        {
+          label: 'Move folder to…',
+          icon: <FolderOpen size={13} />,
+          onClick: () => setDialog({ kind: 'move', paths: [folder.path] }),
+        },
+        { divider: true, label: '', onClick: () => {} },
+        {
+          label: 'Delete folder',
+          icon: <Close size={13} />,
+          destructive: true,
+          onClick: () => setDialog({ kind: 'delete', paths: [folder.path] }),
+        },
+      ];
+      setMenu({ open: true, x, y, items });
+    },
+    [],
+  );
 
   // ---- Dialog wiring ----
 
@@ -323,16 +356,12 @@ export function HearthVault({
 
   const renameSiblings = useMemo(() => {
     if (dialog.kind !== 'rename') return new Set<string>();
-    return new Set(
-      siblingsOf(dialog.file.path, tree).map((s) => s.toLowerCase()),
-    );
+    return new Set(siblingsOf(dialog.file.path, tree).map((s) => s.toLowerCase()));
   }, [dialog, tree]);
 
   const folderRenameSiblings = useMemo(() => {
     if (dialog.kind !== 'rename-folder') return new Set<string>();
-    return new Set(
-      siblingsOf(dialog.folder.path, tree).map((s) => s.toLowerCase()),
-    );
+    return new Set(siblingsOf(dialog.folder.path, tree).map((s) => s.toLowerCase()));
   }, [dialog, tree]);
 
   return (
@@ -366,9 +395,7 @@ export function HearthVault({
           onNewEntry={onNewEntry}
           onSelectFile={onSelectFile}
           onSelectDay={onSelectDay}
-          onOpenVault={() => {
-            // already in vault — no-op
-          }}
+          onOpenVault={noop}
           onOpenPasskey={onOpenPasskey}
           hasPasskey={hasPasskey}
           activeSurface="vault"
@@ -398,9 +425,7 @@ export function HearthVault({
 
           {selection.size > 0 && (
             <div className={styles.bulkBar} role="toolbar">
-              <span className={styles.bulkCount}>
-                {selection.size} selected
-              </span>
+              <span className={styles.bulkCount}>{selection.size} selected</span>
               <button
                 type="button"
                 className={styles.bulkBtn}
@@ -434,74 +459,28 @@ export function HearthVault({
           )}
 
           <div className={styles.shelves}>
-            {folders.length === 0 && (
+            {shelves.length === 0 && (
               <div className={styles.empty}>
                 Your space is empty. Press <em>New entry</em> to write your first note.
               </div>
             )}
-            {shelfFiles.map(({ folderPath, files }, si) => {
-              const folder = folders[si];
-              const visible = files.slice(0, 12);
-              const isDropTarget = dropTarget === folderPath;
-              return (
-                <section
-                  key={folder.path}
-                  className={`${styles.shelf} ${isDropTarget ? styles.shelfDrop : ''}`}
-                  onDragOver={(e) => onShelfDragOver(e, folderPath)}
-                  onDragLeave={() => onShelfDragLeave(folderPath)}
-                  onDrop={(e) => onShelfDrop(e, folderPath)}
-                >
-                  <div className={styles.shelfHead}>
-                    <h2 className={styles.shelfTitle}>
-                      <span className={styles.shelfRoman}>{romanNumeral(si + 1)}.</span>{' '}
-                      {folder.name}
-                    </h2>
-                    <span className={styles.shelfMeta}>
-                      — {files.length} {files.length === 1 ? 'item' : 'items'}
-                    </span>
-                    <span className={styles.shelfRule} />
-                    {files.length > visible.length && (
-                      <button type="button" className={styles.shelfMore} onClick={onBackToReader}>
-                        see all →
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      className={styles.shelfMenuBtn}
-                      onClick={(e) => {
-                        const r = e.currentTarget.getBoundingClientRect();
-                        openFolderMenu(folder, r.right, r.bottom);
-                      }}
-                      aria-label={`Manage ${folder.name}`}
-                      title="Rename, move, or delete this folder"
-                    >
-                      <MoreHorizontal size={14} />
-                    </button>
-                  </div>
-
-                  {visible.length === 0 ? (
-                    <div className={styles.shelfEmpty}>
-                      <em>Nothing here yet.</em> Drag files in, or use New entry / upload.
-                    </div>
-                  ) : (
-                    <div className={styles.grid}>
-                      {visible.map((file) => (
-                        <HearthCard
-                          key={file.path}
-                          file={file}
-                          excerpt={excerpts[file.path]}
-                          tags={meta[file.path]?.tags}
-                          selected={selection.has(file.path)}
-                          onOpen={() => onSelectFile(file.path)}
-                          onContextMenu={(x, y) => openCardMenu(file, x, y)}
-                          onToggleSelect={(mods) => onToggleSelect(file.path, mods)}
-                        />
-                      ))}
-                    </div>
-                  )}
-                </section>
-              );
-            })}
+            {shelves.map(({ folder, files }, si) => (
+              <VaultShelf
+                key={folder.path}
+                folder={folder}
+                files={files}
+                index={si}
+                excerpts={excerpts}
+                meta={meta}
+                selection={selection}
+                onCardOpen={onCardOpen}
+                onCardContextMenu={onCardContextMenu}
+                onCardToggleSelect={onCardToggleSelect}
+                onDropFile={onShelfDrop}
+                onBackToReader={onBackToReader}
+                onFolderMenu={onShelfFolderMenu}
+              />
+            ))}
           </div>
         </main>
       </div>
@@ -577,13 +556,144 @@ export function HearthVault({
   );
 }
 
+function noop() {}
+
+interface VaultShelfProps {
+  folder: TreeFolder;
+  files: TreeFile[];
+  index: number;
+  excerpts: ExcerptMap;
+  meta: MetaMap;
+  selection: ReadonlySet<string>;
+  onCardOpen: (file: TreeFile) => void;
+  onCardContextMenu: (file: TreeFile, x: number, y: number) => void;
+  onCardToggleSelect: (file: TreeFile, mods: { shift?: boolean; cmd?: boolean }) => void;
+  onDropFile: (folderPath: string, droppedPath: string) => void;
+  onBackToReader: () => void;
+  onFolderMenu: (folder: TreeFolder, x: number, y: number) => void;
+}
+
+// Each shelf owns its own drag-over highlight so a dragover transition only
+// re-renders the shelf that's gaining/losing the highlight — not the entire
+// vault and all its visible cards.
+const VaultShelf = memo(function VaultShelf({
+  folder,
+  files,
+  index,
+  excerpts,
+  meta,
+  selection,
+  onCardOpen,
+  onCardContextMenu,
+  onCardToggleSelect,
+  onDropFile,
+  onBackToReader,
+  onFolderMenu,
+}: VaultShelfProps) {
+  const [isDropTarget, setIsDropTarget] = useState(false);
+  const dragDepth = useRef(0);
+
+  const visible = files.length > SHELF_VISIBLE_LIMIT ? files.slice(0, SHELF_VISIBLE_LIMIT) : files;
+
+  function onDragEnter(e: DragEvent<HTMLElement>) {
+    if (!hasHearthDrag(e)) return;
+    e.preventDefault();
+    dragDepth.current += 1;
+    if (dragDepth.current === 1) setIsDropTarget(true);
+  }
+
+  function onDragOver(e: DragEvent<HTMLElement>) {
+    if (!hasHearthDrag(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+  }
+
+  function onDragLeave() {
+    dragDepth.current = Math.max(0, dragDepth.current - 1);
+    if (dragDepth.current === 0) setIsDropTarget(false);
+  }
+
+  function onDrop(e: DragEvent<HTMLElement>) {
+    e.preventDefault();
+    dragDepth.current = 0;
+    setIsDropTarget(false);
+    onDropFile(folder.path, e.dataTransfer.getData(DRAG_MIME));
+  }
+
+  return (
+    <section
+      className={`${styles.shelf} ${isDropTarget ? styles.shelfDrop : ''}`}
+      onDragEnter={onDragEnter}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+    >
+      <div className={styles.shelfHead}>
+        <h2 className={styles.shelfTitle}>
+          <span className={styles.shelfRoman}>{romanNumeral(index + 1)}.</span>{' '}
+          {folder.name}
+        </h2>
+        <span className={styles.shelfMeta}>
+          — {files.length} {files.length === 1 ? 'item' : 'items'}
+        </span>
+        <span className={styles.shelfRule} />
+        {files.length > visible.length && (
+          <button type="button" className={styles.shelfMore} onClick={onBackToReader}>
+            see all →
+          </button>
+        )}
+        <button
+          type="button"
+          className={styles.shelfMenuBtn}
+          onClick={(e) => {
+            const r = e.currentTarget.getBoundingClientRect();
+            onFolderMenu(folder, r.right, r.bottom);
+          }}
+          aria-label={`Manage ${folder.name}`}
+          title="Rename, move, or delete this folder"
+        >
+          <MoreHorizontal size={14} />
+        </button>
+      </div>
+
+      {visible.length === 0 ? (
+        <div className={styles.shelfEmpty}>
+          <em>Nothing here yet.</em> Drag files in, or use New entry / upload.
+        </div>
+      ) : (
+        <div className={styles.grid}>
+          {visible.map((file) => (
+            <HearthCard
+              key={file.path}
+              file={file}
+              excerpt={excerpts[file.path]}
+              tags={meta[file.path]?.tags}
+              selected={selection.has(file.path)}
+              onOpen={onCardOpen}
+              onContextMenu={onCardContextMenu}
+              onToggleSelect={onCardToggleSelect}
+            />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+});
+
+function hasHearthDrag(e: DragEvent<HTMLElement>): boolean {
+  const types = e.dataTransfer?.types;
+  if (!types) return false;
+  for (let i = 0; i < types.length; i += 1) {
+    if (types[i] === DRAG_MIME) return true;
+  }
+  return false;
+}
+
 function intersectionTags(paths: string[], meta: MetaMap): string[] {
   if (paths.length === 0) return [];
   const first = meta[paths[0]]?.tags ?? [];
   if (paths.length === 1) return first;
-  return first.filter((t) =>
-    paths.every((p) => (meta[p]?.tags ?? []).includes(t)),
-  );
+  return first.filter((t) => paths.every((p) => (meta[p]?.tags ?? []).includes(t)));
 }
 
 function siblingsOf(targetPath: string, tree: TreeNode[]): string[] {
@@ -592,14 +702,11 @@ function siblingsOf(targetPath: string, tree: TreeNode[]): string[] {
   const parent = parts.join('/');
   const folder = findFolder(tree, parent);
   if (!folder) return [];
-  return folder.children
-    .map((c) => (c.type === 'file' ? c.name : c.name))
-    .filter((n) => n !== leaf);
+  return folder.children.map((c) => c.name).filter((n) => n !== leaf);
 }
 
 function findFolder(tree: TreeNode[], path: string): TreeFolder | null {
   if (path === '') {
-    // Synthesize a "root" folder so siblingsOf works on top-level items.
     return { type: 'folder', name: '', path: '', children: tree };
   }
   const walk = (nodes: TreeNode[]): TreeFolder | null => {
@@ -624,22 +731,14 @@ function collectFilesUnder(folder: TreeFolder): TreeFile[] {
     }
   };
   walk(folder.children);
-  out.sort((a, b) => new Date(b.updated).getTime() - new Date(a.updated).getTime());
+  // Parse once per file; previously parsed each `updated` twice on every
+  // comparison via `new Date(...)` which dominated the sort cost.
+  out.sort((a, b) => Date.parse(b.updated) - Date.parse(a.updated));
   return out;
 }
 
-function countFiles(tree: TreeNode[]): number {
-  let n = 0;
-  const walk = (nodes: TreeNode[]) => {
-    for (const x of nodes) {
-      if (x.type === 'file') n += 1;
-      else walk(x.children);
-    }
-  };
-  walk(tree);
-  return n;
-}
+const ROMAN = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X'];
 
 function romanNumeral(n: number): string {
-  return ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X'][n - 1] ?? String(n);
+  return ROMAN[n - 1] ?? String(n);
 }

@@ -80,24 +80,29 @@ pub fn search(space: &Space, passphrase: &SecretString, query: &str) -> AppResul
             None => continue,
         };
         let cache_key = path.to_string_lossy().into_owned();
-        let text: Arc<str> = if let Some(cached) = cache.get(&cache_key, mtime) {
-            cached
-        } else {
-            let Ok(bytes) = std::fs::read(path) else {
-                continue;
+        let (text, lower): (Arc<str>, Arc<str>) =
+            if let Some(pair) = cache.get_with_lowered(&cache_key, mtime) {
+                pair
+            } else {
+                let Ok(bytes) = std::fs::read(path) else {
+                    continue;
+                };
+                let Ok(plaintext) = age_io::decrypt_bytes(&bytes, passphrase) else {
+                    continue;
+                };
+                let Ok(text) = String::from_utf8(plaintext) else {
+                    continue;
+                };
+                let arc: Arc<str> = Arc::from(text);
+                cache.put(cache_key.clone(), mtime, arc.clone());
+                // Now ask the cache for the lowered mirror so it's stored
+                // for future searches as well.
+                match cache.get_with_lowered(&cache_key, mtime) {
+                    Some(pair) => pair,
+                    None => (arc.clone(), Arc::from(arc.to_ascii_lowercase())),
+                }
             };
-            let Ok(plaintext) = age_io::decrypt_bytes(&bytes, passphrase) else {
-                continue;
-            };
-            let Ok(text) = String::from_utf8(plaintext) else {
-                continue;
-            };
-            let arc: Arc<str> = Arc::from(text);
-            cache.put(cache_key, mtime, arc.clone());
-            arc
-        };
 
-        let lower = text.to_ascii_lowercase();
         let title = extract_title(&text);
         let title_lower = title.as_deref().map(|t| t.to_ascii_lowercase());
         let tags_lower: Vec<String> = meta_index
