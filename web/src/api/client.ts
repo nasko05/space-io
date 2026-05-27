@@ -27,6 +27,22 @@ export interface ReadFile {
   updated: string | null;
 }
 
+export interface WriteResult {
+  path: string;
+  updated: string;
+}
+
+export interface CreateResult {
+  path: string;
+}
+
+export interface ExcerptItem {
+  title: string | null;
+  excerpt: string;
+}
+
+export type ExcerptMap = Record<string, ExcerptItem>;
+
 export class ApiError extends Error {
   constructor(public readonly status: number, public readonly code: string, message: string) {
     super(message);
@@ -83,6 +99,29 @@ export const api = {
       }),
     );
   },
+  async write(path: string, content: string, message?: string): Promise<WriteResult> {
+    return json(
+      await fetch('/api/files/write', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ path, content, message }),
+      }),
+    );
+  },
+  async create(folder: string, title?: string): Promise<CreateResult> {
+    return json(
+      await fetch('/api/files/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ folder, title: title ?? null }),
+      }),
+    );
+  },
+  async excerpts(): Promise<{ excerpts: ExcerptMap }> {
+    return json(await fetch('/api/files/excerpts', { credentials: 'same-origin' }));
+  },
 };
 
 export function firstMarkdownLeaf(tree: TreeNode[]): TreeFile | null {
@@ -94,4 +133,20 @@ export function firstMarkdownLeaf(tree: TreeNode[]): TreeFile | null {
     }
   }
   return null;
+}
+
+export function flattenFiles(tree: TreeNode[]): TreeFile[] {
+  const out: TreeFile[] = [];
+  const walk = (nodes: TreeNode[]) => {
+    for (const n of nodes) {
+      if (n.type === 'file') out.push(n);
+      else walk(n.children);
+    }
+  };
+  walk(tree);
+  return out;
+}
+
+export function topLevelFolders(tree: TreeNode[]): TreeFolder[] {
+  return tree.filter((n): n is TreeFolder => n.type === 'folder');
 }

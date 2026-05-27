@@ -1,0 +1,199 @@
+.mdCard,
+.docCard,
+.mediaCard {
+  background: #fdf9ee;
+  border-radius: 8px;
+  border: 1px solid var(--rule);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  transition: transform 0.12s, box-shadow 0.12s, border-color 0.12s;
+}
+
+.mdCard:hover,
+.docCard:hover,
+.mediaCard:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 16px rgba(60, 40, 20, 0.06);
+  border-color: var(--accent-soft);
+}
+
+.mdCard {
+  padding: 14px 16px;
+  height: 158px;
+  box-shadow: 0 1px 0 rgba(60, 40, 20, 0.04);
+}
+
+.mdMeta {
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--mute);
+  font-weight: 600;
+  margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.mdTitle {
+  font-family: var(--font-serif);
+  font-size: 15.5px;
+  font-weight: 500;
+  color: var(--ink);
+  letter-spacing: -0.005em;
+  line-height: 1.25;
+  margin-bottom: 6px;
+}
+
+.mdExcerpt {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: 12.5px;
+  color: var(--ink-2);
+  line-height: 1.5;
+  flex: 1;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+}
+
+/* Document card (PDF / DOCX) — visual stub until uploads land. */
+.docCard {
+  padding: 14px 16px;
+  height: 158px;
+}
+
+.docPreview {
+  width: 44px;
+  height: 56px;
+  border-radius: 4px;
+  background: #fff;
+  border: 1px solid var(--rule);
+  padding: 4px;
+  margin-bottom: 12px;
+  position: relative;
+  box-shadow: 0 2px 6px rgba(60, 40, 20, 0.06);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.docLine {
+  height: 2px;
+  background: var(--rule);
+}
+
+.docBadge {
+  position: absolute;
+  bottom: -6px;
+  right: -6px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  color: #fff;
+  font-family: var(--font-sans);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
+.docBadgePdf {
+  background: var(--accent);
+}
+
+.docBadgeDocx {
+  background: var(--blue);
+}
+
+.docTitle {
+  font-family: var(--font-serif);
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ink);
+  letter-spacing: -0.005em;
+  line-height: 1.3;
+}
+
+.docFoot {
+  font-size: 11px;
+  color: var(--mute);
+  margin-top: auto;
+  display: flex;
+  justify-content: space-between;
+}
+
+.docIcon {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  color: var(--mute);
+}
+
+/* Media card (image / video) — visual stub. */
+.mediaCard {
+  height: 158px;
+  overflow: hidden;
+}
+
+.mediaTint {
+  flex: 1;
+  background: linear-gradient(135deg, #b8956a, #d4af7f);
+  position: relative;
+}
+
+.mediaPlay {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink);
+}
+
+.mediaKind {
+  position: absolute;
+  top: 8px;
+  left: 10px;
+  font-size: 10px;
+  color: #fff;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-weight: 600;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.mediaFoot {
+  padding: 8px 12px;
+}
+
+.mediaTitle {
+  font-family: var(--font-serif);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mediaMeta {
+  font-size: 10.5px;
+  color: var(--mute);
+  margin-top: 1px;
+  display: flex;
+  justify-content: space-between;
+}
