@@ -252,6 +252,16 @@ export const MoreHorizontal = (p: IconProps) =>
     p,
   );
 
+export const Split = (p: IconProps) =>
+  wrap(
+    <>
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="M12 4v16" />
+    </>,
+    1.6,
+    p,
+  );
+
 export const Download = (p: IconProps) => wrap(<path d="M12 4v12M7 11l5 5 5-5M4 20h16" />, 1.6, p);
 
 export const Pin = (p: IconProps) => wrap(<path d="M12 17v5M8 3h8l-1 6 3 3H6l3-3-1-6Z" />, 1.6, p);
