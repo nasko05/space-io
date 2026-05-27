@@ -5,9 +5,30 @@ use dashmap::DashMap;
 use uuid::Uuid;
 
 use crate::error::{AppError, AppResult};
+use crate::space::rate_limit::RateLimiter;
 use crate::space::session::SessionStore;
 use crate::space::users::UsersRegistry;
 use crate::space::Space;
+
+/// Runtime configuration sourced from CLI flags + env. Shared by every
+/// request handler so we don't sprinkle `std::env::var` lookups around.
+#[derive(Clone, Debug)]
+pub struct AppConfig {
+    /// Mark the session cookie `Secure`. Defaults to `true`; opt out with
+    /// `HEARTH_INSECURE_COOKIES=1` for local plain-HTTP development.
+    pub cookie_secure: bool,
+}
+
+impl AppConfig {
+    pub fn from_env() -> Self {
+        let insecure = std::env::var("HEARTH_INSECURE_COOKIES")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+        Self {
+            cookie_secure: !insecure,
+        }
+    }
+}
 
 /// Application state. Multi-tenant: a single `data/` root holds one
 /// `.users.toml` mapping plus one `<uuid>/` subdirectory per registered user.
@@ -24,16 +45,25 @@ pub struct AppState {
     users: Arc<RwLock<UsersRegistry>>,
     spaces: Arc<DashMap<Uuid, Space>>,
     pub sessions: SessionStore,
+    pub unlock_limiter: RateLimiter,
+    pub config: AppConfig,
 }
 
 impl AppState {
-    pub fn new(root: PathBuf, sessions: SessionStore) -> AppResult<Self> {
+    pub fn new(
+        root: PathBuf,
+        sessions: SessionStore,
+        unlock_limiter: RateLimiter,
+        config: AppConfig,
+    ) -> AppResult<Self> {
         let users = UsersRegistry::load(&root)?;
         Ok(Self {
             root,
             users: Arc::new(RwLock::new(users)),
             spaces: Arc::new(DashMap::new()),
             sessions,
+            unlock_limiter,
+            config,
         })
     }
 
@@ -54,6 +84,19 @@ impl AppState {
     pub fn register_user(&self, email: &str) -> AppResult<crate::space::users::UserEntry> {
         let mut guard = self.users.write().expect("users rwlock poisoned");
         guard.add(&self.root, email)
+    }
+
+    /// Roll back a failed registration: remove the entry whose UUID we just
+    /// minted but whose space we couldn't initialise. Best effort — if the
+    /// save fails the operator can still hand-edit `.users.toml`, but the
+    /// common case (init_space errors after the registry write) leaves a
+    /// clean state for the next attempt.
+    pub fn unregister_user(&self, uuid: &Uuid) {
+        let mut guard = self.users.write().expect("users rwlock poisoned");
+        guard.remove_by_uuid(uuid);
+        if let Err(e) = guard.save(&self.root) {
+            tracing::warn!(error = %e, "failed to persist user-registry rollback");
+        }
     }
 
     /// Find a user by email (case-insensitive).

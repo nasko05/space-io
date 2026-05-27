@@ -1,13 +1,14 @@
 # SpaceIO Hearth · AWS deployment
 
-A one-stack deployment. Three resources, plus an implicit EBS root volume:
+A one-stack deployment:
 
 | Resource | Why |
 |---|---|
 | EC2 instance (`t4g.nano` by default) | Runs the Hearth binary |
 | Security Group | SSH + port 7777, locked to your CIDR |
 | Elastic IP | Stable address; survives stop/start |
-| (root EBS, gp3, encrypted) | Disk + your `.age` blobs |
+| Root EBS (gp3, encrypted, 8 GiB) | OS + binary; deleted with the stack |
+| Data EBS (gp3, encrypted, 8 GiB default) | `.age` blobs, mounted at `/data`; **retained** on stack delete |
 
 No load balancer, no Route53, no ACM certificate, no S3, no IAM role.
 Monthly cost on `us-east-1` runs about **\$4–\$5** depending on volume size.
@@ -138,12 +139,12 @@ deploy/deploy.sh logs
 
 ```sh
 deploy/deploy.sh open
+# http://203.0.113.5:7777
 ```
 
-Opens an SSH tunnel (local `7777` → instance `7777`) and pops a
-browser tab at `http://127.0.0.1:7777`. The tunnel stays alive until
-you Ctrl-C the terminal — close the tab any time, the connection
-re-opens with the next click.
+Prints the public URL — `http://<eip>:<port>` — for you to paste into a
+browser. The instance listens directly on its public IP, restricted to
+`HEARTH_ALLOWED_CIDR`.
 
 **First connect** lands you on a "Make your space" registration page.
 Pick an email + passphrase there and the browser drops you straight
@@ -154,18 +155,11 @@ registration and at unlock — it never lives in CloudFormation
 parameters, instance metadata, or the systemd unit. Additional users
 can register from the login screen via the "Register" link.
 
-> 🔐 Why a tunnel? Hearth serves plain HTTP on port 7777. Without the
-> tunnel, your **passphrase travels in cleartext** over the public
-> internet on every unlock. The tunnel routes it through SSH instead,
-> so it's encrypted end-to-end without needing TLS certs.
-
-If you've already set up TLS (Caddy on the box, CloudFront, etc.) and
-want the public URL, opt out:
-
-```sh
-deploy/deploy.sh open --no-tunnel
-# (script prompts you to confirm because the default is insecure)
-```
+> ⚠️ Hearth serves **plain HTTP** on port 7777. If you can reach the
+> instance over the open internet, the unlock passphrase travels in
+> cleartext. Either restrict the security group to your VPN/home IP
+> (the deploy script auto-detects your /32 if `HEARTH_ALLOWED_CIDR`
+> isn't set) or front the box with TLS — see the **TLS** section below.
 
 ## Day-2 ops
 
@@ -206,28 +200,36 @@ updates you SSH in and pull yourself.)
 deploy/deploy.sh down
 ```
 
-**This destroys the EBS volume**. Snapshot or rsync your `data/` away first
-if you want it back.
+The instance, security group, root volume, and EIP go away. The **data
+EBS volume is retained** (DeletionPolicy: Retain in the template) so the
+encrypted vault survives the teardown. To actually reclaim that storage,
+delete the volume from the EC2 console once you're sure you don't want
+it: `aws ec2 delete-volume --volume-id vol-…`.
 
 ## TLS
 
 The default deployment serves plain HTTP on port 7777. Three paths to
 end-to-end encryption, from cheapest to nicest:
 
-1. **SSH tunnel** (built in — `deploy/deploy.sh open`). Already
-   documented above. No DNS, no certs, no extra AWS resources.
+1. **Local SSH tunnel** — run it yourself when you need it:
+   `ssh -i ~/.ssh/<key>.pem -N -L 7777:127.0.0.1:7777 ec2-user@<eip>`,
+   then open `http://127.0.0.1:7777`. No DNS, no certs.
 2. **Caddy on the instance** — point a domain at the Elastic IP, then
    `sudo dnf install caddy && sudo caddy reverse-proxy --from your.domain --to localhost:7777`.
-   Auto Let's Encrypt. After this, `deploy/deploy.sh open --no-tunnel`
-   gets you to the real domain.
-3. **CloudFront + ACM** — adds resources (and cost). Not minimal; left
-   as an exercise.
+   Auto Let's Encrypt.
+3. **Cloudflare Tunnel** — `cloudflared` on the instance, point a hostname
+   at it, terminates TLS at the edge.
 
 ## Security notes
 
 - The on-disk `.age` blobs are encrypted before the EBS layer sees them; EBS
   encryption is a defence-in-depth measure, not the primary boundary.
 - The security group should be locked to your IP. `0.0.0.0/0` defeats the
-  premise.
+  premise — the CloudFormation template has no default for `AllowedCidr`,
+  so you must pass one explicitly, and the deploy script auto-fills your
+  current /32 if `HEARTH_ALLOWED_CIDR` isn't set.
 - The instance role grants nothing; the binary doesn't talk to any AWS
   service.
+- The systemd unit sets `HEARTH_INSECURE_COOKIES=1` so the session cookie
+  is sent over the deploy's plain-HTTP listener. Put a TLS-terminating
+  proxy in front and remove that line to flip the cookie to `Secure`.

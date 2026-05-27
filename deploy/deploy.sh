@@ -61,6 +61,7 @@ INSTANCE_TYPE="${HEARTH_INSTANCE_TYPE:-t4g.nano}"
 DATA_GIB="${HEARTH_DATA_GIB:-8}"
 REPO_URL="${HEARTH_REPO_URL:-https://github.com/nasko05/space-io.git}"
 REPO_REF="${HEARTH_REPO_REF:-main}"
+HEARTH_PORT="${HEARTH_PORT:-7777}"
 TEMPLATE="$(dirname "$0")/cloudformation.yaml"
 
 # If the operator created the key pair via `aws ec2 create-key-pair` they
@@ -108,14 +109,12 @@ Usage: deploy/deploy.sh [--profile NAME] [--region REGION] [--env-file PATH] <co
 
 Commands:
   up        create or update the stack
-  down      delete the stack (and the data volume!)
+  down      delete the stack (the data volume is RETAINED — see notes)
   status    show stack + instance state
   whoami    print the AWS identity + profile + region the script will use
   ssh       open an SSH session to the running instance
   logs      tail the bootstrap log
-  open      open an SSH tunnel + your browser at http://127.0.0.1:7777
-            (use --no-tunnel to open http://<eip>:7777 directly — INSECURE,
-            passphrase travels in cleartext)
+  open      print the public URL (http://<eip>:<port>) for the instance
 
 Config file:
   deploy/.env is auto-sourced if it exists (use deploy/.env.example as a template).
@@ -124,6 +123,8 @@ Config file:
 
 Required env (for `up`):
   HEARTH_KEYPAIR        existing EC2 key pair name (for SSH)
+  HEARTH_ALLOWED_CIDR   CIDR allowed to reach SSH/Hearth (no default — set
+                        to your /32 unless you really want a public host)
 
 AWS auth (any one is enough; --profile and --region win over env):
   --profile NAME        named profile from ~/.aws/config / ~/.aws/credentials
@@ -141,12 +142,11 @@ Optional env:
   HEARTH_NO_SSH_ADD     Set to 1 to skip the implicit `ssh-add` of the
                         resolved key into your ssh-agent. The script
                         still threads -i into its own ssh calls.
-  HEARTH_ALLOWED_CIDR   CIDR allowed to reach SSH/Hearth
-                        (default: your current public IP /32)
   HEARTH_INSTANCE_TYPE  EC2 type (default: t4g.nano -- ARM, cheapest)
   HEARTH_DATA_GIB       data volume size in GiB (default: 8)
   HEARTH_REPO_URL       git URL the instance clones (default: this repo)
   HEARTH_REPO_REF       branch or tag (default: main)
+  HEARTH_PORT           port Hearth listens on (default: 7777)
 USAGE
 }
 
@@ -262,17 +262,19 @@ Stack is up. Next:
   1. Wait ~3-5 minutes for the bootstrap to build the binary.
      Tail progress with: deploy/deploy.sh logs
      (Hearth starts itself as soon as the build finishes.)
-  2. Open the app (encrypted SSH tunnel, browser opens to localhost):
+  2. Print the URL to open:
        deploy/deploy.sh open
-     First visit shows a "Make your space" page -- pick a passphrase
-     there and you're in.
+     First visit shows a "Make your space" page -- pick an email and
+     passphrase there and you're in.
 MSG
 }
 
 cmd_down() {
   verify_auth
   echo "About to delete stack '$STACK_NAME' in $REGION."
-  echo "This DESTROYS the EBS volume holding your encrypted data."
+  echo "The /data EBS volume is retained on stack delete (see template),"
+  echo "so the encrypted vault survives -- but the instance, EIP, and SG"
+  echo "are torn down. You'll need to re-attach the volume to bring it back."
   read -r -p "Type 'yes' to confirm: " ans
   [ "$ans" = "yes" ] || { echo "aborted"; exit 1; }
   aws_ cloudformation delete-stack --stack-name "$STACK_NAME"
@@ -329,78 +331,19 @@ cmd_logs() {
   ssh_to "$ip" 'sudo tail -n 200 -f /var/log/hearth-bootstrap.log'
 }
 
-# Best-effort "open this URL in the default browser" across mac / linux / wsl.
-open_url() {
-  local url=$1
-  if command -v open >/dev/null 2>&1; then
-    open "$url" >/dev/null 2>&1 &
-  elif command -v xdg-open >/dev/null 2>&1; then
-    xdg-open "$url" >/dev/null 2>&1 &
-  elif command -v wslview >/dev/null 2>&1; then
-    wslview "$url" >/dev/null 2>&1 &
-  elif command -v start >/dev/null 2>&1; then
-    start "$url" >/dev/null 2>&1 &
-  else
-    echo "Please open: $url"
-  fi
-}
-
+# Hearth listens directly on its public IP; `open` just hands you the URL.
+# No SSH tunnel: traffic is plain HTTP, which is fine for a single-tenant
+# host you reach over your own VPN, but means the passphrase is in the
+# clear if you typed it onto the open internet. Front the instance with
+# Caddy/nginx/Cloudflare Tunnel if you want TLS.
 cmd_open() {
-  local use_tunnel=$1  # "yes" | "no"
   local ip
   ip=$(instance_ip)
   [ -n "$ip" ] || { echo "stack has no PublicAddress output yet" >&2; exit 1; }
-
-  if [ "$use_tunnel" = "no" ]; then
-    local url="http://${ip}:7777"
-    cat >&2 <<WARN
-warning: --no-tunnel opens the app over plain HTTP on the public internet.
-         Your passphrase will travel in cleartext.
-         Press Enter to continue, Ctrl-C to abort.
-WARN
-    read -r _
-    open_url "$url"
-    echo "Opened $url"
-    return 0
-  fi
-
-  local url="http://127.0.0.1:7777"
-  cat <<MSG
-Opening an SSH tunnel to ec2-user@${ip} (local 7777 -> remote 7777).
-A browser tab should open at ${url} in ~1 second.
-Press Ctrl-C in this terminal to close the tunnel.
-MSG
-  if [ -n "$KEY_PATH" ] && [ ! -f "$KEY_PATH" ]; then
-    echo "error: HEARTH_KEY_PATH does not exist: $KEY_PATH" >&2
-    exit 1
-  fi
-  # Open the browser after a short delay so it has a connection to land on.
-  (sleep 2 && open_url "$url") &
-  local -a ssh_args=(
-    -N -L 7777:127.0.0.1:7777
-    -o StrictHostKeyChecking=accept-new
-    -o ExitOnForwardFailure=yes
-  )
-  if [ -n "$KEY_PATH" ]; then
-    ssh_args+=(-i "$KEY_PATH" -o IdentitiesOnly=yes)
-  fi
-  exec ssh "${ssh_args[@]}" "ec2-user@$ip"
+  echo "http://${ip}:${HEARTH_PORT}"
 }
 
 parse_flags "$@"
-
-# Pull `open`-only flags off the remaining args so they can be passed
-# *after* the subcommand: `deploy.sh open --no-tunnel`.
-OPEN_USE_TUNNEL="yes"
-FILTERED_ARGS=()
-for a in "${ARGS[@]:-}"; do
-  case "$a" in
-    --no-tunnel) OPEN_USE_TUNNEL="no" ;;
-    --tunnel) OPEN_USE_TUNNEL="yes" ;;
-    *) FILTERED_ARGS+=("$a") ;;
-  esac
-done
-ARGS=("${FILTERED_ARGS[@]:-}")
 
 # Help is the only command that doesn't need the aws / curl toolchain.
 case "${ARGS[0]:-}" in
@@ -417,6 +360,6 @@ case "${ARGS[0]:-}" in
   whoami) cmd_whoami ;;
   ssh) cmd_ssh ;;
   logs) cmd_logs ;;
-  open) cmd_open "$OPEN_USE_TUNNEL" ;;
+  open) cmd_open ;;
   *) echo "unknown command: ${ARGS[0]}" >&2; usage; exit 1 ;;
 esac

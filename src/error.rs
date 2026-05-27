@@ -1,4 +1,4 @@
-use axum::http::StatusCode;
+use axum::http::{header, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde_json::json;
@@ -13,6 +13,8 @@ pub enum AppError {
     Unauthorized,
     #[error("wrong passphrase")]
     WrongPassphrase,
+    #[error("too many requests; retry in {retry_after_secs}s")]
+    TooManyRequests { retry_after_secs: u64 },
     #[error("bad request: {0}")]
     BadRequest(String),
     #[error("io: {0}")]
@@ -28,6 +30,9 @@ impl AppError {
             AppError::Forbidden => (StatusCode::FORBIDDEN, "forbidden"),
             AppError::Unauthorized => (StatusCode::UNAUTHORIZED, "unauthorized"),
             AppError::WrongPassphrase => (StatusCode::UNAUTHORIZED, "wrong_passphrase"),
+            AppError::TooManyRequests { .. } => {
+                (StatusCode::TOO_MANY_REQUESTS, "too_many_requests")
+            }
             AppError::BadRequest(_) => (StatusCode::BAD_REQUEST, "bad_request"),
             AppError::Io(_) => (StatusCode::INTERNAL_SERVER_ERROR, "io"),
             AppError::Internal(_) => (StatusCode::INTERNAL_SERVER_ERROR, "internal"),
@@ -41,10 +46,21 @@ impl IntoResponse for AppError {
         if status.is_server_error() {
             tracing::error!(error = %self, "request failed");
         }
+        let retry_after = if let AppError::TooManyRequests { retry_after_secs } = &self {
+            Some(*retry_after_secs)
+        } else {
+            None
+        };
         let body = Json(json!({
             "error": { "code": code, "message": self.to_string() }
         }));
-        (status, body).into_response()
+        let mut response = (status, body).into_response();
+        if let Some(secs) = retry_after {
+            if let Ok(value) = HeaderValue::from_str(&secs.to_string()) {
+                response.headers_mut().insert(header::RETRY_AFTER, value);
+            }
+        }
+        response
     }
 }
 
@@ -92,6 +108,21 @@ mod tests {
         let (s, c) = err_code(AppError::WrongPassphrase);
         assert_eq!(s, StatusCode::UNAUTHORIZED);
         assert_eq!(c, "wrong_passphrase");
+    }
+
+    #[test]
+    fn too_many_requests_is_429_with_retry_after() {
+        let res = AppError::TooManyRequests {
+            retry_after_secs: 42,
+        }
+        .into_response();
+        assert_eq!(res.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(
+            res.headers()
+                .get(header::RETRY_AFTER)
+                .map(|v| v.to_str().unwrap()),
+            Some("42")
+        );
     }
 
     #[test]

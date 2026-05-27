@@ -88,6 +88,13 @@ impl UsersRegistry {
         self.users.iter().find(|u| u.email == needle)
     }
 
+    /// Drop the entry whose `uuid` matches. Used by registration rollback
+    /// when `init_space` errors out and leaves the registry pointing at a
+    /// directory that never materialised.
+    pub fn remove_by_uuid(&mut self, uuid: &Uuid) {
+        self.users.retain(|u| u.uuid != *uuid);
+    }
+
     /// Register a new user. Mints a UUID, appends, returns the new entry.
     ///
     /// `root` is the space-root directory (`./data`); the registry is rewritten

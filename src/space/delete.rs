@@ -48,8 +48,9 @@ pub fn delete_to_trash(
             std::fs::create_dir_all(parent)?;
         }
         std::fs::rename(&file, &dest)?;
+        space.cache().invalidate(&file.to_string_lossy());
         meta::rewrite_paths(space, passphrase, path, &trash_rel, false)?;
-        commit_all(&root, &format!("delete: {path}"))?;
+        space.with_repo(|repo| commit_all(repo, &format!("delete: {path}")))?;
         return Ok(DeleteResult {
             trash_path: trash_rel,
         });
@@ -60,8 +61,11 @@ pub fn delete_to_trash(
             std::fs::create_dir_all(parent)?;
         }
         std::fs::rename(&resolved, &trash_resolved)?;
+        // A whole subtree just moved; cheaper to drop the cache than walk
+        // and invalidate every file under it.
+        space.cache().clear();
         meta::rewrite_paths(space, passphrase, path, &trash_rel, true)?;
-        commit_all(&root, &format!("delete folder: {path}"))?;
+        space.with_repo(|repo| commit_all(repo, &format!("delete folder: {path}")))?;
         return Ok(DeleteResult {
             trash_path: trash_rel,
         });

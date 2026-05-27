@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { Close } from '../icons/Icon';
+import { useAsyncDialog } from '../../lib/useAsyncDialog';
 import styles from './dialog.module.css';
 
 interface Props {
@@ -14,15 +15,10 @@ interface Props {
 
 export function RenameDialog({ open, currentName, siblingNames, onClose, onRename }: Props) {
   const [name, setName] = useState(currentName);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { busy, error, run, setError, clearError } = useAsyncDialog(open, 'rename failed');
 
   useEffect(() => {
-    if (open) {
-      setName(currentName);
-      setBusy(false);
-      setError(null);
-    }
+    if (open) setName(currentName);
   }, [open, currentName]);
 
   if (!open) return null;
@@ -48,15 +44,7 @@ export function RenameDialog({ open, currentName, siblingNames, onClose, onRenam
       onClose();
       return;
     }
-    setBusy(true);
-    setError(null);
-    try {
-      await onRename(name.trim());
-      onClose();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'rename failed');
-      setBusy(false);
-    }
+    await run(() => onRename(name.trim()), { onSuccess: onClose });
   }
 
   return (
@@ -80,7 +68,7 @@ export function RenameDialog({ open, currentName, siblingNames, onClose, onRenam
               value={name}
               onChange={(e) => {
                 setName(e.target.value);
-                setError(null);
+                clearError();
               }}
               autoFocus
               spellCheck={false}

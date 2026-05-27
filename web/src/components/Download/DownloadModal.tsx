@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api, TreeFile } from '../../api/client';
 import { Close, Download as DownloadIcon, Folder } from '../icons/Icon';
+import { formatSize } from '../../lib/format';
 import styles from './DownloadModal.module.css';
 
 interface Props {
@@ -200,8 +201,3 @@ function fetchWithProgress(
   });
 }
 
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-}

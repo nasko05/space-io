@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Close, FolderOpen, Plus } from '../icons/Icon';
 import { TreeFolder, TreeNode } from '../../api/client';
+import { useAsyncDialog } from '../../lib/useAsyncDialog';
 import styles from './dialog.module.css';
 
 interface Props {
@@ -43,16 +44,13 @@ export function MoveDialog({
   onCreateFolder,
 }: Props) {
   const [picked, setPicked] = useState<string>('');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
+  const { busy, error, run } = useAsyncDialog(open, 'move failed');
 
   useEffect(() => {
     if (open) {
       setPicked('');
-      setBusy(false);
-      setError(null);
       setCreating(false);
       setNewFolderName('');
     }
@@ -68,32 +66,18 @@ export function MoveDialog({
 
   async function submit() {
     if (busy) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await onMove(picked);
-      onClose();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'move failed');
-      setBusy(false);
-    }
+    await run(() => onMove(picked), { onSuccess: onClose });
   }
 
   async function createFolderInside() {
     const name = newFolderName.trim();
     if (!name) return;
-    setBusy(true);
-    setError(null);
-    try {
+    await run(async () => {
       const created = await onCreateFolder(picked, name);
       setPicked(created);
       setCreating(false);
       setNewFolderName('');
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'could not create folder');
-    } finally {
-      setBusy(false);
-    }
+    });
   }
 
   if (!open) return null;

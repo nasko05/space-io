@@ -2,6 +2,7 @@ import { ChangeEvent, DragEvent, useEffect, useRef, useState } from 'react';
 import { Close, FilePdf, Folder, Image as ImageIcon, Upload as UploadIcon, Video } from '../icons/Icon';
 import { api } from '../../api/client';
 import { topLevelFolders, TreeNode } from '../../api/client';
+import { formatSize, shortId } from '../../lib/format';
 import styles from './UploadModal.module.css';
 
 interface Props {
@@ -13,6 +14,7 @@ interface Props {
 }
 
 type Item = {
+  id: string;
   file: File;
   state: 'queued' | 'doing' | 'done' | 'error';
   progress: number;
@@ -34,7 +36,12 @@ export function UploadModal({ open, initialFiles, tree, onClose, onUploaded }: P
   useEffect(() => {
     if (open) {
       setItems(
-        (initialFiles ?? []).map<Item>((f) => ({ file: f, state: 'queued', progress: 0 })),
+        (initialFiles ?? []).map<Item>((f) => ({
+          id: shortId('up'),
+          file: f,
+          state: 'queued',
+          progress: 0,
+        })),
       );
       setSubmitting(false);
       setDragOver(false);
@@ -48,48 +55,51 @@ export function UploadModal({ open, initialFiles, tree, onClose, onUploaded }: P
     if (!list) return;
     const accepted: Item[] = [];
     for (const f of Array.from(list)) {
+      const id = shortId('up');
       if (f.size > MAX_BYTES) {
         accepted.push({
+          id,
           file: f,
           state: 'error',
           progress: 0,
           error: `${formatSize(f.size)} exceeds 50 MB`,
         });
       } else {
-        accepted.push({ file: f, state: 'queued', progress: 0 });
+        accepted.push({ id, file: f, state: 'queued', progress: 0 });
       }
     }
     setItems((cur) => [...cur, ...accepted]);
   }
 
-  function removeAt(idx: number) {
-    setItems((cur) => cur.filter((_, i) => i !== idx));
+  function removeById(id: string) {
+    setItems((cur) => cur.filter((it) => it.id !== id));
   }
 
   async function submit() {
-    const ready = items
-      .map((it, idx) => ({ it, idx }))
-      .filter(({ it }) => it.state === 'queued');
+    // Capture an id-keyed snapshot so removeById/appendFiles during the
+    // upload loop can't shuffle indices under us.
+    const ready = items.filter((it) => it.state === 'queued');
     if (ready.length === 0 || submitting) return;
     setSubmitting(true);
-    for (const { idx } of ready) {
-      // Snapshot the file reference; setItems is async.
-      const file = items[idx]?.file;
-      if (!file) continue;
-      setItems((cur) => cur.map((it, i) => (i === idx ? { ...it, state: 'doing', progress: 0 } : it)));
+    for (const { id, file } of ready) {
+      setItems((cur) =>
+        cur.map((it) => (it.id === id ? { ...it, state: 'doing', progress: 0 } : it)),
+      );
       try {
         await api.upload(folder, [file], (loaded, total) => {
           setItems((cur) =>
-            cur.map((it, i) => (i === idx ? { ...it, progress: total ? loaded / total : 0 } : it)),
+            cur.map((it) =>
+              it.id === id ? { ...it, progress: total ? loaded / total : 0 } : it,
+            ),
           );
         });
         setItems((cur) =>
-          cur.map((it, i) => (i === idx ? { ...it, state: 'done', progress: 1 } : it)),
+          cur.map((it) => (it.id === id ? { ...it, state: 'done', progress: 1 } : it)),
         );
       } catch (err) {
         const message = err instanceof Error ? err.message : 'upload failed';
         setItems((cur) =>
-          cur.map((it, i) => (i === idx ? { ...it, state: 'error', error: message } : it)),
+          cur.map((it) => (it.id === id ? { ...it, state: 'error', error: message } : it)),
         );
       }
     }
@@ -180,8 +190,8 @@ export function UploadModal({ open, initialFiles, tree, onClose, onUploaded }: P
 
         {items.length > 0 && (
           <div className={styles.list}>
-            {items.map((it, i) => (
-              <div key={i} className={styles.row}>
+            {items.map((it) => (
+              <div key={it.id} className={styles.row}>
                 <div className={styles.rowIcon}>
                   {kindIcon(it.file.name)}
                 </div>
@@ -211,7 +221,7 @@ export function UploadModal({ open, initialFiles, tree, onClose, onUploaded }: P
                     <button
                       type="button"
                       className={styles.rowRemove}
-                      onClick={() => removeAt(i)}
+                      onClick={() => removeById(it.id)}
                       aria-label="Remove"
                     >
                       <Close size={12} />
@@ -248,10 +258,4 @@ function kindIcon(name: string) {
   if (ext === 'pdf') return <FilePdf size={16} />;
   if (['mp4', 'mov', 'webm'].includes(ext)) return <Video size={16} />;
   return <ImageIcon size={16} />;
-}
-
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }

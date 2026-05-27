@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import mammoth from 'mammoth';
+import { sanitizeHtml } from '../../lib/sanitizeHtml';
 import styles from './DocxRenderer.module.css';
 
 interface Props {
@@ -15,7 +16,7 @@ export default function DocxRenderer({ data }: Props) {
     (async () => {
       try {
         const result = await mammoth.convertToHtml({ arrayBuffer: data.slice(0) });
-        if (!cancelled) setHtml(result.value);
+        if (!cancelled) setHtml(sanitizeHtml(result.value));
       } catch (err) {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : 'failed to render DOCX');

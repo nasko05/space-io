@@ -33,6 +33,19 @@ pub fn router() -> Router<AppState> {
         .route("/files/meta", get(get_meta).put(put_meta))
 }
 
+/// Run blocking work (file I/O, age decrypt, git) on the dedicated
+/// blocking pool so we don't pin async workers. Joining the task is what
+/// surfaces panics or cancellation as `AppError::Internal`.
+async fn blocking<F, T>(f: F) -> AppResult<T>
+where
+    F: FnOnce() -> AppResult<T> + Send + 'static,
+    T: Send + 'static,
+{
+    tokio::task::spawn_blocking(f)
+        .await
+        .map_err(|e| AppError::Internal(format!("blocking join: {e}")))?
+}
+
 #[derive(Serialize)]
 struct TreeResponse {
     tree: Vec<tree::TreeNode>,
@@ -40,7 +53,7 @@ struct TreeResponse {
 
 async fn get_tree(State(state): State<AppState>, jar: CookieJar) -> AppResult<Json<TreeResponse>> {
     let (_, space) = require_session(&state, &jar)?;
-    let tree = tree::build_tree(&space)?;
+    let tree = blocking(move || tree::build_tree(&space)).await?;
     Ok(Json(TreeResponse { tree }))
 }
 
@@ -62,7 +75,7 @@ async fn get_read(
     Query(q): Query<ReadQuery>,
 ) -> AppResult<Json<ReadResponse>> {
     let (pass, space) = require_session(&state, &jar)?;
-    let result = read::read_file(&space, &pass, &q.path)?;
+    let result = blocking(move || read::read_file(&space, &pass, &q.path)).await?;
     Ok(Json(ReadResponse {
         path: result.path,
         content: result.content,
@@ -89,13 +102,16 @@ async fn put_write(
     Json(req): Json<WriteRequest>,
 ) -> AppResult<Json<WriteResponse>> {
     let (pass, space) = require_session(&state, &jar)?;
-    let result = write::write_file(
-        &space,
-        &pass,
-        &req.path,
-        &req.content,
-        req.message.as_deref(),
-    )?;
+    let result = blocking(move || {
+        write::write_file(
+            &space,
+            &pass,
+            &req.path,
+            &req.content,
+            req.message.as_deref(),
+        )
+    })
+    .await?;
     Ok(Json(WriteResponse {
         path: result.path,
         updated: result.updated,
@@ -119,7 +135,9 @@ async fn post_create(
     Json(req): Json<CreateRequest>,
 ) -> AppResult<Json<CreateResponse>> {
     let (pass, space) = require_session(&state, &jar)?;
-    let result = create::create_file(&space, &pass, &req.folder, req.title.as_deref())?;
+    let result =
+        blocking(move || create::create_file(&space, &pass, &req.folder, req.title.as_deref()))
+            .await?;
     Ok(Json(CreateResponse { path: result.path }))
 }
 
@@ -139,7 +157,7 @@ async fn get_excerpts(
     jar: CookieJar,
 ) -> AppResult<Json<ExcerptsResponse>> {
     let (pass, space) = require_session(&state, &jar)?;
-    let raw = excerpt::build_excerpts(&space, &pass)?;
+    let raw = blocking(move || excerpt::build_excerpts(&space, &pass)).await?;
     let excerpts = raw
         .into_iter()
         .map(|(k, v)| {
@@ -215,14 +233,18 @@ async fn post_upload(
     }
     let folder = folder.unwrap_or_else(|| DEFAULT_UPLOAD_FOLDER.to_string());
 
-    let mut results = Vec::with_capacity(files.len());
-    for (name, bytes) in files {
-        let r = upload::store_upload(&space, &pass, &folder, &name, &bytes)?;
-        results.push(UploadResult {
-            path: r.path,
-            size: r.size,
-        });
-    }
+    let results = blocking(move || {
+        let mut results = Vec::with_capacity(files.len());
+        for (name, bytes) in files {
+            let r = upload::store_upload(&space, &pass, &folder, &name, &bytes)?;
+            results.push(UploadResult {
+                path: r.path,
+                size: r.size,
+            });
+        }
+        Ok(results)
+    })
+    .await?;
     Ok(Json(UploadResponse { files: results }))
 }
 
@@ -237,7 +259,7 @@ async fn get_download(
     Query(q): Query<DownloadQuery>,
 ) -> AppResult<Response> {
     let (pass, space) = require_session(&state, &jar)?;
-    let file = download::fetch_decrypted(&space, &pass, &q.path)?;
+    let file = blocking(move || download::fetch_decrypted(&space, &pass, &q.path)).await?;
     let mime = mime_guess::from_path(&file.path).first_or_octet_stream();
     let base_name = std::path::Path::new(&file.path)
         .file_name()
@@ -279,7 +301,8 @@ async fn get_history(
     Query(q): Query<HistoryQuery>,
 ) -> AppResult<Json<HistoryResponse>> {
     let (_, space) = require_session(&state, &jar)?;
-    let entries = history::file_history(&space, &q.path)?
+    let entries = blocking(move || history::file_history(&space, &q.path))
+        .await?
         .into_iter()
         .map(|e| HistoryEntryDto {
             commit: e.commit,
@@ -309,7 +332,7 @@ async fn post_move(
     Json(req): Json<MoveRequest>,
 ) -> AppResult<Json<MoveResponse>> {
     let (pass, space) = require_session(&state, &jar)?;
-    let r = rename::rename_path(&space, &pass, &req.from, &req.to)?;
+    let r = blocking(move || rename::rename_path(&space, &pass, &req.from, &req.to)).await?;
     Ok(Json(MoveResponse {
         path: r.path,
         is_directory: r.is_directory,
@@ -332,7 +355,7 @@ async fn delete_file(
     Json(req): Json<DeleteRequest>,
 ) -> AppResult<Json<DeleteResponse>> {
     let (pass, space) = require_session(&state, &jar)?;
-    let r = delete_mod::delete_to_trash(&space, &pass, &req.path)?;
+    let r = blocking(move || delete_mod::delete_to_trash(&space, &pass, &req.path)).await?;
     Ok(Json(DeleteResponse {
         trash_path: r.trash_path,
     }))
@@ -349,7 +372,7 @@ async fn post_mkdir(
     Json(req): Json<MkdirRequest>,
 ) -> AppResult<StatusCode> {
     let (_, space) = require_session(&state, &jar)?;
-    mkdir::create_folder(&space, &req.path)?;
+    blocking(move || mkdir::create_folder(&space, &req.path)).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -365,7 +388,7 @@ struct MetaResponse {
 
 async fn get_meta(State(state): State<AppState>, jar: CookieJar) -> AppResult<Json<MetaResponse>> {
     let (pass, space) = require_session(&state, &jar)?;
-    let idx = meta::load(&space, &pass)?;
+    let idx = blocking(move || meta::load(&space, &pass)).await?;
     let meta = idx
         .paths
         .into_iter()
@@ -386,6 +409,6 @@ async fn put_meta(
     Json(req): Json<PutMetaRequest>,
 ) -> AppResult<StatusCode> {
     let (pass, space) = require_session(&state, &jar)?;
-    meta::set_tags(&space, &pass, &req.path, req.tags)?;
+    blocking(move || meta::set_tags(&space, &pass, &req.path, req.tags)).await?;
     Ok(StatusCode::NO_CONTENT)
 }

@@ -16,7 +16,7 @@ pub fn create_folder(space: &Space, path: &str) -> AppResult<()> {
     }
     std::fs::create_dir_all(&resolved)?;
     std::fs::write(resolved.join(".gitkeep"), b"")?;
-    commit_all(&root, &format!("mkdir: {path}"))?;
+    space.with_repo(|repo| commit_all(repo, &format!("mkdir: {path}")))?;
     Ok(())
 }
 

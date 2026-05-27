@@ -1,5 +1,5 @@
-import { useState } from 'react';
 import { Close } from '../icons/Icon';
+import { useAsyncDialog } from '../../lib/useAsyncDialog';
 import styles from './dialog.module.css';
 
 interface Props {
@@ -18,21 +18,12 @@ export function DeleteConfirmDialog({
   onClose,
   onConfirm,
 }: Props) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { busy, error, run } = useAsyncDialog(open, 'delete failed');
 
   if (!open) return null;
 
   async function go() {
-    setBusy(true);
-    setError(null);
-    try {
-      await onConfirm();
-      onClose();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'delete failed');
-      setBusy(false);
-    }
+    await run(onConfirm, { onSuccess: onClose });
   }
 
   return (
