@@ -46,3 +46,52 @@ pub fn decrypt_bytes(ciphertext: &[u8], passphrase: &SecretString) -> AppResult<
         .map_err(|e| AppError::Internal(format!("age read: {e}")))?;
     Ok(out)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn secret(s: &str) -> SecretString {
+        SecretString::from(s.to_string())
+    }
+
+    #[test]
+    fn encrypt_decrypt_roundtrip_is_lossless() {
+        let pass = secret("correct horse battery staple");
+        let plaintext = b"# Hello\n\nThe *quick* brown fox jumps over the lazy dog.";
+        let ct = encrypt_bytes(plaintext, &pass).unwrap();
+        // Sanity: ciphertext differs from plaintext and carries the age header.
+        assert_ne!(ct.as_slice(), &plaintext[..]);
+        assert!(ct.starts_with(b"age-encryption.org/v1\n"));
+        let pt = decrypt_bytes(&ct, &pass).unwrap();
+        assert_eq!(pt, plaintext);
+    }
+
+    #[test]
+    fn wrong_passphrase_fails_to_decrypt() {
+        let right = secret("right one");
+        let wrong = secret("wrong one");
+        let ct = encrypt_bytes(b"secret note", &right).unwrap();
+        let err = decrypt_bytes(&ct, &wrong).unwrap_err();
+        // We don't pin the variant message, just that it errors rather than
+        // silently returning garbage.
+        assert!(matches!(err, AppError::Internal(_)));
+    }
+
+    #[test]
+    fn empty_plaintext_roundtrips() {
+        let pass = secret("p");
+        let ct = encrypt_bytes(b"", &pass).unwrap();
+        let pt = decrypt_bytes(&ct, &pass).unwrap();
+        assert_eq!(pt.as_slice(), b"");
+    }
+
+    #[test]
+    fn truncated_ciphertext_is_rejected() {
+        let pass = secret("p");
+        let ct = encrypt_bytes(b"hello", &pass).unwrap();
+        // Lop off the last few bytes; the AEAD tag should fail.
+        let truncated = &ct[..ct.len().saturating_sub(8)];
+        assert!(decrypt_bytes(truncated, &pass).is_err());
+    }
+}

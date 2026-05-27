@@ -89,3 +89,75 @@ pub fn init_space(opts: InitOptions) -> AppResult<()> {
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    fn init_with(passphrase: &str) -> TempDir {
+        let dir = TempDir::new().unwrap();
+        init_space(InitOptions {
+            space_dir: dir.path().to_path_buf(),
+            passphrase: SecretString::from(passphrase.to_string()),
+            owner: "test@home.lan".into(),
+        })
+        .expect("init succeeded");
+        dir
+    }
+
+    #[test]
+    fn creates_space_toml() {
+        let dir = init_with("p");
+        let cfg = SpaceConfig::load(dir.path()).unwrap();
+        assert_eq!(cfg.owner, "test@home.lan");
+        assert!(!cfg.salt_verify_hex.is_empty());
+        assert!(!cfg.verifier_hash_hex.is_empty());
+        assert!(cfg.passkey.is_none());
+    }
+
+    #[test]
+    fn creates_seed_note_as_encrypted_blob() {
+        let dir = init_with("p");
+        let seed = dir.path().join("space").join("Journal/2026/welcome.md.age");
+        assert!(seed.is_file(), "seed note exists");
+        let bytes = std::fs::read(&seed).unwrap();
+        assert!(bytes.starts_with(b"age-encryption.org/v1\n"));
+    }
+
+    #[test]
+    fn produces_a_git_repository_with_one_root_commit() {
+        let dir = init_with("p");
+        let repo = git2::Repository::open(dir.path().join("space")).unwrap();
+        let head = repo.head().unwrap().peel_to_commit().unwrap();
+        assert_eq!(
+            head.message().unwrap().trim(),
+            "Initial commit — welcome note"
+        );
+        assert_eq!(head.parent_count(), 0);
+    }
+
+    #[test]
+    fn rejects_double_init() {
+        let dir = init_with("p");
+        let err = init_space(InitOptions {
+            space_dir: dir.path().to_path_buf(),
+            passphrase: SecretString::from("p".to_string()),
+            owner: "x".into(),
+        })
+        .unwrap_err();
+        assert!(matches!(err, AppError::BadRequest(_)));
+    }
+
+    #[test]
+    fn seed_decrypts_with_the_chosen_passphrase() {
+        let dir = init_with("right one");
+        let seed = dir.path().join("space").join("Journal/2026/welcome.md.age");
+        let bytes = std::fs::read(&seed).unwrap();
+        let pass = SecretString::from("right one".to_string());
+        let pt = crate::crypto::age_io::decrypt_bytes(&bytes, &pass).unwrap();
+        assert!(String::from_utf8(pt)
+            .unwrap()
+            .starts_with("# Welcome to your space"));
+    }
+}

@@ -63,3 +63,100 @@ impl SpaceConfig {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    fn sample() -> SpaceConfig {
+        SpaceConfig {
+            owner: "ada@home.lan".into(),
+            salt_verify_hex: "deadbeef".into(),
+            verifier_hash_hex: "cafebabe".into(),
+            kdf_log_n: 15,
+            kdf_r: 8,
+            kdf_p: 1,
+            passkey: None,
+        }
+    }
+
+    #[test]
+    fn config_path_places_inside_space_dir() {
+        let p = SpaceConfig::config_path(Path::new("/foo"));
+        assert_eq!(p, Path::new("/foo/.space.toml"));
+    }
+
+    #[test]
+    fn space_root_places_inside_space_dir() {
+        let p = SpaceConfig::space_root(Path::new("/foo"));
+        assert_eq!(p, Path::new("/foo/space"));
+    }
+
+    #[test]
+    fn save_then_load_roundtrips() {
+        let dir = TempDir::new().unwrap();
+        let cfg = sample();
+        cfg.save(dir.path()).unwrap();
+        let loaded = SpaceConfig::load(dir.path()).unwrap();
+        assert_eq!(loaded.owner, cfg.owner);
+        assert_eq!(loaded.salt_verify_hex, cfg.salt_verify_hex);
+        assert_eq!(loaded.verifier_hash_hex, cfg.verifier_hash_hex);
+        assert_eq!(loaded.kdf_log_n, cfg.kdf_log_n);
+        assert!(loaded.passkey.is_none());
+    }
+
+    #[test]
+    fn loading_missing_config_yields_bad_request() {
+        let dir = TempDir::new().unwrap();
+        let err = SpaceConfig::load(dir.path()).unwrap_err();
+        assert!(matches!(err, AppError::BadRequest(_)));
+    }
+
+    #[test]
+    fn loading_malformed_config_yields_internal_error() {
+        let dir = TempDir::new().unwrap();
+        std::fs::write(SpaceConfig::config_path(dir.path()), "{ not toml").unwrap();
+        let err = SpaceConfig::load(dir.path()).unwrap_err();
+        assert!(matches!(err, AppError::Internal(_)));
+    }
+
+    #[test]
+    fn passkey_round_trips_through_disk() {
+        let dir = TempDir::new().unwrap();
+        let mut cfg = sample();
+        cfg.passkey = Some(PasskeyConfig {
+            credential_id_b64: "abc".into(),
+            prf_salt_b64: "salt".into(),
+            wrapped_passphrase_b64: "wrap".into(),
+        });
+        cfg.save(dir.path()).unwrap();
+        let loaded = SpaceConfig::load(dir.path()).unwrap();
+        let pk = loaded.passkey.expect("passkey persisted");
+        assert_eq!(pk.credential_id_b64, "abc");
+        assert_eq!(pk.prf_salt_b64, "salt");
+        assert_eq!(pk.wrapped_passphrase_b64, "wrap");
+    }
+
+    #[test]
+    fn legacy_config_without_passkey_section_loads() {
+        // Older `.space.toml` files written before the passkey feature do
+        // not have a [passkey] block; serde(default) should let them load.
+        let dir = TempDir::new().unwrap();
+        std::fs::write(
+            SpaceConfig::config_path(dir.path()),
+            r#"
+owner = "old@home.lan"
+salt_verify_hex = "00"
+verifier_hash_hex = "11"
+kdf_log_n = 15
+kdf_r = 8
+kdf_p = 1
+"#,
+        )
+        .unwrap();
+        let loaded = SpaceConfig::load(dir.path()).unwrap();
+        assert_eq!(loaded.owner, "old@home.lan");
+        assert!(loaded.passkey.is_none());
+    }
+}

@@ -29,3 +29,52 @@ pub fn derive_verifier(
 pub fn verify(supplied: &[u8; VERIFIER_LEN], expected: &[u8; VERIFIER_LEN]) -> bool {
     supplied.ct_eq(expected).into()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SALT: &[u8] = b"test-salt-16-byt";
+
+    #[test]
+    fn derivation_is_deterministic() {
+        let a = derive_verifier("passphrase", SALT, 4, 8, 1).unwrap();
+        let b = derive_verifier("passphrase", SALT, 4, 8, 1).unwrap();
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn different_passphrases_produce_different_verifiers() {
+        let a = derive_verifier("one", SALT, 4, 8, 1).unwrap();
+        let b = derive_verifier("two", SALT, 4, 8, 1).unwrap();
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn different_salts_produce_different_verifiers() {
+        let a = derive_verifier("p", b"salt-A-aaaaaaaaa", 4, 8, 1).unwrap();
+        let b = derive_verifier("p", b"salt-B-bbbbbbbbb", 4, 8, 1).unwrap();
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn invalid_params_error() {
+        // log_n = 64 exceeds scrypt's allowed range.
+        let err = derive_verifier("p", SALT, 64, 8, 1).unwrap_err();
+        assert!(matches!(err, crate::error::AppError::Internal(_)));
+    }
+
+    #[test]
+    fn verify_matches_identical_buffers() {
+        let v = derive_verifier("p", SALT, 4, 8, 1).unwrap();
+        assert!(verify(&v, &v));
+    }
+
+    #[test]
+    fn verify_rejects_one_bit_difference() {
+        let mut a = derive_verifier("p", SALT, 4, 8, 1).unwrap();
+        let b = a;
+        a[0] ^= 0x01;
+        assert!(!verify(&a, &b));
+    }
+}

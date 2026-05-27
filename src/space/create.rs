@@ -32,6 +32,7 @@ fn sanitise(title: &str) -> Option<String> {
     }
 }
 
+#[derive(Debug)]
 pub struct CreateResult {
     pub path: String,
 }
@@ -78,4 +79,93 @@ pub fn create_file(
     commit_all(&root, &format!("Create: {rel_path}"))?;
 
     Ok(CreateResult { path: rel_path })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::space::test_helpers::make_space;
+
+    #[test]
+    fn sanitise_preserves_simple_titles() {
+        assert_eq!(sanitise("My Note"), Some("My Note".into()));
+    }
+
+    #[test]
+    fn sanitise_strips_punctuation() {
+        assert_eq!(sanitise("Hello, world!"), Some("Hello world".into()));
+    }
+
+    #[test]
+    fn sanitise_replaces_unsupported_chars_with_dash() {
+        assert_eq!(sanitise("a/b\\c"), Some("a-b-c".into()));
+    }
+
+    #[test]
+    fn sanitise_returns_none_for_empty() {
+        assert_eq!(sanitise(""), None);
+        assert_eq!(sanitise("   "), None);
+    }
+
+    #[test]
+    fn sanitise_collapses_whitespace() {
+        assert_eq!(sanitise("hello   world"), Some("hello world".into()));
+    }
+
+    #[test]
+    fn untitled_when_no_title_is_provided() {
+        let (_dir, space, pass) = make_space("p");
+        let r = create_file(&space, &pass, "Journal/2026", None).unwrap();
+        let name = r.path.split('/').next_back().unwrap();
+        assert!(
+            name.starts_with("Untitled "),
+            "expected 'Untitled ...', got {}",
+            name
+        );
+        assert!(name.ends_with(".md"));
+    }
+
+    #[test]
+    fn title_seeds_filename_stem() {
+        let (_dir, space, pass) = make_space("p");
+        let r = create_file(&space, &pass, "Journal/2026", Some("Memo for M")).unwrap();
+        assert_eq!(r.path, "Journal/2026/Memo for M.md");
+    }
+
+    #[test]
+    fn collision_yields_paren_suffix() {
+        let (_dir, space, pass) = make_space("p");
+        let a = create_file(&space, &pass, "Journal/2026", Some("Note")).unwrap();
+        let b = create_file(&space, &pass, "Journal/2026", Some("Note")).unwrap();
+        let c = create_file(&space, &pass, "Journal/2026", Some("Note")).unwrap();
+        assert_eq!(a.path, "Journal/2026/Note.md");
+        assert_eq!(b.path, "Journal/2026/Note (2).md");
+        assert_eq!(c.path, "Journal/2026/Note (3).md");
+    }
+
+    #[test]
+    fn create_produces_an_encrypted_empty_file() {
+        let (dir, space, pass) = make_space("p");
+        let r = create_file(&space, &pass, "F", Some("a")).unwrap();
+        let on_disk = dir.path().join("space").join(format!("{}.age", r.path));
+        let bytes = std::fs::read(&on_disk).unwrap();
+        assert!(bytes.starts_with(b"age-encryption.org/v1\n"));
+        let pt = crate::crypto::age_io::decrypt_bytes(&bytes, &pass).unwrap();
+        assert!(pt.is_empty());
+    }
+
+    #[test]
+    fn rejects_traversal_folder() {
+        let (_dir, space, pass) = make_space("p");
+        let err = create_file(&space, &pass, "../etc", None).unwrap_err();
+        assert!(matches!(err, AppError::Forbidden));
+    }
+
+    #[test]
+    fn empty_folder_drops_path_to_root() {
+        let (dir, space, pass) = make_space("p");
+        let r = create_file(&space, &pass, "", Some("root note")).unwrap();
+        assert_eq!(r.path, "root note.md");
+        assert!(dir.path().join("space/root note.md.age").is_file());
+    }
 }

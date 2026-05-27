@@ -149,3 +149,79 @@ fn make_snippet(src: &str, around: usize) -> String {
         trimmed.to_string()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::space::test_helpers::make_space_with_note;
+
+    #[test]
+    fn empty_query_returns_nothing() {
+        let (_dir, space, pass) = make_space_with_note("p", "a.md", "# A\n\nbody");
+        assert!(search(&space, &pass, "").unwrap().is_empty());
+        assert!(search(&space, &pass, "   ").unwrap().is_empty());
+    }
+
+    #[test]
+    fn finds_body_match() {
+        let (_dir, space, pass) =
+            make_space_with_note("p", "a.md", "# Sunday\n\nThe quick brown fox");
+        let hits = search(&space, &pass, "brown fox").unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].path, "a.md");
+        assert!(hits[0].snippet.contains("brown fox"));
+    }
+
+    #[test]
+    fn title_hit_scores_higher_than_body_hit() {
+        let (_dir, space, pass) =
+            make_space_with_note("p", "title.md", "# Memory palaces\n\nshort");
+        crate::space::write::write_file(
+            &space,
+            &pass,
+            "body.md",
+            "# Other\n\nThe word memory appears here.",
+            None,
+        )
+        .unwrap();
+        let hits = search(&space, &pass, "memory").unwrap();
+        assert_eq!(hits.len(), 2);
+        // The title hit should rank first.
+        assert_eq!(hits[0].path, "title.md");
+    }
+
+    #[test]
+    fn and_semantics_require_all_tokens_to_match() {
+        let (_dir, space, pass) = make_space_with_note(
+            "p",
+            "a.md",
+            "# Note\n\nThe quick brown fox jumps over the lazy dog.",
+        );
+        crate::space::write::write_file(&space, &pass, "b.md", "# Just brown.\n\nshort", None)
+            .unwrap();
+        let hits = search(&space, &pass, "brown fox").unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].path, "a.md");
+    }
+
+    #[test]
+    fn case_insensitive_match() {
+        let (_dir, space, pass) = make_space_with_note("p", "a.md", "# T\n\nHELLO world");
+        let hits = search(&space, &pass, "hello").unwrap();
+        assert_eq!(hits.len(), 1);
+    }
+
+    #[test]
+    fn no_match_returns_empty() {
+        let (_dir, space, pass) = make_space_with_note("p", "a.md", "# T\n\nnothing");
+        assert!(search(&space, &pass, "xyz123").unwrap().is_empty());
+    }
+
+    #[test]
+    fn snippet_strips_markdown_emphasis() {
+        let (_dir, space, pass) =
+            make_space_with_note("p", "a.md", "# T\n\nA *star* and **bold** match here.");
+        let hits = search(&space, &pass, "match").unwrap();
+        assert!(!hits[0].snippet.contains('*'));
+    }
+}
