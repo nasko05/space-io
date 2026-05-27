@@ -88,7 +88,8 @@ pub fn build_excerpts(
     Ok(out)
 }
 
-fn extract_title(src: &str) -> Option<String> {
+/// Pull the first `# …` heading from markdown source as the title.
+pub fn extract_title(src: &str) -> Option<String> {
     src.lines()
         .find_map(|l| l.strip_prefix("# ").map(|t| t.trim().to_string()))
 }

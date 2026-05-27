@@ -5,6 +5,7 @@ use walkdir::WalkDir;
 
 use crate::crypto::age_io;
 use crate::error::AppResult;
+use crate::space::excerpt::extract_title;
 use crate::space::paths::ENC_EXT;
 use crate::space::Space;
 
@@ -153,11 +154,6 @@ pub fn search(space: &Space, passphrase: &SecretString, query: &str) -> AppResul
     hits.sort_by(|a, b| b.score.cmp(&a.score).then_with(|| a.path.cmp(&b.path)));
     hits.truncate(MAX_HITS);
     Ok(hits)
-}
-
-fn extract_title(src: &str) -> Option<String> {
-    src.lines()
-        .find_map(|l| l.strip_prefix("# ").map(|t| t.trim().to_string()))
 }
 
 fn make_snippet(src: &str, around: usize) -> String {

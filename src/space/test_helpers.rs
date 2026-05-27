@@ -45,6 +45,16 @@ pub fn make_space(passphrase: &str) -> (TempDir, Space, SecretString) {
     (dir, space, pass)
 }
 
+/// Count the total commits reachable from HEAD.
+pub fn count_commits(repo_path: &std::path::Path) -> usize {
+    let repo = git2::Repository::open(repo_path).unwrap();
+    let mut walk = repo.revwalk().unwrap();
+    if walk.push_head().is_err() {
+        return 0;
+    }
+    walk.filter_map(Result::ok).count()
+}
+
 /// Convenience: build a space and pre-populate a single encrypted note.
 pub fn make_space_with_note(
     passphrase: &str,

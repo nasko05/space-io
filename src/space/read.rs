@@ -1,12 +1,9 @@
-use std::time::SystemTime;
-
 use age::secrecy::SecretString;
-use time::OffsetDateTime;
 
 use crate::crypto::age_io;
 use crate::error::{AppError, AppResult};
 use crate::space::paths::{resolve_under, with_age_suffix};
-use crate::space::Space;
+use crate::space::{systemtime_iso8601, Space};
 
 #[derive(Debug)]
 pub struct ReadFile {
@@ -34,12 +31,6 @@ pub fn read_file(space: &Space, passphrase: &SecretString, rel_path: &str) -> Ap
         content,
         updated,
     })
-}
-
-fn systemtime_iso8601(t: SystemTime) -> Option<String> {
-    let dt: OffsetDateTime = t.into();
-    dt.format(&time::format_description::well_known::Rfc3339)
-        .ok()
 }
 
 #[cfg(test)]

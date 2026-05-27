@@ -59,16 +59,7 @@ pub fn write_file(
 mod tests {
     use super::*;
     use crate::error::AppError;
-    use crate::space::test_helpers::make_space;
-
-    fn count_commits(root: &std::path::Path) -> usize {
-        let repo = git2::Repository::open(root).unwrap();
-        let mut walk = repo.revwalk().unwrap();
-        if walk.push_head().is_err() {
-            return 0;
-        }
-        walk.filter_map(Result::ok).count()
-    }
+    use crate::space::test_helpers::{count_commits, make_space};
 
     #[test]
     fn writes_an_encrypted_blob_at_the_expected_path() {
