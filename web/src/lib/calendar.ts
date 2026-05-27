@@ -1,4 +1,4 @@
-import { ExcerptMap, TreeFile, flattenFiles, TreeNode } from '../api/client';
+import { ExcerptMap, TreeFile, TreeNode } from '../api/client';
 
 export interface TodayEntry {
   path: string;
@@ -36,6 +36,28 @@ function pad(n: number): string {
   return n < 10 ? `0${n}` : `${n}`;
 }
 
+/** Visit every markdown file in the tree exactly once, surfacing the file
+ * along with a parsed timestamp so callers don't each have to re-parse and
+ * re-walk. */
+function forEachMarkdown(
+  tree: TreeNode[],
+  visit: (file: TreeFile, ts: number) => void,
+): void {
+  const walk = (nodes: TreeNode[]) => {
+    for (const n of nodes) {
+      if (n.type === 'file') {
+        if (n.kind !== 'md' || !n.updated) continue;
+        const ts = Date.parse(n.updated);
+        if (!Number.isFinite(ts)) continue;
+        visit(n, ts);
+      } else {
+        walk(n.children);
+      }
+    }
+  };
+  walk(tree);
+}
+
 export function buildCalendar(now: Date, tree: TreeNode[]): CalendarView {
   const year = now.getFullYear();
   const month = now.getMonth();
@@ -44,13 +66,12 @@ export function buildCalendar(now: Date, tree: TreeNode[]): CalendarView {
   const startWeekday = new Date(year, month, 1).getDay();
 
   const filled = new Set<number>();
-  for (const f of flattenFiles(tree)) {
-    if (f.kind !== 'md' || !f.updated) continue;
-    const d = new Date(f.updated);
+  forEachMarkdown(tree, (_, ts) => {
+    const d = new Date(ts);
     if (d.getFullYear() === year && d.getMonth() === month) {
       filled.add(d.getDate());
     }
-  }
+  });
 
   return {
     year,
@@ -81,26 +102,28 @@ export function entriesForDate(
   excerpts: ExcerptMap,
   currentPath: string | null,
 ): TodayEntry[] {
-  const sameDay = (a: Date, b: Date) =>
-    a.getFullYear() === b.getFullYear() &&
-    a.getMonth() === b.getMonth() &&
-    a.getDate() === b.getDate();
-
-  const files = flattenFiles(tree).filter((f) => f.kind === 'md' && f.updated);
-  return files
-    .filter((f) => sameDay(new Date(f.updated), date))
-    .sort((a, b) => new Date(b.updated).getTime() - new Date(a.updated).getTime())
-    .map((f) => {
-      const d = new Date(f.updated);
-      const title =
-        excerpts[f.path]?.title ?? f.name.replace(/\.(md|markdown)$/i, '');
-      return {
-        path: f.path,
-        title,
-        time: `${pad(d.getHours())}:${pad(d.getMinutes())}`,
-        current: f.path === currentPath,
-      };
-    });
+  const year = date.getFullYear();
+  const month = date.getMonth();
+  const day = date.getDate();
+  type Row = { file: TreeFile; ts: number };
+  const rows: Row[] = [];
+  forEachMarkdown(tree, (file, ts) => {
+    const d = new Date(ts);
+    if (d.getFullYear() === year && d.getMonth() === month && d.getDate() === day) {
+      rows.push({ file, ts });
+    }
+  });
+  rows.sort((a, b) => b.ts - a.ts);
+  return rows.map(({ file, ts }) => {
+    const d = new Date(ts);
+    const title = excerpts[file.path]?.title ?? file.name.replace(/\.(md|markdown)$/i, '');
+    return {
+      path: file.path,
+      title,
+      time: `${pad(d.getHours())}:${pad(d.getMinutes())}`,
+      current: file.path === currentPath,
+    };
+  });
 }
 
 /** Find the first markdown file updated on the given (year, month, day). */
@@ -110,14 +133,15 @@ export function findFileForDay(
   month: number,
   day: number,
 ): TreeFile | null {
-  for (const f of flattenFiles(tree)) {
-    if (f.kind !== 'md' || !f.updated) continue;
-    const d = new Date(f.updated);
+  let hit: TreeFile | null = null;
+  forEachMarkdown(tree, (file, ts) => {
+    if (hit) return;
+    const d = new Date(ts);
     if (d.getFullYear() === year && d.getMonth() === month && d.getDate() === day) {
-      return f;
+      hit = file;
     }
-  }
-  return null;
+  });
+  return hit;
 }
 
 /** Locale-independent "27 May 2026" — matches the dateline format used in the

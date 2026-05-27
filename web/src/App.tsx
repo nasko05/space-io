@@ -396,6 +396,21 @@ export function App() {
 
   const clearSelectedDay = useCallback(() => setSelectedDay(null), []);
 
+  // Resolve a path to a `TreeFile` (for preview routing) and select. Wrapped
+  // here so HearthVault gets a stable handler reference, which keeps the
+  // memoized rail from re-rendering on unrelated parent updates.
+  const onVaultSelectPath = useCallback(
+    (p: string) => {
+      const file = findInTree(tree, p);
+      if (file) onSelectVaultFile(file);
+      else void selectFile(p);
+    },
+    [onSelectVaultFile, selectFile, tree],
+  );
+
+  const openSearch = useCallback(() => setSearchOpen(true), []);
+  const openPasskey = useCallback(() => setPasskeyOpen(true), []);
+
   const onUploaded = useCallback(async () => {
     await refreshTree();
     void refreshExcerpts();
@@ -419,14 +434,16 @@ export function App() {
 
   const handleMoveFiles = useCallback(
     async (paths: string[], destinationFolder: string) => {
-      // Issue serially so a failure halfway through is easier to recover from.
       try {
-        for (const from of paths) {
-          const name = from.split('/').pop() ?? from;
-          const to = destinationFolder ? `${destinationFolder}/${name}` : name;
-          if (from === to) continue;
-          await api.move(from, to);
-        }
+        const moves = paths
+          .map((from) => {
+            const name = from.split('/').pop() ?? from;
+            const to = destinationFolder ? `${destinationFolder}/${name}` : name;
+            return { from, to };
+          })
+          .filter((m) => m.from !== m.to);
+        if (moves.length === 0) return;
+        await api.moveBulk(moves);
         await refreshTree();
         void refreshMeta();
       } catch (err) {
@@ -454,10 +471,9 @@ export function App() {
 
   const handleDeleteFiles = useCallback(
     async (paths: string[]) => {
+      if (paths.length === 0) return;
       try {
-        for (const p of paths) {
-          await api.deleteFile(p);
-        }
+        await api.deleteFilesBulk(paths);
         await refreshTree();
         void refreshExcerpts();
         void refreshMeta();
@@ -472,10 +488,9 @@ export function App() {
 
   const handleSetTags = useCallback(
     async (paths: string[], tags: string[]) => {
+      if (paths.length === 0) return;
       try {
-        for (const p of paths) {
-          await api.setTags(p, tags);
-        }
+        await api.setTagsBulk(paths.map((path) => ({ path, tags })));
         // Patch local state immediately so the UI doesn't blink while the
         // server walk catches up.
         setMeta((cur) => {
@@ -555,7 +570,16 @@ export function App() {
     return () => window.clearTimeout(t);
   }, [toast]);
 
-  const calendar: CalendarView = useMemo(() => buildCalendar(now, tree), [now, tree]);
+  // `now` ticks every minute so relative-time labels eventually refresh, but
+  // the calendar and the entries list only care about the calendar date.
+  // Memoize on day-precision so neither rebuilds (and re-renders subtrees)
+  // just because a minute elapsed.
+  const dayKey = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}`;
+  const calendar: CalendarView = useMemo(
+    () => buildCalendar(now, tree),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [dayKey, tree],
+  );
   // If the calendar slides into a new month while a day is pinned (e.g. a
   // long-running session ticks past midnight on the last of the month),
   // drop the selection so we don't keep highlighting a day that no longer
@@ -568,11 +592,14 @@ export function App() {
 
   const currentPath =
     view.kind === 'unlocked' && view.surface.kind === 'reader' ? view.surface.file.path : null;
-  const railDate =
-    selectedDay != null ? new Date(calendar.year, calendar.month, selectedDay) : now;
   const railEntries: TodayEntry[] = useMemo(
-    () => entriesForDate(railDate, tree, excerpts, currentPath),
-    [railDate, tree, excerpts, currentPath],
+    () => {
+      const target =
+        selectedDay != null ? new Date(calendar.year, calendar.month, selectedDay) : now;
+      return entriesForDate(target, tree, excerpts, currentPath);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [dayKey, selectedDay, calendar.year, calendar.month, tree, excerpts, currentPath],
   );
   const railLabel: string =
     selectedDay != null ? shortDayLabel(calendar.month, selectedDay) : 'Today';
@@ -624,12 +651,12 @@ export function App() {
           onSelectDay={selectDay}
           onNewEntry={newEntry}
           onOpenVault={openVault}
-          onOpenSearch={() => setSearchOpen(true)}
+          onOpenSearch={openSearch}
           onLock={onLock}
           onSave={saveFile}
           onRollback={rollbackFile}
           onWikilinkMiss={onWikilinkMiss}
-          onOpenPasskey={() => setPasskeyOpen(true)}
+          onOpenPasskey={openPasskey}
           hasPasskey={hasPasskey}
           theme={theme}
           onToggleTheme={toggleTheme}
@@ -645,21 +672,17 @@ export function App() {
           entriesLabel={railLabel}
           selectedDay={selectedDay}
           onClearSelectedDay={clearSelectedDay}
-          onSelectFile={(p) => {
-            const file = findInTree(tree, p);
-            if (file) onSelectVaultFile(file);
-            else void selectFile(p);
-          }}
+          onSelectFile={onVaultSelectPath}
           onSelectDay={selectDay}
           onNewEntry={newEntry}
           onBackToReader={backFromVault}
-          onDownloadFile={(f) => setDownloadFile(f)}
+          onDownloadFile={setDownloadFile}
           onRenameFile={handleRenameFile}
           onMoveFiles={handleMoveFiles}
           onCreateFolder={handleCreateFolder}
           onDeleteFiles={handleDeleteFiles}
           onSetTags={handleSetTags}
-          onOpenPasskey={() => setPasskeyOpen(true)}
+          onOpenPasskey={openPasskey}
           hasPasskey={hasPasskey}
           theme={theme}
           onToggleTheme={toggleTheme}
@@ -678,8 +701,8 @@ export function App() {
           onNewEntry={newEntry}
           onOpenVault={openVault}
           onLock={onLock}
-          onDownload={(f) => setDownloadFile(f)}
-          onOpenPasskey={() => setPasskeyOpen(true)}
+          onDownload={setDownloadFile}
+          onOpenPasskey={openPasskey}
           hasPasskey={hasPasskey}
           theme={theme}
           onToggleTheme={toggleTheme}

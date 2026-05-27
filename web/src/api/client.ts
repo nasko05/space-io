@@ -281,6 +281,18 @@ export const api = {
       }),
     );
   },
+  async moveBulk(
+    moves: { from: string; to: string }[],
+  ): Promise<{ results: { path: string; is_directory: boolean }[] }> {
+    return json(
+      await fetch('/api/files/move/bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ moves }),
+      }),
+    );
+  },
   async deleteFile(path: string): Promise<{ trash_path: string }> {
     return json(
       await fetch('/api/files/delete', {
@@ -288,6 +300,16 @@ export const api = {
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
         body: JSON.stringify({ path }),
+      }),
+    );
+  },
+  async deleteFilesBulk(paths: string[]): Promise<{ results: { trash_path: string }[] }> {
+    return json(
+      await fetch('/api/files/delete/bulk', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ paths }),
       }),
     );
   },
@@ -311,6 +333,16 @@ export const api = {
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
         body: JSON.stringify({ path, tags }),
+      }),
+    );
+  },
+  async setTagsBulk(updates: { path: string; tags: string[] }[]): Promise<void> {
+    await json(
+      await fetch('/api/files/meta/bulk', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ updates }),
       }),
     );
   },

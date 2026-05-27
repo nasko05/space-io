@@ -2,7 +2,7 @@ use age::secrecy::SecretString;
 
 use crate::crypto::age_io;
 use crate::error::AppResult;
-use crate::space::git::commit_all;
+use crate::space::git::commit_paths;
 use crate::space::paths::{resolve_under, with_age_suffix};
 use crate::space::Space;
 
@@ -33,7 +33,11 @@ pub fn write_file(
     let summary = message
         .map(|m| m.to_string())
         .unwrap_or_else(|| format!("Edit: {rel_path}"));
-    space.with_repo(|repo| commit_all(repo, &summary))?;
+    let staged = on_disk
+        .strip_prefix(&root)
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|_| on_disk.clone());
+    space.with_repo(|repo| commit_paths(repo, &summary, [staged]))?;
 
     let updated = std::fs::metadata(&on_disk)
         .and_then(|m| m.modified())

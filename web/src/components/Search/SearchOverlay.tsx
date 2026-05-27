@@ -1,4 +1,4 @@
-import { ChangeEvent, useEffect, useRef, useState } from 'react';
+import { ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { api, SearchHit } from '../../api/client';
 import { Search } from '../icons/Icon';
 import styles from './SearchOverlay.module.css';
@@ -83,6 +83,18 @@ export function SearchOverlay({ open, onClose, onSelect }: Props) {
     }
   }
 
+  // Build the highlight regex once per query rather than once per (hit ×
+  // field). With 24 hits × 2 fields per hit, the old highlight() was
+  // re-compiling the regex 48 times per render of the results pane.
+  const highlightPattern = useMemo(() => {
+    const tokens = query
+      .trim()
+      .split(/\s+/)
+      .filter((t) => t.length > 0);
+    if (tokens.length === 0) return null;
+    return new RegExp(`(${tokens.map(escapeRegex).join('|')})`, 'gi');
+  }, [query]);
+
   if (!open) return null;
 
   return (
@@ -126,9 +138,9 @@ export function SearchOverlay({ open, onClose, onSelect }: Props) {
                 onMouseEnter={() => setActiveIndex(i)}
                 onClick={() => onSelect(hit.path)}
               >
-                <div className={styles.hitTitle}>{highlight(title, query)}</div>
+                <div className={styles.hitTitle}>{highlight(title, highlightPattern)}</div>
                 <div className={styles.hitPath}>{hit.path}</div>
-                <div className={styles.hitSnippet}>{highlight(hit.snippet, query)}</div>
+                <div className={styles.hitSnippet}>{highlight(hit.snippet, highlightPattern)}</div>
               </button>
             );
           })}
@@ -145,16 +157,16 @@ export function SearchOverlay({ open, onClose, onSelect }: Props) {
   );
 }
 
-function highlight(text: string, query: string): React.ReactNode {
-  const tokens = query
-    .trim()
-    .split(/\s+/)
-    .filter((t) => t.length > 0);
-  if (tokens.length === 0) return text;
-  const pattern = new RegExp(`(${tokens.map(escapeRegex).join('|')})`, 'gi');
+/** Split `text` around the capture group in `pattern`. When the pattern has
+ * a capturing group, `String.split` interleaves matches and non-matches —
+ * odd-indexed entries are always the matches, which lets us highlight
+ * without re-running `test()` (which had a subtle lastIndex bug on the
+ * global flag). */
+function highlight(text: string, pattern: RegExp | null): React.ReactNode {
+  if (!pattern) return text;
   const pieces = text.split(pattern);
   return pieces.map((p, i) =>
-    pattern.test(p) ? (
+    i % 2 === 1 ? (
       <mark key={i} className={styles.mark}>
         {p}
       </mark>

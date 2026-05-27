@@ -201,7 +201,17 @@ export function Reader({
     if (mode === 'edit' || mode === 'split') textareaRef.current?.focus();
   }, [mode]);
 
-  const allTitles = useMemo(() => Array.from(titleToPath.keys()), [titleToPath]);
+  // Build paired (original, lowered) titles once per `titleToPath` change so
+  // the autocomplete filter doesn't lowercase every title on every keystroke
+  // — the old code did N string allocations per character typed inside a
+  // wikilink, which was the noticeable hitch with 1000+ notes.
+  const titleIndex = useMemo(() => {
+    const list: { title: string; lower: string }[] = [];
+    for (const t of titleToPath.keys()) {
+      list.push({ title: t, lower: t.toLowerCase() });
+    }
+    return list;
+  }, [titleToPath]);
 
   function recomputeAutocomplete(value: string, caret: number) {
     // Find the most recent `[[` to the left of the caret with no closing `]]`
@@ -222,9 +232,13 @@ export function Reader({
           return;
         }
         const q = between.toLowerCase();
-        const hits = allTitles
-          .filter((t) => t.toLowerCase().includes(q))
-          .slice(0, WIKILINK_MAX_SUGGESTIONS);
+        const hits: string[] = [];
+        for (const entry of titleIndex) {
+          if (entry.lower.includes(q)) {
+            hits.push(entry.title);
+            if (hits.length >= WIKILINK_MAX_SUGGESTIONS) break;
+          }
+        }
         if (hits.length === 0) {
           setAc(EMPTY_AC);
           return;
@@ -310,17 +324,47 @@ export function Reader({
     [flush, onSelectFile, onWikilinkMiss, titleToPath],
   );
 
-  const segments = path.split('/');
-  const fileName = segments[segments.length - 1] ?? path;
-  const folderSegments = segments.slice(0, -1);
+  // The rail is memoized — keep these callbacks referentially stable so it
+  // doesn't re-render on every keystroke.
+  const railSelectFile = useCallback(
+    (p: string) => {
+      void flush();
+      onSelectFile(p);
+    },
+    [flush, onSelectFile],
+  );
+  const railOpenVault = useCallback(() => {
+    void flush();
+    onOpenVault();
+  }, [flush, onOpenVault]);
 
-  const titleFromContent = extractTitle(content);
+  const { fileName, folderSegments } = useMemo(() => {
+    const segments = path.split('/');
+    return {
+      fileName: segments[segments.length - 1] ?? path,
+      folderSegments: segments.slice(0, -1),
+    };
+  }, [path]);
+
+  // Derived values from `content` re-run on every keystroke. The regex and
+  // tokenization passes are cheap individually but compound as the note
+  // grows; memoizing trims a few ms off the typing-latency budget.
+  const titleFromContent = useMemo(() => extractTitle(content), [content]);
+  const wordCount = useMemo(() => countWords(content), [content]);
+  const bodySource = useMemo(
+    () => (mode === 'preview' ? stripFirstH1(content) : ''),
+    [content, mode],
+  );
+  const linkedTitles = useMemo(
+    () =>
+      mode === 'preview' ? backlinkableTitles(titleFromContent, content, titleToPath) : [],
+    [content, mode, titleFromContent, titleToPath],
+  );
+
   const headlineTitle = titleFromContent ?? fileNameToTitle(fileName);
   const titleParts = splitTitle(headlineTitle);
-  const bodySource = stripFirstH1(content);
-  const wordCount = countWords(content);
   const readMin = Math.max(1, Math.round(wordCount / 220));
-  const isEmpty = content.trim().length === 0;
+  const isEmpty = content.length === 0 || content.trim().length === 0;
   const saveLabel = saveStatusLabel(status);
 
   // Same editor JSX is reused in single-pane edit and the left side of
@@ -403,15 +447,9 @@ export function Reader({
           selectedDay={selectedDay}
           onClearSelectedDay={onClearSelectedDay}
           onNewEntry={onNewEntry}
-          onSelectFile={(p) => {
-            void flush();
-            onSelectFile(p);
-          }}
+          onSelectFile={railSelectFile}
           onSelectDay={onSelectDay}
-          onOpenVault={() => {
-            void flush();
-            onOpenVault();
-          }}
+          onOpenVault={railOpenVault}
           onOpenPasskey={onOpenPasskey}
           hasPasskey={hasPasskey}
           activeSurface="reader"
@@ -539,28 +577,22 @@ export function Reader({
                     </div>
                   )}
 
-                  {mode === 'preview' ? (
-                    <Markdown source={bodySource} onWikilinkClick={handleWikilinkClick} />
-                  ) : (
-                    editorPane
-                  )}
-
-                  {mode === 'preview' && !isEmpty && backlinkableTitles(titleFromContent, content, titleToPath).length > 0 && (
-                    <div className={styles.linkedFrom}>
-                      <Link size={12} />
-                      <span className={styles.linkedLabel}>Linked notes</span>
-                      {backlinkableTitles(titleFromContent, content, titleToPath).map((t) => (
-                        <button
-                          key={t}
-                          type="button"
-                          className={styles.linkedLink}
-                          onClick={() => handleWikilinkClick(t)}
-                        >
-                          {t}
-                        </button>
-                      ))}
-                    </div>
-                  )}
+                {mode === 'preview' && !isEmpty && linkedTitles.length > 0 && (
+                  <div className={styles.linkedFrom}>
+                    <Link size={12} />
+                    <span className={styles.linkedLabel}>Linked notes</span>
+                    {linkedTitles.map((t) => (
+                      <button
+                        key={t}
+                        type="button"
+                        className={styles.linkedLink}
+                        onClick={() => handleWikilinkClick(t)}
+                      >
+                        {t}
+                      </button>
+                    ))}
+                  </div>
+                )}
                 </article>
               </div>
             )}

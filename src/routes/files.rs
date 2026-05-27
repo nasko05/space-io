@@ -29,9 +29,12 @@ pub fn router() -> Router<AppState> {
         .route("/files/history", get(get_history))
         .route("/files/rollback", post(post_rollback))
         .route("/files/move", post(post_move))
+        .route("/files/move/bulk", post(post_move_bulk))
         .route("/files/delete", delete(delete_file))
+        .route("/files/delete/bulk", delete(delete_files_bulk))
         .route("/files/mkdir", post(post_mkdir))
         .route("/files/meta", get(get_meta).put(put_meta))
+        .route("/files/meta/bulk", put(put_meta_bulk))
 }
 
 /// Run blocking work (file I/O, age decrypt, git) on the dedicated
@@ -366,6 +369,41 @@ async fn post_move(
 }
 
 #[derive(Deserialize)]
+struct MovePair {
+    from: String,
+    to: String,
+}
+
+#[derive(Deserialize)]
+struct MoveBulkRequest {
+    moves: Vec<MovePair>,
+}
+
+#[derive(Serialize)]
+struct MoveBulkResponse {
+    results: Vec<MoveResponse>,
+}
+
+async fn post_move_bulk(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Json(req): Json<MoveBulkRequest>,
+) -> AppResult<Json<MoveBulkResponse>> {
+    let (pass, space) = require_session(&state, &jar)?;
+    let pairs: Vec<(String, String)> = req.moves.into_iter().map(|m| (m.from, m.to)).collect();
+    let results = blocking(move || rename::rename_paths_bulk(&space, &pass, pairs)).await?;
+    Ok(Json(MoveBulkResponse {
+        results: results
+            .into_iter()
+            .map(|r| MoveResponse {
+                path: r.path,
+                is_directory: r.is_directory,
+            })
+            .collect(),
+    }))
+}
+
+#[derive(Deserialize)]
 struct DeleteRequest {
     path: String,
 }
@@ -384,6 +422,34 @@ async fn delete_file(
     let r = blocking(move || delete_mod::delete_to_trash(&space, &pass, &req.path)).await?;
     Ok(Json(DeleteResponse {
         trash_path: r.trash_path,
+    }))
+}
+
+#[derive(Deserialize)]
+struct DeleteBulkRequest {
+    paths: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct DeleteBulkResponse {
+    results: Vec<DeleteResponse>,
+}
+
+async fn delete_files_bulk(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Json(req): Json<DeleteBulkRequest>,
+) -> AppResult<Json<DeleteBulkResponse>> {
+    let (pass, space) = require_session(&state, &jar)?;
+    let results =
+        blocking(move || delete_mod::delete_to_trash_bulk(&space, &pass, req.paths)).await?;
+    Ok(Json(DeleteBulkResponse {
+        results: results
+            .into_iter()
+            .map(|r| DeleteResponse {
+                trash_path: r.trash_path,
+            })
+            .collect(),
     }))
 }
 
@@ -417,8 +483,15 @@ async fn get_meta(State(state): State<AppState>, jar: CookieJar) -> AppResult<Js
     let idx = blocking(move || meta::load(&space, &pass)).await?;
     let meta = idx
         .paths
-        .into_iter()
-        .map(|(k, v)| (k, MetaItem { tags: v.tags }))
+        .iter()
+        .map(|(k, v)| {
+            (
+                k.clone(),
+                MetaItem {
+                    tags: v.tags.clone(),
+                },
+            )
+        })
         .collect();
     Ok(Json(MetaResponse { meta }))
 }
@@ -436,5 +509,31 @@ async fn put_meta(
 ) -> AppResult<StatusCode> {
     let (pass, space) = require_session(&state, &jar)?;
     blocking(move || meta::set_tags(&space, &pass, &req.path, req.tags)).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+struct MetaUpdate {
+    path: String,
+    tags: Vec<String>,
+}
+
+#[derive(Deserialize)]
+struct PutMetaBulkRequest {
+    updates: Vec<MetaUpdate>,
+}
+
+/// Apply a batch of tag updates atomically. One decrypt + one encrypt + one
+/// git commit, regardless of how many files are touched — replacing the
+/// "loop with N round-trips" pattern the UI used before.
+async fn put_meta_bulk(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Json(req): Json<PutMetaBulkRequest>,
+) -> AppResult<StatusCode> {
+    let (pass, space) = require_session(&state, &jar)?;
+    let updates: Vec<(String, Vec<String>)> =
+        req.updates.into_iter().map(|u| (u.path, u.tags)).collect();
+    blocking(move || meta::set_tags_bulk(&space, &pass, updates)).await?;
     Ok(StatusCode::NO_CONTENT)
 }
