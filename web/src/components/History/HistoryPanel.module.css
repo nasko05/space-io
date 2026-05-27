@@ -164,3 +164,29 @@
   padding: 1px 6px;
   border-radius: 999px;
 }
+
+.restoreBtn {
+  flex-shrink: 0;
+  align-self: center;
+  font-family: var(--font-sans);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  color: var(--ink-2);
+  background: transparent;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  padding: 3px 10px;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+
+.restoreBtn:hover:not(:disabled) {
+  background: var(--warm);
+  color: var(--ink);
+  border-color: var(--accent-soft);
+}
+
+.restoreBtn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}

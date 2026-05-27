@@ -12,8 +12,8 @@ use axum::routing::delete;
 use crate::error::{AppError, AppResult};
 use crate::routes::auth::require_session;
 use crate::space::{
-    create, delete as delete_mod, download, excerpt, history, meta, mkdir, read, rename, tree,
-    upload, write,
+    create, delete as delete_mod, download, excerpt, history, meta, mkdir, read, rename, rollback,
+    tree, upload, write,
 };
 use crate::state::AppState;
 
@@ -27,6 +27,7 @@ pub fn router() -> Router<AppState> {
         .route("/files/upload", post(post_upload))
         .route("/files/download", get(get_download))
         .route("/files/history", get(get_history))
+        .route("/files/rollback", post(post_rollback))
         .route("/files/move", post(post_move))
         .route("/files/delete", delete(delete_file))
         .route("/files/mkdir", post(post_mkdir))
@@ -312,6 +313,31 @@ async fn get_history(
         })
         .collect();
     Ok(Json(HistoryResponse { entries }))
+}
+
+#[derive(Deserialize)]
+struct RollbackRequest {
+    path: String,
+    commit: String,
+}
+
+#[derive(Serialize)]
+struct RollbackResponse {
+    path: String,
+    updated: String,
+}
+
+async fn post_rollback(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Json(req): Json<RollbackRequest>,
+) -> AppResult<Json<RollbackResponse>> {
+    let (pass, space) = require_session(&state, &jar)?;
+    let r = blocking(move || rollback::rollback_to(&space, &pass, &req.path, &req.commit)).await?;
+    Ok(Json(RollbackResponse {
+        path: r.path,
+        updated: r.updated,
+    }))
 }
 
 #[derive(Deserialize)]

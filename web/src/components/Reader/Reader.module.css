@@ -175,11 +175,34 @@
 .article {
   width: 100%;
   max-width: 680px;
-  padding: 52px 48px 96px;
+  /* Extra-generous bottom padding so the last line of a long note can be
+     scrolled up to the middle of the viewport for comfortable reading,
+     and so it never sits flush against the scrollbar edge. */
+  padding: 52px 48px 30vh;
   font-family: var(--font-serif);
   color: var(--ink);
   line-height: 1.6;
   font-size: 17px;
+}
+
+/* Side-by-side editor + preview. Each pane gets its own .column so the
+ * two halves scroll independently; the article max-width relaxes so a
+ * 680px column doesn't push the text into a narrow ribbon. */
+.splitRow {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  min-width: 0;
+  min-height: 0;
+}
+
+.splitPaneLeft {
+  border-right: 1px solid var(--rule);
+}
+
+.articleSplit {
+  max-width: none;
+  padding: 28px 32px 28vh;
 }
 
 .dateline {

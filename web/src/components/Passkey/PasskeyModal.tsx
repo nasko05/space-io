@@ -197,6 +197,25 @@ export function PasskeyModal({ open, email, owner, hasPasskey, onClose, onChange
 
         {phase.kind === 'error' && <div className={styles.error}>{phase.message}</div>}
         {phase.kind === 'done' && <div className={styles.success}>{phase.message}</div>}
+
+        {/* Diagnostic footer — quietly shows the page context the WebAuthn
+            call will use, so when a SecurityError comes back the user can
+            see exactly what we tried. */}
+        {typeof window !== 'undefined' && (
+          <div className={styles.diagnostic}>
+            <span>
+              origin <code>{window.location.origin}</code>
+            </span>
+            <span>·</span>
+            <span>
+              rp.id <code>{window.location.hostname || '(empty)'}</code>
+            </span>
+            <span>·</span>
+            <span>
+              secure <code>{String(window.isSecureContext)}</code>
+            </span>
+          </div>
+        )}
       </div>
     </div>
   );

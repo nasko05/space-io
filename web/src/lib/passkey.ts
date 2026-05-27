@@ -36,16 +36,26 @@ export function isPasskeySupported(): boolean {
 }
 
 export type WebAuthnStatus =
-  | { ok: true }
+  | { ok: true; origin: string; rpId: string; isLoopback: boolean }
   | {
       ok: false;
       reason:
         | 'unsupported'
         | 'insecure-context'
         | 'ip-host'
+        | 'cross-origin-frame'
         | 'ssr';
       message: string;
     };
+
+function isInsideCrossOriginFrame(): boolean {
+  try {
+    return window.top !== null && window.top !== window;
+  } catch {
+    // Accessing window.top across origins throws — that's the definition.
+    return true;
+  }
+}
 
 /** Inspect the runtime for the conditions WebAuthn needs *before* we call
  *  into `navigator.credentials`. Surfacing this up-front lets the UI explain
@@ -71,9 +81,18 @@ export function webauthnStatus(): WebAuthnStatus {
         `Passkeys require a secure context. The current origin (${window.location.protocol}//${window.location.host}) is plain HTTP. Open the app over HTTPS, or reach it at 127.0.0.1 via the SSH tunnel.`,
     };
   }
+  if (isInsideCrossOriginFrame()) {
+    return {
+      ok: false,
+      reason: 'cross-origin-frame',
+      message:
+        'Passkeys cannot be used from a cross-origin iframe without an explicit `allow="publickey-credentials-create; publickey-credentials-get"` on the embedding frame. Open the app in its own tab.',
+    };
+  }
   const host = window.location.hostname;
+  const origin = window.location.origin;
   if (host === 'localhost' || host === '127.0.0.1' || host === '::1') {
-    return { ok: true };
+    return { ok: true, origin, rpId: host, isLoopback: true };
   }
   const isIpV4 = /^\d{1,3}(\.\d{1,3}){3}$/.test(host);
   const isIpV6 = host.includes(':') || host.startsWith('[');
@@ -85,7 +104,7 @@ export function webauthnStatus(): WebAuthnStatus {
         `Passkeys need a domain name as the relying-party ID; '${host}' is an IP. Reach the app via a domain, or the SSH tunnel at 127.0.0.1.`,
     };
   }
-  return { ok: true };
+  return { ok: true, origin, rpId: host, isLoopback: false };
 }
 
 /** Throw a single Error explaining why WebAuthn can't run, if it can't. */
@@ -97,8 +116,15 @@ function ensureWebAuthnUsable(): void {
 /** Wrap the underlying browser error so the modal sees something more
  *  useful than the bare DOMException's default message. NotAllowedError
  *  in particular is overloaded — it covers user cancel, timeout, the PRF
- *  extension being unsupported by the authenticator, and a few more. */
+ *  extension being unsupported by the authenticator, and a few more.
+ *  Also dumps the page context (origin + rp.id) so the user can paste it
+ *  into a bug report without us having to ask "what URL are you on?". */
 function wrapWebAuthnError(stage: 'create' | 'get', err: unknown): Error {
+  // Pull the rp.id we tried + the origin so the message says exactly what
+  // failed, not just "something failed".
+  const origin = typeof window !== 'undefined' ? window.location.origin : '<no-window>';
+  const rpId = typeof window !== 'undefined' ? window.location.hostname : '<no-window>';
+
   if (err instanceof DOMException) {
     const name = err.name;
     const detail = err.message ? ` (${err.message})` : '';
@@ -108,7 +134,7 @@ function wrapWebAuthnError(stage: 'create' | 'get', err: unknown): Error {
         ? ' — cancelled, timed out, or the authenticator refused this site.'
         : ' — cancelled, timed out, or no matching credential on the authenticator.';
     } else if (name === 'SecurityError') {
-      hint = ' — the origin or relying-party ID is not allowed in this context.';
+      hint = ` — the browser rejected rp.id='${rpId}' for origin ${origin}. Common causes: the page is in a cross-origin iframe, rp.id is not a registrable suffix of the origin, or the origin is not actually secure despite isSecureContext.`;
     } else if (name === 'InvalidStateError') {
       hint = stage === 'create'
         ? ' — this authenticator already has a credential for this account.'
@@ -119,11 +145,15 @@ function wrapWebAuthnError(stage: 'create' | 'get', err: unknown): Error {
       hint = ' — the request was aborted.';
     }
     // eslint-disable-next-line no-console
-    console.error(`WebAuthn ${stage} failed:`, name, err);
+    console.error(
+      `WebAuthn ${stage} failed:`,
+      { name, origin, rpId, isSecureContext: window.isSecureContext, inFrame: isInsideCrossOriginFrame() },
+      err,
+    );
     return new Error(`${name}${hint}${detail}`);
   }
   // eslint-disable-next-line no-console
-  console.error(`WebAuthn ${stage} failed:`, err);
+  console.error(`WebAuthn ${stage} failed:`, { origin, rpId }, err);
   return err instanceof Error ? err : new Error(String(err));
 }
 
