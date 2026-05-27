@@ -238,7 +238,56 @@ export const api = {
       }),
     );
   },
+  async move(from: string, to: string): Promise<{ path: string; is_directory: boolean }> {
+    return json(
+      await fetch('/api/files/move', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ from, to }),
+      }),
+    );
+  },
+  async deleteFile(path: string): Promise<{ trash_path: string }> {
+    return json(
+      await fetch('/api/files/delete', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ path }),
+      }),
+    );
+  },
+  async mkdir(path: string): Promise<void> {
+    await json(
+      await fetch('/api/files/mkdir', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ path }),
+      }),
+    );
+  },
+  async meta(): Promise<{ meta: MetaMap }> {
+    return json(await fetch('/api/files/meta', { credentials: 'same-origin' }));
+  },
+  async setTags(path: string, tags: string[]): Promise<void> {
+    await json(
+      await fetch('/api/files/meta', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ path, tags }),
+      }),
+    );
+  },
 };
+
+export interface MetaItem {
+  tags: string[];
+}
+
+export type MetaMap = Record<string, MetaItem>;
 
 export function firstMarkdownLeaf(tree: TreeNode[]): TreeFile | null {
   for (const node of tree) {

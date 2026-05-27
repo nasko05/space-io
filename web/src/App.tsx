@@ -11,6 +11,7 @@ import {
   api,
   ExcerptMap,
   firstMarkdownLeaf,
+  MetaMap,
   ReadFile,
   TreeFile,
   TreeNode,
@@ -40,6 +41,7 @@ export function App() {
   const [view, setView] = useState<View>({ kind: 'loading' });
   const [tree, setTree] = useState<TreeNode[]>([]);
   const [excerpts, setExcerpts] = useState<ExcerptMap>({});
+  const [meta, setMeta] = useState<MetaMap>({});
   const [now, setNow] = useState(() => new Date());
   const [hasPasskey, setHasPasskey] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -85,6 +87,15 @@ export function App() {
     }
   }, []);
 
+  const refreshMeta = useCallback(async () => {
+    try {
+      const { meta } = await api.meta();
+      setMeta(meta);
+    } catch (err) {
+      console.error('meta failed', err);
+    }
+  }, []);
+
   const refreshStatus = useCallback(async () => {
     try {
       const status = await api.status();
@@ -101,6 +112,7 @@ export function App() {
       try {
         const t = await refreshTree();
         void refreshExcerpts();
+        void refreshMeta();
         const leaf = firstMarkdownLeaf(t);
         if (!leaf) {
           const { path } = await api.create(DEFAULT_NEW_FOLDER);
@@ -128,7 +140,7 @@ export function App() {
         });
       }
     },
-    [refreshExcerpts, refreshTree],
+    [refreshExcerpts, refreshMeta, refreshTree],
   );
 
   useEffect(() => {
@@ -170,6 +182,7 @@ export function App() {
     }
     setTree([]);
     setExcerpts({});
+    setMeta({});
     previousPathRef.current = null;
     setSearchOpen(false);
     setUploadOpen(false);
@@ -224,11 +237,11 @@ export function App() {
       surface: { kind: 'vault', previousPath: previousPathRef.current },
     });
     try {
-      await Promise.all([refreshTree(), refreshExcerpts()]);
+      await Promise.all([refreshTree(), refreshExcerpts(), refreshMeta()]);
     } catch (err) {
       console.error('failed to refresh vault', err);
     }
-  }, [refreshExcerpts, refreshTree, view]);
+  }, [refreshExcerpts, refreshMeta, refreshTree, view]);
 
   const backFromVault = useCallback(async () => {
     if (view.kind !== 'unlocked') return;
@@ -316,6 +329,100 @@ export function App() {
     await refreshTree();
     void refreshExcerpts();
   }, [refreshExcerpts, refreshTree]);
+
+  // ---- Vault CRUD handlers (Phase 4) ----
+
+  const handleRenameFile = useCallback(
+    async (from: string, to: string) => {
+      try {
+        await api.move(from, to);
+        await refreshTree();
+        void refreshMeta();
+      } catch (err) {
+        setToast(err instanceof Error ? err.message : 'rename failed');
+        throw err;
+      }
+    },
+    [refreshMeta, refreshTree],
+  );
+
+  const handleMoveFiles = useCallback(
+    async (paths: string[], destinationFolder: string) => {
+      // Issue serially so a failure halfway through is easier to recover from.
+      try {
+        for (const from of paths) {
+          const name = from.split('/').pop() ?? from;
+          const to = destinationFolder ? `${destinationFolder}/${name}` : name;
+          if (from === to) continue;
+          await api.move(from, to);
+        }
+        await refreshTree();
+        void refreshMeta();
+      } catch (err) {
+        await refreshTree();
+        void refreshMeta();
+        setToast(err instanceof Error ? err.message : 'move failed');
+        throw err;
+      }
+    },
+    [refreshMeta, refreshTree],
+  );
+
+  const handleCreateFolder = useCallback(
+    async (path: string) => {
+      try {
+        await api.mkdir(path);
+        await refreshTree();
+      } catch (err) {
+        setToast(err instanceof Error ? err.message : 'mkdir failed');
+        throw err;
+      }
+    },
+    [refreshTree],
+  );
+
+  const handleDeleteFiles = useCallback(
+    async (paths: string[]) => {
+      try {
+        for (const p of paths) {
+          await api.deleteFile(p);
+        }
+        await refreshTree();
+        void refreshExcerpts();
+        void refreshMeta();
+      } catch (err) {
+        await refreshTree();
+        setToast(err instanceof Error ? err.message : 'delete failed');
+        throw err;
+      }
+    },
+    [refreshExcerpts, refreshMeta, refreshTree],
+  );
+
+  const handleSetTags = useCallback(
+    async (paths: string[], tags: string[]) => {
+      try {
+        for (const p of paths) {
+          await api.setTags(p, tags);
+        }
+        // Patch local state immediately so the UI doesn't blink while the
+        // server walk catches up.
+        setMeta((cur) => {
+          const next = { ...cur };
+          for (const p of paths) {
+            if (tags.length === 0) delete next[p];
+            else next[p] = { tags };
+          }
+          return next;
+        });
+      } catch (err) {
+        void refreshMeta();
+        setToast(err instanceof Error ? err.message : 'tag update failed');
+        throw err;
+      }
+    },
+    [refreshMeta],
+  );
 
   const onWikilinkMiss = useCallback((title: string) => {
     setToast(`No note titled "${title}" — yet.`);
@@ -429,6 +536,7 @@ export function App() {
         <HearthVault
           tree={tree}
           excerpts={excerpts}
+          meta={meta}
           calendar={calendar}
           today={today}
           onSelectFile={(p) => {
@@ -439,6 +547,12 @@ export function App() {
           onSelectDay={selectDay}
           onNewEntry={newEntry}
           onBackToReader={backFromVault}
+          onDownloadFile={(f) => setDownloadFile(f)}
+          onRenameFile={handleRenameFile}
+          onMoveFiles={handleMoveFiles}
+          onCreateFolder={handleCreateFolder}
+          onDeleteFiles={handleDeleteFiles}
+          onSetTags={handleSetTags}
           onOpenPasskey={() => setPasskeyOpen(true)}
           hasPasskey={hasPasskey}
           theme={theme}

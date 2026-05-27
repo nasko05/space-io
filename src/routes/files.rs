@@ -7,9 +7,14 @@ use axum::{Json, Router};
 use axum_extra::extract::cookie::CookieJar;
 use serde::{Deserialize, Serialize};
 
+use axum::routing::delete;
+
 use crate::error::{AppError, AppResult};
 use crate::routes::auth::require_passphrase;
-use crate::space::{create, download, excerpt, history, read, tree, upload, write};
+use crate::space::{
+    create, delete as delete_mod, download, excerpt, history, meta, mkdir, read, rename, tree,
+    upload, write,
+};
 use crate::state::AppState;
 
 pub fn router() -> Router<AppState> {
@@ -22,6 +27,10 @@ pub fn router() -> Router<AppState> {
         .route("/files/upload", post(post_upload))
         .route("/files/download", get(get_download))
         .route("/files/history", get(get_history))
+        .route("/files/move", post(post_move))
+        .route("/files/delete", delete(delete_file))
+        .route("/files/mkdir", post(post_mkdir))
+        .route("/files/meta", get(get_meta).put(put_meta))
 }
 
 #[derive(Serialize)]
@@ -280,4 +289,103 @@ async fn get_history(
         })
         .collect();
     Ok(Json(HistoryResponse { entries }))
+}
+
+#[derive(Deserialize)]
+struct MoveRequest {
+    from: String,
+    to: String,
+}
+
+#[derive(Serialize)]
+struct MoveResponse {
+    path: String,
+    is_directory: bool,
+}
+
+async fn post_move(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Json(req): Json<MoveRequest>,
+) -> AppResult<Json<MoveResponse>> {
+    let pass = require_passphrase(&state, &jar)?;
+    let r = rename::rename_path(&state.space, &pass, &req.from, &req.to)?;
+    Ok(Json(MoveResponse {
+        path: r.path,
+        is_directory: r.is_directory,
+    }))
+}
+
+#[derive(Deserialize)]
+struct DeleteRequest {
+    path: String,
+}
+
+#[derive(Serialize)]
+struct DeleteResponse {
+    trash_path: String,
+}
+
+async fn delete_file(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Json(req): Json<DeleteRequest>,
+) -> AppResult<Json<DeleteResponse>> {
+    let pass = require_passphrase(&state, &jar)?;
+    let r = delete_mod::delete_to_trash(&state.space, &pass, &req.path)?;
+    Ok(Json(DeleteResponse {
+        trash_path: r.trash_path,
+    }))
+}
+
+#[derive(Deserialize)]
+struct MkdirRequest {
+    path: String,
+}
+
+async fn post_mkdir(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Json(req): Json<MkdirRequest>,
+) -> AppResult<StatusCode> {
+    require_passphrase(&state, &jar)?;
+    mkdir::create_folder(&state.space, &req.path)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Serialize)]
+struct MetaItem {
+    tags: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct MetaResponse {
+    meta: std::collections::BTreeMap<String, MetaItem>,
+}
+
+async fn get_meta(State(state): State<AppState>, jar: CookieJar) -> AppResult<Json<MetaResponse>> {
+    let pass = require_passphrase(&state, &jar)?;
+    let idx = meta::load(&state.space, &pass)?;
+    let meta = idx
+        .paths
+        .into_iter()
+        .map(|(k, v)| (k, MetaItem { tags: v.tags }))
+        .collect();
+    Ok(Json(MetaResponse { meta }))
+}
+
+#[derive(Deserialize)]
+struct PutMetaRequest {
+    path: String,
+    tags: Vec<String>,
+}
+
+async fn put_meta(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Json(req): Json<PutMetaRequest>,
+) -> AppResult<StatusCode> {
+    let pass = require_passphrase(&state, &jar)?;
+    meta::set_tags(&state.space, &pass, &req.path, req.tags)?;
+    Ok(StatusCode::NO_CONTENT)
 }
