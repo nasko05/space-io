@@ -352,7 +352,7 @@ export function Reader({
   const titleFromContent = useMemo(() => extractTitle(content), [content]);
   const wordCount = useMemo(() => countWords(content), [content]);
   const bodySource = useMemo(
-    () => (mode === 'preview' ? stripFirstH1(content) : ''),
+    () => (mode === 'preview' || mode === 'split' ? stripFirstH1(content) : ''),
     [content, mode],
   );
   const linkedTitles = useMemo(
@@ -563,7 +563,7 @@ export function Reader({
 
                   {mode === 'edit' && isEmpty && (
                     <div className={styles.prompts}>
-                      <div className={styles.promptsLabel}>Three prompts, in case you're stuck</div>
+                      <div className={styles.promptsLabel}>Three prompts, in case you’re stuck</div>
                       {[
                         'What’s on the windowsill of your mind today?',
                         'Something small you noticed and want to keep.',
@@ -577,22 +577,28 @@ export function Reader({
                     </div>
                   )}
 
-                {mode === 'preview' && !isEmpty && linkedTitles.length > 0 && (
-                  <div className={styles.linkedFrom}>
-                    <Link size={12} />
-                    <span className={styles.linkedLabel}>Linked notes</span>
-                    {linkedTitles.map((t) => (
-                      <button
-                        key={t}
-                        type="button"
-                        className={styles.linkedLink}
-                        onClick={() => handleWikilinkClick(t)}
-                      >
-                        {t}
-                      </button>
-                    ))}
-                  </div>
-                )}
+                  {mode === 'edit' && editorPane}
+
+                  {mode === 'preview' && !isEmpty && (
+                    <Markdown source={bodySource} onWikilinkClick={handleWikilinkClick} />
+                  )}
+
+                  {mode === 'preview' && !isEmpty && linkedTitles.length > 0 && (
+                    <div className={styles.linkedFrom}>
+                      <Link size={12} />
+                      <span className={styles.linkedLabel}>Linked notes</span>
+                      {linkedTitles.map((t) => (
+                        <button
+                          key={t}
+                          type="button"
+                          className={styles.linkedLink}
+                          onClick={() => handleWikilinkClick(t)}
+                        >
+                          {t}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </article>
               </div>
             )}

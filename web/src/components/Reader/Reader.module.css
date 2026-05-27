@@ -200,6 +200,10 @@
   border-right: 1px solid var(--rule);
 }
 
+.splitPaneRight {
+  overflow: auto;
+}
+
 .articleSplit {
   max-width: none;
   padding: 28px 32px 28vh;
