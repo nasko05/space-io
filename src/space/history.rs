@@ -90,3 +90,51 @@ fn format_git_time(t: git2::Time) -> String {
     dt.format(&time::format_description::well_known::Rfc3339)
         .unwrap_or_default()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::space::test_helpers::make_space;
+
+    #[test]
+    fn empty_space_has_no_history() {
+        let (_dir, space, _pass) = make_space("p");
+        let h = file_history(&space, "missing.md").unwrap();
+        assert!(h.is_empty());
+    }
+
+    #[test]
+    fn returns_create_and_edit_for_one_file() {
+        let (_dir, space, pass) = make_space("p");
+        let r = crate::space::create::create_file(&space, &pass, "F", Some("Note")).unwrap();
+        crate::space::write::write_file(&space, &pass, &r.path, "edited content", None).unwrap();
+
+        let h = file_history(&space, &r.path).unwrap();
+        assert_eq!(h.len(), 2);
+        // Newest first.
+        assert!(h[0].message.starts_with("Edit:"));
+        assert!(h[1].message.starts_with("Create:"));
+    }
+
+    #[test]
+    fn does_not_include_commits_touching_other_paths() {
+        let (_dir, space, pass) = make_space("p");
+        crate::space::write::write_file(&space, &pass, "a.md", "x", None).unwrap();
+        crate::space::write::write_file(&space, &pass, "b.md", "y", None).unwrap();
+
+        let h_a = file_history(&space, "a.md").unwrap();
+        assert_eq!(h_a.len(), 1);
+        assert!(h_a[0].message.contains("a.md"));
+        assert!(!h_a[0].message.contains("b.md"));
+    }
+
+    #[test]
+    fn entries_have_author_and_rfc3339_time() {
+        let (_dir, space, pass) = make_space("p");
+        crate::space::write::write_file(&space, &pass, "n.md", "x", None).unwrap();
+        let h = file_history(&space, "n.md").unwrap();
+        assert_eq!(h[0].author, "hearth");
+        assert!(h[0].when.contains('T'));
+        assert_eq!(h[0].commit.len(), 40, "git oid is 40 hex chars");
+    }
+}
