@@ -13,7 +13,10 @@ const DocxRenderer = lazy(() => import('./DocxRenderer'));
 interface Props {
   file: TreeFile;
   calendar: CalendarView;
-  today: TodayEntry[];
+  entries: TodayEntry[];
+  entriesLabel: string;
+  selectedDay: number | null;
+  onClearSelectedDay: () => void;
   onSelectFile: (path: string) => void;
   onSelectDay: (day: number) => void;
   onNewEntry: () => void;
@@ -34,7 +37,10 @@ type FetchState =
 export function Preview({
   file,
   calendar,
-  today,
+  entries,
+  entriesLabel,
+  selectedDay,
+  onClearSelectedDay,
   onSelectFile,
   onSelectDay,
   onNewEntry,
@@ -92,7 +98,10 @@ export function Preview({
       <div className={styles.layout}>
         <HearthRail
           calendar={calendar}
-          today={today}
+          entries={entries}
+          entriesLabel={entriesLabel}
+          selectedDay={selectedDay}
+          onClearSelectedDay={onClearSelectedDay}
           onNewEntry={onNewEntry}
           onSelectFile={onSelectFile}
           onSelectDay={onSelectDay}

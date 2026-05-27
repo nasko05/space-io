@@ -69,6 +69,18 @@ export function entriesForToday(
   excerpts: ExcerptMap,
   currentPath: string | null,
 ): TodayEntry[] {
+  return entriesForDate(now, tree, excerpts, currentPath);
+}
+
+/** Markdown notes whose `updated` timestamp falls on the same calendar day as
+ *  `date`. Sorted newest first; the entry currently open in the Reader is
+ *  flagged with `current: true`. */
+export function entriesForDate(
+  date: Date,
+  tree: TreeNode[],
+  excerpts: ExcerptMap,
+  currentPath: string | null,
+): TodayEntry[] {
   const sameDay = (a: Date, b: Date) =>
     a.getFullYear() === b.getFullYear() &&
     a.getMonth() === b.getMonth() &&
@@ -76,7 +88,7 @@ export function entriesForToday(
 
   const files = flattenFiles(tree).filter((f) => f.kind === 'md' && f.updated);
   return files
-    .filter((f) => sameDay(new Date(f.updated), now))
+    .filter((f) => sameDay(new Date(f.updated), date))
     .sort((a, b) => new Date(b.updated).getTime() - new Date(a.updated).getTime())
     .map((f) => {
       const d = new Date(f.updated);
@@ -112,4 +124,9 @@ export function findFileForDay(
  *  Reader and is safe to feed to the create-file endpoint as a title. */
 export function dateTitle(year: number, month: number, day: number): string {
   return `${day} ${MONTHS[month]} ${year}`;
+}
+
+/** Short "27 May" label for the calendar's day-entries header. */
+export function shortDayLabel(month: number, day: number): string {
+  return `${day} ${MONTHS[month]}`;
 }

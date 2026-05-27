@@ -20,9 +20,8 @@ import {
 import {
   buildCalendar,
   CalendarView,
-  dateTitle,
-  entriesForToday,
-  findFileForDay,
+  entriesForDate,
+  shortDayLabel,
   TodayEntry,
 } from './lib/calendar';
 
@@ -53,6 +52,10 @@ export function App() {
   const [downloadFile, setDownloadFile] = useState<TreeFile | null>(null);
   const [passkeyOpen, setPasskeyOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  // Calendar selection. `null` means "show today" (the default); a number
+  // pins the rail's entry list to that day-of-month in the displayed
+  // calendar. Clicking the same day again clears the selection.
+  const [selectedDay, setSelectedDay] = useState<number | null>(null);
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     const stored = typeof window !== 'undefined' ? window.localStorage.getItem('hearth.theme') : null;
     return stored === 'dark' ? 'dark' : 'light';
@@ -365,40 +368,11 @@ export function App() {
     [openPreview, selectFile],
   );
 
-  const selectDay = useCallback(
-    async (day: number) => {
-      if (view.kind !== 'unlocked') return;
-      const year = now.getFullYear();
-      const month = now.getMonth();
-      const target = findFileForDay(tree, year, month, day);
-      if (target) {
-        void selectFile(target.path);
-        return;
-      }
-      // Nothing on this day yet — create a date-titled note in the year's
-      // Journal folder and drop straight into the editor. Works for past,
-      // present, and future days; collisions resolve to "(2)"-suffixed
-      // filenames on the server.
-      try {
-        const title = dateTitle(year, month, day);
-        const { path } = await api.create(`Journal/${year}`, title);
-        const file = await api.read(path);
-        await refreshTree();
-        void refreshExcerpts();
-        previousPathRef.current = path;
-        setView({
-          kind: 'unlocked',
-          owner: view.owner,
-          email: view.email,
-          surface: { kind: 'reader', file, initialMode: 'edit' },
-        });
-      } catch (err) {
-        console.error('failed to create entry for day', err);
-        setToast(err instanceof Error ? err.message : 'Could not open day');
-      }
-    },
-    [now, refreshExcerpts, refreshTree, selectFile, tree, view],
-  );
+  const selectDay = useCallback((day: number) => {
+    setSelectedDay((cur) => (cur === day ? null : day));
+  }, []);
+
+  const clearSelectedDay = useCallback(() => setSelectedDay(null), []);
 
   const onUploaded = useCallback(async () => {
     await refreshTree();
@@ -560,12 +534,26 @@ export function App() {
   }, [toast]);
 
   const calendar: CalendarView = useMemo(() => buildCalendar(now, tree), [now, tree]);
+  // If the calendar slides into a new month while a day is pinned (e.g. a
+  // long-running session ticks past midnight on the last of the month),
+  // drop the selection so we don't keep highlighting a day that no longer
+  // exists in the displayed grid.
+  useEffect(() => {
+    if (selectedDay != null && selectedDay > calendar.daysInMonth) {
+      setSelectedDay(null);
+    }
+  }, [calendar.daysInMonth, selectedDay]);
+
   const currentPath =
     view.kind === 'unlocked' && view.surface.kind === 'reader' ? view.surface.file.path : null;
-  const today: TodayEntry[] = useMemo(
-    () => entriesForToday(now, tree, excerpts, currentPath),
-    [now, tree, excerpts, currentPath],
+  const railDate =
+    selectedDay != null ? new Date(calendar.year, calendar.month, selectedDay) : now;
+  const railEntries: TodayEntry[] = useMemo(
+    () => entriesForDate(railDate, tree, excerpts, currentPath),
+    [railDate, tree, excerpts, currentPath],
   );
+  const railLabel: string =
+    selectedDay != null ? shortDayLabel(calendar.month, selectedDay) : 'Today';
   const titleToPath = useMemo(() => buildTitleMap(tree, excerpts), [tree, excerpts]);
 
   if (view.kind === 'loading') return <LoadingScreen />;
@@ -605,7 +593,10 @@ export function App() {
           updated={surface.file.updated}
           initialMode={surface.initialMode}
           calendar={calendar}
-          today={today}
+          entries={railEntries}
+          entriesLabel={railLabel}
+          selectedDay={selectedDay}
+          onClearSelectedDay={clearSelectedDay}
           titleToPath={titleToPath}
           onSelectFile={selectFile}
           onSelectDay={selectDay}
@@ -627,7 +618,10 @@ export function App() {
           excerpts={excerpts}
           meta={meta}
           calendar={calendar}
-          today={today}
+          entries={railEntries}
+          entriesLabel={railLabel}
+          selectedDay={selectedDay}
+          onClearSelectedDay={clearSelectedDay}
           onSelectFile={(p) => {
             const file = findInTree(tree, p);
             if (file) onSelectVaultFile(file);
@@ -652,7 +646,10 @@ export function App() {
         <Preview
           file={surface.file}
           calendar={calendar}
-          today={today}
+          entries={railEntries}
+          entriesLabel={railLabel}
+          selectedDay={selectedDay}
+          onClearSelectedDay={clearSelectedDay}
           onSelectFile={selectFile}
           onSelectDay={selectDay}
           onNewEntry={newEntry}

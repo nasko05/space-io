@@ -6,6 +6,7 @@ import {
   Close,
   Download as DownloadIcon,
   FolderOpen,
+  MoreHorizontal,
   Moon,
   Pencil,
   Plus,
@@ -17,6 +18,7 @@ import { RenameDialog } from '../VaultDialogs/RenameDialog';
 import { MoveDialog } from '../VaultDialogs/MoveDialog';
 import { TagsDialog } from '../VaultDialogs/TagsDialog';
 import { DeleteConfirmDialog } from '../VaultDialogs/DeleteConfirmDialog';
+import { CreateFolderDialog } from '../VaultDialogs/CreateFolderDialog';
 import { ExcerptMap, MetaMap, TreeFile, TreeFolder, TreeNode } from '../../api/client';
 import { CalendarView, TodayEntry } from '../../lib/calendar';
 import styles from './HearthVault.module.css';
@@ -28,7 +30,10 @@ interface Props {
   excerpts: ExcerptMap;
   meta: MetaMap;
   calendar: CalendarView;
-  today: TodayEntry[];
+  entries: TodayEntry[];
+  entriesLabel: string;
+  selectedDay: number | null;
+  onClearSelectedDay: () => void;
   onSelectFile: (path: string) => void;
   onSelectDay: (day: number) => void;
   onNewEntry: () => void;
@@ -48,9 +53,11 @@ interface Props {
 type DialogState =
   | { kind: 'none' }
   | { kind: 'rename'; file: TreeFile }
+  | { kind: 'rename-folder'; folder: TreeFolder }
   | { kind: 'move'; paths: string[] }
   | { kind: 'tags'; paths: string[] }
-  | { kind: 'delete'; paths: string[] };
+  | { kind: 'delete'; paths: string[] }
+  | { kind: 'create-folder' };
 
 interface MenuState {
   open: boolean;
@@ -66,7 +73,10 @@ export function HearthVault({
   excerpts,
   meta,
   calendar,
-  today,
+  entries,
+  entriesLabel,
+  selectedDay,
+  onClearSelectedDay,
   onSelectFile,
   onSelectDay,
   onNewEntry,
@@ -202,6 +212,32 @@ export function HearthVault({
     setMenu({ open: true, x, y, items: fileContextItems(file) });
   }
 
+  function folderMenuItems(folder: TreeFolder): MenuItem[] {
+    return [
+      {
+        label: 'Rename folder…',
+        icon: <Pencil size={13} />,
+        onClick: () => setDialog({ kind: 'rename-folder', folder }),
+      },
+      {
+        label: 'Move folder to…',
+        icon: <FolderOpen size={13} />,
+        onClick: () => setDialog({ kind: 'move', paths: [folder.path] }),
+      },
+      { divider: true, label: '', onClick: () => {} },
+      {
+        label: 'Delete folder',
+        icon: <Close size={13} />,
+        destructive: true,
+        onClick: () => setDialog({ kind: 'delete', paths: [folder.path] }),
+      },
+    ];
+  }
+
+  function openFolderMenu(folder: TreeFolder, x: number, y: number) {
+    setMenu({ open: true, x, y, items: folderMenuItems(folder) });
+  }
+
   // ---- Drag-and-drop on shelves ----
 
   function onShelfDragOver(e: DragEvent<HTMLElement>, folderPath: string) {
@@ -241,6 +277,21 @@ export function HearthVault({
     await onRenameFile(file.path, newPath);
   }
 
+  async function handleRenameFolder(newName: string) {
+    if (dialog.kind !== 'rename-folder') return;
+    const folder = dialog.folder;
+    const parts = folder.path.split('/');
+    parts[parts.length - 1] = newName;
+    const newPath = parts.join('/');
+    // Backend's /api/files/move handles both files and folders.
+    await onRenameFile(folder.path, newPath);
+  }
+
+  async function handleCreateFolderDialog(parent: string, name: string) {
+    const path = parent ? `${parent}/${name}` : name;
+    await onCreateFolder(path);
+  }
+
   async function handleMove(destinationFolder: string) {
     if (dialog.kind !== 'move') return;
     await onMoveFiles(dialog.paths, destinationFolder);
@@ -277,6 +328,13 @@ export function HearthVault({
     );
   }, [dialog, tree]);
 
+  const folderRenameSiblings = useMemo(() => {
+    if (dialog.kind !== 'rename-folder') return new Set<string>();
+    return new Set(
+      siblingsOf(dialog.folder.path, tree).map((s) => s.toLowerCase()),
+    );
+  }, [dialog, tree]);
+
   return (
     <div className={styles.root}>
       <WindowChrome
@@ -301,7 +359,10 @@ export function HearthVault({
       <div className={styles.layout}>
         <HearthRail
           calendar={calendar}
-          today={today}
+          entries={entries}
+          entriesLabel={entriesLabel}
+          selectedDay={selectedDay}
+          onClearSelectedDay={onClearSelectedDay}
           onNewEntry={onNewEntry}
           onSelectFile={onSelectFile}
           onSelectDay={onSelectDay}
@@ -327,12 +388,8 @@ export function HearthVault({
               <button
                 type="button"
                 className={styles.viewBtn}
-                onClick={() => {
-                  const name = window.prompt('New folder name:');
-                  if (!name) return;
-                  void onCreateFolder(name.trim());
-                }}
-                title="Create a new top-level folder"
+                onClick={() => setDialog({ kind: 'create-folder' })}
+                title="Create a folder anywhere in the tree"
               >
                 <Plus size={12} /> New folder
               </button>
@@ -408,6 +465,18 @@ export function HearthVault({
                         see all →
                       </button>
                     )}
+                    <button
+                      type="button"
+                      className={styles.shelfMenuBtn}
+                      onClick={(e) => {
+                        const r = e.currentTarget.getBoundingClientRect();
+                        openFolderMenu(folder, r.right, r.bottom);
+                      }}
+                      aria-label={`Manage ${folder.name}`}
+                      title="Rename, move, or delete this folder"
+                    >
+                      <MoreHorizontal size={14} />
+                    </button>
                   </div>
 
                   {visible.length === 0 ? (
@@ -452,6 +521,23 @@ export function HearthVault({
           siblingNames={renameSiblings}
           onClose={() => setDialog({ kind: 'none' })}
           onRename={handleRename}
+        />
+      )}
+      {dialog.kind === 'rename-folder' && (
+        <RenameDialog
+          open
+          currentName={dialog.folder.name}
+          siblingNames={folderRenameSiblings}
+          onClose={() => setDialog({ kind: 'none' })}
+          onRename={handleRenameFolder}
+        />
+      )}
+      {dialog.kind === 'create-folder' && (
+        <CreateFolderDialog
+          open
+          tree={tree}
+          onClose={() => setDialog({ kind: 'none' })}
+          onCreate={handleCreateFolderDialog}
         />
       )}
       {dialog.kind === 'move' && (
