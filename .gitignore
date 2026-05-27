@@ -3,6 +3,7 @@
 /web/node_modules
 /web/tsconfig.tsbuildinfo
 /data
+/deploy/.env
 .DS_Store
 *.swp
 *.swo

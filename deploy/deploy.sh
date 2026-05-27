@@ -6,6 +6,51 @@
 
 set -euo pipefail
 
+# Auto-load deploy/.env (or $HEARTH_ENV_FILE, or whatever --env-file
+# points at) so you don't have to re-export HEARTH_KEYPAIR every
+# session. We do this BEFORE reading any HEARTH_* variables below.
+load_env_file() {
+  local target="$1"
+  [ -z "$target" ] && return 0
+  if [ ! -f "$target" ]; then
+    echo "error: env file not found: $target" >&2
+    exit 1
+  fi
+  # shellcheck disable=SC1090
+  set -a
+  source "$target"
+  set +a
+}
+
+# Pull --env-file off the front of the args first so it can supply
+# HEARTH_* defaults that the rest of the script reads.
+ENV_FILE="${HEARTH_ENV_FILE:-}"
+DEFAULT_ENV_FILE="$(dirname "$0")/.env"
+ENV_ARGS=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --env-file)
+      [ $# -ge 2 ] || { echo "error: --env-file needs a path" >&2; exit 1; }
+      ENV_FILE="$2"; shift 2 ;;
+    --env-file=*)
+      ENV_FILE="${1#--env-file=}"; shift ;;
+    --no-env-file)
+      ENV_FILE="-"; shift ;;
+    *)
+      ENV_ARGS+=("$1"); shift ;;
+  esac
+done
+
+if [ "$ENV_FILE" = "-" ]; then
+  : # explicitly disabled
+elif [ -n "$ENV_FILE" ]; then
+  load_env_file "$ENV_FILE"
+elif [ -f "$DEFAULT_ENV_FILE" ]; then
+  load_env_file "$DEFAULT_ENV_FILE"
+fi
+
+set -- "${ENV_ARGS[@]:-}"
+
 STACK_NAME="${HEARTH_STACK:-hearth}"
 REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-us-east-1}}"
 PROFILE="${HEARTH_AWS_PROFILE:-${AWS_PROFILE:-}}"
@@ -19,7 +64,7 @@ TEMPLATE="$(dirname "$0")/cloudformation.yaml"
 
 usage() {
   cat <<'USAGE'
-Usage: deploy/deploy.sh [--profile NAME] [--region REGION] <command>
+Usage: deploy/deploy.sh [--profile NAME] [--region REGION] [--env-file PATH] <command>
 
 Commands:
   up        create or update the stack
@@ -28,6 +73,11 @@ Commands:
   whoami    print the AWS identity + profile + region the script will use
   ssh       open an SSH session to the running instance
   logs      tail the bootstrap log
+
+Config file:
+  deploy/.env is auto-sourced if it exists (use deploy/.env.example as a template).
+  Override with --env-file PATH or HEARTH_ENV_FILE=PATH.
+  Disable with --no-env-file.
 
 Required env (for `up`):
   HEARTH_KEYPAIR        existing EC2 key pair name (for SSH)
