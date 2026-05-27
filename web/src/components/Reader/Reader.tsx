@@ -35,7 +35,10 @@ interface Props {
   updated: string | null;
   initialMode?: 'preview' | 'edit';
   calendar: CalendarView;
-  today: TodayEntry[];
+  entries: TodayEntry[];
+  entriesLabel: string;
+  selectedDay: number | null;
+  onClearSelectedDay: () => void;
   titleToPath: Map<string, string>;
   onSelectFile: (path: string) => void;
   onSelectDay: (day: number) => void;
@@ -75,7 +78,10 @@ export function Reader({
   updated,
   initialMode = 'preview',
   calendar,
-  today,
+  entries,
+  entriesLabel,
+  selectedDay,
+  onClearSelectedDay,
   titleToPath,
   onSelectFile,
   onSelectDay,
@@ -322,7 +328,10 @@ export function Reader({
       <div className={styles.layout}>
         <HearthRail
           calendar={calendar}
-          today={today}
+          entries={entries}
+          entriesLabel={entriesLabel}
+          selectedDay={selectedDay}
+          onClearSelectedDay={onClearSelectedDay}
           onNewEntry={onNewEntry}
           onSelectFile={(p) => {
             void flush();

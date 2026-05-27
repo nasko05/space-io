@@ -1,7 +1,12 @@
 import { FormEvent, useState } from 'react';
 import { Close, Eye } from '../icons/Icon';
 import { api, ApiError } from '../../api/client';
-import { isPasskeySupported, registerPasskey, unlockWithPasskey } from '../../lib/passkey';
+import {
+  isPasskeySupported,
+  registerPasskey,
+  unlockWithPasskey,
+  webauthnStatus,
+} from '../../lib/passkey';
 import styles from './PasskeyModal.module.css';
 
 interface Props {
@@ -72,6 +77,8 @@ export function PasskeyModal({ open, email, owner, hasPasskey, onClose, onChange
       setPassphrase('');
       onChanged();
     } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('passkey registration failed:', err);
       setPhase({
         kind: 'error',
         message: err instanceof Error ? err.message : 'Registration failed',
@@ -95,6 +102,8 @@ export function PasskeyModal({ open, email, owner, hasPasskey, onClose, onChange
   }
 
   const supported = isPasskeySupported();
+  const status = webauthnStatus();
+  const usable = status.ok;
 
   return (
     <div className={styles.scrim} onMouseDown={onClose}>
@@ -119,6 +128,10 @@ export function PasskeyModal({ open, email, owner, hasPasskey, onClose, onChange
             passphrase. Try a recent Chrome, Edge, or Safari on a device with Touch ID or a
             FIDO2 key.
           </div>
+        )}
+
+        {supported && !status.ok && (
+          <div className={styles.warn}>{status.message}</div>
         )}
 
         {hasPasskey ? (
@@ -170,7 +183,7 @@ export function PasskeyModal({ open, email, owner, hasPasskey, onClose, onChange
               <button
                 type="submit"
                 className={styles.submit}
-                disabled={!supported || !passphrase || phase.kind === 'verifying' || phase.kind === 'registering'}
+                disabled={!supported || !usable || !passphrase || phase.kind === 'verifying' || phase.kind === 'registering'}
               >
                 {phase.kind === 'verifying'
                   ? 'Checking…'

@@ -35,29 +35,96 @@ export function isPasskeySupported(): boolean {
   );
 }
 
-/** Pre-flight check that fails with a useful message instead of letting the
- *  browser throw the cryptic "The operation is insecure" SecurityError.
- *  WebAuthn requires a secure context (HTTPS or localhost) and a domain-style
- *  hostname — bare IP addresses are rejected by the platform.
- */
-function ensureWebAuthnUsable(): void {
-  if (typeof window === 'undefined') return;
+export type WebAuthnStatus =
+  | { ok: true }
+  | {
+      ok: false;
+      reason:
+        | 'unsupported'
+        | 'insecure-context'
+        | 'ip-host'
+        | 'ssr';
+      message: string;
+    };
+
+/** Inspect the runtime for the conditions WebAuthn needs *before* we call
+ *  into `navigator.credentials`. Surfacing this up-front lets the UI explain
+ *  why the passkey path is unavailable instead of leaving the user to decode
+ *  "The operation is insecure" out of a stack trace. */
+export function webauthnStatus(): WebAuthnStatus {
+  if (typeof window === 'undefined') {
+    return { ok: false, reason: 'ssr', message: 'No window object (server render).' };
+  }
+  if (!isPasskeySupported()) {
+    return {
+      ok: false,
+      reason: 'unsupported',
+      message:
+        'This browser does not expose the WebAuthn API. Try a recent Chrome, Edge, Safari, or Firefox.',
+    };
+  }
   if (!window.isSecureContext) {
-    throw new Error(
-      'Passkeys require a secure context. Open the app over HTTPS, or use the SSH tunnel (deploy/deploy.sh open) so you reach it at 127.0.0.1.',
-    );
+    return {
+      ok: false,
+      reason: 'insecure-context',
+      message:
+        `Passkeys require a secure context. The current origin (${window.location.protocol}//${window.location.host}) is plain HTTP. Open the app over HTTPS, or reach it at 127.0.0.1 via the SSH tunnel.`,
+    };
   }
   const host = window.location.hostname;
-  if (host === 'localhost' || host === '127.0.0.1' || host === '::1') return;
-  // WebAuthn rejects IP-address relying-party IDs. The simplest detection
-  // covers IPv4 dotted-quad; IPv6 literals always contain a colon.
+  if (host === 'localhost' || host === '127.0.0.1' || host === '::1') {
+    return { ok: true };
+  }
   const isIpV4 = /^\d{1,3}(\.\d{1,3}){3}$/.test(host);
   const isIpV6 = host.includes(':') || host.startsWith('[');
   if (isIpV4 || isIpV6) {
-    throw new Error(
-      'Passkeys need a hostname, not an IP address. Reach the app via a domain (or the SSH tunnel at 127.0.0.1).',
-    );
+    return {
+      ok: false,
+      reason: 'ip-host',
+      message:
+        `Passkeys need a domain name as the relying-party ID; '${host}' is an IP. Reach the app via a domain, or the SSH tunnel at 127.0.0.1.`,
+    };
   }
+  return { ok: true };
+}
+
+/** Throw a single Error explaining why WebAuthn can't run, if it can't. */
+function ensureWebAuthnUsable(): void {
+  const s = webauthnStatus();
+  if (!s.ok) throw new Error(s.message);
+}
+
+/** Wrap the underlying browser error so the modal sees something more
+ *  useful than the bare DOMException's default message. NotAllowedError
+ *  in particular is overloaded — it covers user cancel, timeout, the PRF
+ *  extension being unsupported by the authenticator, and a few more. */
+function wrapWebAuthnError(stage: 'create' | 'get', err: unknown): Error {
+  if (err instanceof DOMException) {
+    const name = err.name;
+    const detail = err.message ? ` (${err.message})` : '';
+    let hint = '';
+    if (name === 'NotAllowedError') {
+      hint = stage === 'create'
+        ? ' — cancelled, timed out, or the authenticator refused this site.'
+        : ' — cancelled, timed out, or no matching credential on the authenticator.';
+    } else if (name === 'SecurityError') {
+      hint = ' — the origin or relying-party ID is not allowed in this context.';
+    } else if (name === 'InvalidStateError') {
+      hint = stage === 'create'
+        ? ' — this authenticator already has a credential for this account.'
+        : '';
+    } else if (name === 'NotSupportedError') {
+      hint = ' — the authenticator does not support the required algorithm or extension.';
+    } else if (name === 'AbortError') {
+      hint = ' — the request was aborted.';
+    }
+    // eslint-disable-next-line no-console
+    console.error(`WebAuthn ${stage} failed:`, name, err);
+    return new Error(`${name}${hint}${detail}`);
+  }
+  // eslint-disable-next-line no-console
+  console.error(`WebAuthn ${stage} failed:`, err);
+  return err instanceof Error ? err : new Error(String(err));
 }
 
 /** Create a new passkey and wrap the user's passphrase under its PRF secret. */
@@ -73,28 +140,33 @@ export async function registerPasskey(
   const challenge = crypto.getRandomValues(new Uint8Array(32));
   const userId = await sha256(new TextEncoder().encode(`hearth:${owner}`));
 
-  const cred = (await navigator.credentials.create({
-    publicKey: {
-      challenge,
-      rp: { name: 'SpaceIO', id: window.location.hostname },
-      user: {
-        id: userId.slice(0, 16),
-        name: owner,
-        displayName: owner,
+  let cred: PublicKeyCredential | null;
+  try {
+    cred = (await navigator.credentials.create({
+      publicKey: {
+        challenge,
+        rp: { name: 'SpaceIO', id: window.location.hostname },
+        user: {
+          id: userId.slice(0, 16),
+          name: owner,
+          displayName: owner,
+        },
+        pubKeyCredParams: [
+          { type: 'public-key', alg: -7 }, // ES256
+          { type: 'public-key', alg: -257 }, // RS256
+        ],
+        authenticatorSelection: {
+          userVerification: 'preferred',
+          residentKey: 'preferred',
+        },
+        timeout: 60_000,
+        attestation: 'none',
+        extensions: { prf: { eval: { first: prfSalt } } },
       },
-      pubKeyCredParams: [
-        { type: 'public-key', alg: -7 }, // ES256
-        { type: 'public-key', alg: -257 }, // RS256
-      ],
-      authenticatorSelection: {
-        userVerification: 'preferred',
-        residentKey: 'preferred',
-      },
-      timeout: 60_000,
-      attestation: 'none',
-      extensions: { prf: { eval: { first: prfSalt } } },
-    },
-  } as CredentialCreationOptions)) as PublicKeyCredential | null;
+    } as CredentialCreationOptions)) as PublicKeyCredential | null;
+  } catch (err) {
+    throw wrapWebAuthnError('create', err);
+  }
   if (!cred) throw new Error('passkey creation was cancelled');
 
   const extensions = (cred.getClientExtensionResults() as PrfExtensionResults).prf;
@@ -123,15 +195,20 @@ export async function unlockWithPasskey(input: AuthenticateInput): Promise<strin
   const wrapped = b64UrlToBytes(input.wrappedPassphraseB64);
   const challenge = crypto.getRandomValues(new Uint8Array(32));
 
-  const assertion = (await navigator.credentials.get({
-    publicKey: {
-      challenge,
-      allowCredentials: [{ id: credentialId, type: 'public-key' }],
-      userVerification: 'preferred',
-      timeout: 60_000,
-      extensions: { prf: { eval: { first: prfSalt } } },
-    },
-  } as CredentialRequestOptions)) as PublicKeyCredential | null;
+  let assertion: PublicKeyCredential | null;
+  try {
+    assertion = (await navigator.credentials.get({
+      publicKey: {
+        challenge,
+        allowCredentials: [{ id: credentialId, type: 'public-key' }],
+        userVerification: 'preferred',
+        timeout: 60_000,
+        extensions: { prf: { eval: { first: prfSalt } } },
+      },
+    } as CredentialRequestOptions)) as PublicKeyCredential | null;
+  } catch (err) {
+    throw wrapWebAuthnError('get', err);
+  }
   if (!assertion) throw new Error('passkey assertion was cancelled');
 
   const extensions = (assertion.getClientExtensionResults() as PrfExtensionResults).prf;

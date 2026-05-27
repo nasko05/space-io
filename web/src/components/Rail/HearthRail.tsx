@@ -1,10 +1,17 @@
-import { FolderOpen, HardDrive, Pencil } from '../icons/Icon';
+import { Close, FolderOpen, HardDrive, Pencil } from '../icons/Icon';
 import { CalendarView, TodayEntry } from '../../lib/calendar';
 import styles from './HearthRail.module.css';
 
 interface Props {
   calendar: CalendarView;
-  today: TodayEntry[];
+  entries: TodayEntry[];
+  /** Label for the section under the calendar — "Today", or a date like "27 May". */
+  entriesLabel: string;
+  /** When set, the calendar cell for this day is highlighted and the entries
+   *  are for that day (not today). Click another day to switch; click the
+   *  same day or the clear button to reset to today. */
+  selectedDay?: number | null;
+  onClearSelectedDay?: () => void;
   onNewEntry: () => void;
   onSelectFile: (path: string) => void;
   onSelectDay?: (day: number) => void;
@@ -22,7 +29,10 @@ const WEEKDAYS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 // - "my space" badge in the brand row navigates to the Vault surface.
 export function HearthRail({
   calendar,
-  today,
+  entries,
+  entriesLabel,
+  selectedDay = null,
+  onClearSelectedDay,
   onNewEntry,
   onSelectFile,
   onSelectDay,
@@ -74,11 +84,13 @@ export function HearthRail({
           {days.map((d) => {
             const has = calendar.filled.has(d);
             const cur = d === calendar.today;
+            const sel = d === selectedDay;
             const clickable = !!onSelectDay;
             const className = [
               styles.calCell,
               cur ? styles.calCellCurrent : '',
-              has && !cur ? styles.calCellHas : '',
+              sel && !cur ? styles.calCellSelected : '',
+              has && !cur && !sel ? styles.calCellHas : '',
               clickable ? styles.calCellClickable : '',
             ]
               .filter(Boolean)
@@ -94,35 +106,52 @@ export function HearthRail({
                   clickable
                     ? has
                       ? `Notes from day ${d}`
-                      : `Write a note for day ${d}`
+                      : `No notes on day ${d}`
                     : undefined
                 }
               >
                 {d}
-                {has && !cur && <span className={styles.calDot} />}
+                {has && !cur && !sel && <span className={styles.calDot} />}
               </button>
             );
           })}
         </div>
       </div>
 
-      <div>
+      <div className={styles.todaySection}>
         <div className={styles.todayHead}>
-          <span>Today</span>
+          <span>{entriesLabel}</span>
+          {selectedDay != null && onClearSelectedDay && (
+            <button
+              type="button"
+              className={styles.todayClear}
+              onClick={onClearSelectedDay}
+              title="Back to today"
+              aria-label="Clear day selection"
+            >
+              <Close size={10} />
+            </button>
+          )}
           <span className={styles.todayRule} />
           <span className={styles.todayCount}>
-            {today.length === 0
+            {entries.length === 0
               ? 'nothing yet'
-              : `${today.length} note${today.length === 1 ? '' : 's'}`}
+              : `${entries.length} note${entries.length === 1 ? '' : 's'}`}
           </span>
         </div>
-        {today.length === 0 ? (
+        {entries.length === 0 ? (
           <div className={styles.todayEmpty}>
-            Begin where you are. Press <em>New entry</em>.
+            {selectedDay != null ? (
+              <>No notes from that day.</>
+            ) : (
+              <>
+                Begin where you are. Press <em>New entry</em>.
+              </>
+            )}
           </div>
         ) : (
           <ul className={styles.todayList}>
-            {today.map((it) => (
+            {entries.map((it) => (
               <li
                 key={it.path}
                 className={[
