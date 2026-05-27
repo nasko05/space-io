@@ -127,11 +127,8 @@ mod tests {
         let store = SessionStore::new();
         let id = store.create(secret("stale"));
         // Backdate the entry so the next get() trips the TTL.
-        store
-            .inner
-            .get_mut(&id)
-            .expect("present")
-            .last_seen = Instant::now() - SESSION_TTL - Duration::from_secs(1);
+        store.inner.get_mut(&id).expect("present").last_seen =
+            Instant::now() - SESSION_TTL - Duration::from_secs(1);
         assert!(store.get(&id).is_none());
         // And the entry is gone, not just hidden.
         assert!(store.inner.get(&id).is_none());
@@ -142,11 +139,8 @@ mod tests {
         let store = SessionStore::new();
         let fresh = store.create(secret("fresh"));
         let stale = store.create(secret("stale"));
-        store
-            .inner
-            .get_mut(&stale)
-            .expect("present")
-            .last_seen = Instant::now() - SESSION_TTL - Duration::from_secs(1);
+        store.inner.get_mut(&stale).expect("present").last_seen =
+            Instant::now() - SESSION_TTL - Duration::from_secs(1);
         store.sweep_expired();
         assert!(store.inner.get(&fresh).is_some());
         assert!(store.inner.get(&stale).is_none());

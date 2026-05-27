@@ -37,8 +37,9 @@ pub fn commit_all(repo: &Repository, message: &str) -> AppResult<()> {
             Ok(c) => vec![c],
             Err(e) => return Err(AppError::Internal(format!("git peel head: {e}"))),
         },
-        Err(e) if e.code() == git2::ErrorCode::UnbornBranch
-            || e.code() == git2::ErrorCode::NotFound =>
+        Err(e)
+            if e.code() == git2::ErrorCode::UnbornBranch
+                || e.code() == git2::ErrorCode::NotFound =>
         {
             vec![]
         }

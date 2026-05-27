@@ -112,10 +112,15 @@ mod tests {
 
     #[test]
     fn too_many_requests_is_429_with_retry_after() {
-        let res = AppError::TooManyRequests { retry_after_secs: 42 }.into_response();
+        let res = AppError::TooManyRequests {
+            retry_after_secs: 42,
+        }
+        .into_response();
         assert_eq!(res.status(), StatusCode::TOO_MANY_REQUESTS);
         assert_eq!(
-            res.headers().get(header::RETRY_AFTER).map(|v| v.to_str().unwrap()),
+            res.headers()
+                .get(header::RETRY_AFTER)
+                .map(|v| v.to_str().unwrap()),
             Some("42")
         );
     }

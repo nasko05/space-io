@@ -139,10 +139,9 @@ async fn post_create(
 ) -> AppResult<Json<CreateResponse>> {
     let pass = require_passphrase(&state, &jar)?;
     let space = state.space.clone();
-    let result = blocking(move || {
-        create::create_file(&space, &pass, &req.folder, req.title.as_deref())
-    })
-    .await?;
+    let result =
+        blocking(move || create::create_file(&space, &pass, &req.folder, req.title.as_deref()))
+            .await?;
     Ok(Json(CreateResponse { path: result.path }))
 }
 
