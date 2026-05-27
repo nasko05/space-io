@@ -1,5 +1,6 @@
 import { DragEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Auth } from './components/Auth/Auth';
+import { Registration } from './components/Registration/Registration';
 import { Reader } from './components/Reader/Reader';
 import { HearthVault } from './components/Vault/HearthVault';
 import { Preview } from './components/Preview/Preview';
@@ -26,8 +27,9 @@ import {
 
 type View =
   | { kind: 'loading' }
-  | { kind: 'auth'; owner: string; hasPasskey: boolean }
-  | { kind: 'unlocked'; owner: string; surface: Surface }
+  | { kind: 'registration'; anyUsers: boolean }
+  | { kind: 'auth'; anyUsers: boolean }
+  | { kind: 'unlocked'; owner: string; email: string; surface: Surface }
   | { kind: 'fatal'; message: string };
 
 type Surface =
@@ -108,7 +110,7 @@ export function App() {
   }, []);
 
   const enterReader = useCallback(
-    async (owner: string) => {
+    async (owner: string, email: string) => {
       try {
         const t = await refreshTree();
         void refreshExcerpts();
@@ -122,6 +124,7 @@ export function App() {
           setView({
             kind: 'unlocked',
             owner,
+            email,
             surface: { kind: 'reader', file, initialMode: 'edit' },
           });
           return;
@@ -131,6 +134,7 @@ export function App() {
         setView({
           kind: 'unlocked',
           owner,
+          email,
           surface: { kind: 'reader', file, initialMode: 'preview' },
         });
       } catch (err) {
@@ -151,9 +155,11 @@ export function App() {
         if (cancelled) return;
         setHasPasskey(status.has_passkey);
         if (status.unlocked) {
-          await enterReader(status.owner);
+          await enterReader(status.owner, status.email);
+        } else if (!status.any_users) {
+          setView({ kind: 'registration', anyUsers: false });
         } else {
-          setView({ kind: 'auth', owner: status.owner, hasPasskey: status.has_passkey });
+          setView({ kind: 'auth', anyUsers: true });
         }
       } catch (err) {
         if (cancelled) return;
@@ -168,11 +174,49 @@ export function App() {
     };
   }, [enterReader]);
 
-  const onUnlocked = useCallback(() => {
+  const onRegistered = useCallback(async () => {
+    // `/api/auth/init` mints the session cookie itself, so we just need to
+    // re-fetch status (to learn the chosen display name) and drop into the
+    // reader. The seed welcome note is already in place under the new UUID
+    // folder.
+    try {
+      const status = await api.status();
+      setHasPasskey(status.has_passkey);
+      if (status.unlocked) {
+        await enterReader(status.owner, status.email);
+      } else {
+        setView({ kind: 'auth', anyUsers: status.any_users });
+      }
+    } catch (err) {
+      setView({
+        kind: 'fatal',
+        message: err instanceof Error ? err.message : 'Registration succeeded but the next step failed.',
+      });
+    }
+  }, [enterReader]);
+
+  const onUnlocked = useCallback(async () => {
     if (view.kind !== 'auth') return;
     setView({ kind: 'loading' });
-    void enterReader(view.owner);
+    try {
+      const status = await api.status();
+      setHasPasskey(status.has_passkey);
+      await enterReader(status.owner, status.email);
+    } catch (err) {
+      setView({
+        kind: 'fatal',
+        message: err instanceof Error ? err.message : 'Unlock succeeded but the next step failed.',
+      });
+    }
   }, [enterReader, view]);
+
+  const showRegistration = useCallback(() => {
+    setView({ kind: 'registration', anyUsers: true });
+  }, []);
+
+  const showLogin = useCallback(() => {
+    setView({ kind: 'auth', anyUsers: true });
+  }, []);
 
   const onLock = useCallback(async () => {
     try {
@@ -191,10 +235,9 @@ export function App() {
     const status = await refreshStatus();
     setView({
       kind: 'auth',
-      owner: status?.owner ?? (view.kind === 'unlocked' ? view.owner : 'ada@home.lan'),
-      hasPasskey: status?.has_passkey ?? hasPasskey,
+      anyUsers: status?.any_users ?? true,
     });
-  }, [hasPasskey, refreshStatus, view]);
+  }, [refreshStatus]);
 
   const selectFile = useCallback(
     async (path: string) => {
@@ -205,6 +248,7 @@ export function App() {
         setView({
           kind: 'unlocked',
           owner: view.owner,
+          email: view.email,
           surface: { kind: 'reader', file, initialMode: 'preview' },
         });
         setSearchOpen(false);
@@ -223,6 +267,7 @@ export function App() {
       setView({
         kind: 'unlocked',
         owner: view.owner,
+        email: view.email,
         surface: { kind: 'preview', file, previousPath: previous },
       });
     },
@@ -234,6 +279,7 @@ export function App() {
     setView({
       kind: 'unlocked',
       owner: view.owner,
+      email: view.email,
       surface: { kind: 'vault', previousPath: previousPathRef.current },
     });
     try {
@@ -248,7 +294,7 @@ export function App() {
     if (view.surface.kind !== 'vault') return;
     const target = view.surface.previousPath;
     if (!target) {
-      void enterReader(view.owner);
+      void enterReader(view.owner, view.email);
       return;
     }
     try {
@@ -256,10 +302,11 @@ export function App() {
       setView({
         kind: 'unlocked',
         owner: view.owner,
+        email: view.email,
         surface: { kind: 'reader', file, initialMode: 'preview' },
       });
     } catch {
-      void enterReader(view.owner);
+      void enterReader(view.owner, view.email);
     }
   }, [enterReader, view]);
 
@@ -274,6 +321,7 @@ export function App() {
       setView({
         kind: 'unlocked',
         owner: view.owner,
+        email: view.email,
         surface: { kind: 'reader', file, initialMode: 'edit' },
       });
     } catch (err) {
@@ -494,8 +542,22 @@ export function App() {
   const titleToPath = useMemo(() => buildTitleMap(tree, excerpts), [tree, excerpts]);
 
   if (view.kind === 'loading') return <LoadingScreen />;
+  if (view.kind === 'registration')
+    return (
+      <Registration
+        showBackToLogin={view.anyUsers}
+        onRegistered={onRegistered}
+        onBackToLogin={showLogin}
+      />
+    );
   if (view.kind === 'auth')
-    return <Auth owner={view.owner} hasPasskey={view.hasPasskey} onUnlocked={onUnlocked} />;
+    return (
+      <Auth
+        showRegisterLink={view.anyUsers}
+        onUnlocked={onUnlocked}
+        onRegister={showRegistration}
+      />
+    );
   if (view.kind === 'fatal') return <FatalScreen message={view.message} />;
 
   const { surface } = view;
@@ -606,6 +668,7 @@ export function App() {
 
       <PasskeyModal
         open={passkeyOpen}
+        email={view.email}
         owner={view.owner}
         hasPasskey={hasPasskey}
         onClose={() => setPasskeyOpen(false)}

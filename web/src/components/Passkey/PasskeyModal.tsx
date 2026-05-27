@@ -6,6 +6,9 @@ import styles from './PasskeyModal.module.css';
 
 interface Props {
   open: boolean;
+  /** Email of the currently-unlocked user; needed to re-verify the passphrase. */
+  email: string;
+  /** Display name (for the WebAuthn `user.name` field). */
   owner: string;
   hasPasskey: boolean;
   onClose: () => void;
@@ -20,7 +23,7 @@ type Phase =
   | { kind: 'done'; message: string }
   | { kind: 'error'; message: string };
 
-export function PasskeyModal({ open, owner, hasPasskey, onClose, onChanged }: Props) {
+export function PasskeyModal({ open, email, owner, hasPasskey, onClose, onChanged }: Props) {
   const [passphrase, setPassphrase] = useState('');
   const [visible, setVisible] = useState(false);
   const [phase, setPhase] = useState<Phase>({ kind: 'idle' });
@@ -36,7 +39,7 @@ export function PasskeyModal({ open, owner, hasPasskey, onClose, onChanged }: Pr
     // will mint a new session cookie either way; we accept that because the
     // user is already in an unlocked session anyway).
     try {
-      await api.unlock(passphrase);
+      await api.unlock(email, passphrase);
     } catch (err) {
       const msg =
         err instanceof ApiError && err.code === 'wrong_passphrase'

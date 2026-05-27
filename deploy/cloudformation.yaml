@@ -143,30 +143,17 @@ Resources:
           ExecStart=/opt/space-io/target/release/hearth serve --space-dir /opt/space-io/data --listen 0.0.0.0:7777
           Restart=on-failure
           RestartSec=5
-          # Don't auto-start; the operator must run `hearth init` first.
 
           [Install]
           WantedBy=multi-user.target
           EOF
 
           systemctl daemon-reload
-          # Service is enabled but NOT started -- wait for an `init`.
-          systemctl enable hearth.service
-
-          # First-run helper.
-          cat > /opt/space-io/init-space.sh <<'EOF'
-          #!/bin/bash
-          set -euo pipefail
-          if [ -f /opt/space-io/data/.space.toml ]; then
-            echo "Space already initialised."
-            exit 1
-          fi
-          /opt/space-io/target/release/hearth init --space-dir /opt/space-io/data
-          echo
-          echo "Done. Start the server with: sudo systemctl start hearth"
-          EOF
-          chmod +x /opt/space-io/init-space.sh
-          chown ec2-user:ec2-user /opt/space-io/init-space.sh
+          # `hearth serve` now tolerates an empty space-dir -- the
+          # browser-side registration page (POST /api/auth/init) sets
+          # the passphrase on first connect. So we can enable + start
+          # the unit immediately; no SSH-and-init dance needed.
+          systemctl enable --now hearth.service
       Tags:
         - Key: Name
           Value: hearth
@@ -189,5 +176,5 @@ Outputs:
     Value: !Sub ssh -i ${KeyPairName}.pem ec2-user@${HearthEip}
 
   HearthUrl:
-    Description: Open after `init-space.sh` + `systemctl start hearth`.
+    Description: Open in a browser; the first connect shows the registration page.
     Value: !Sub http://${HearthEip}:7777

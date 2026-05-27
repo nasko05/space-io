@@ -259,15 +259,13 @@ cmd_up() {
   cat <<MSG
 
 Stack is up. Next:
-  1. Wait ~3-5 minutes for the bootstrap script to build the binary.
-     Tail with: deploy/deploy.sh logs
-  2. SSH in:    deploy/deploy.sh ssh
-  3. Initialise the space (one-time, interactive — asks for a passphrase):
-       /opt/space-io/init-space.sh
-  4. Start the service:
-       sudo systemctl start hearth
-  5. Open the app (encrypted SSH tunnel, browser opens to localhost):
+  1. Wait ~3-5 minutes for the bootstrap to build the binary.
+     Tail progress with: deploy/deploy.sh logs
+     (Hearth starts itself as soon as the build finishes.)
+  2. Open the app (encrypted SSH tunnel, browser opens to localhost):
        deploy/deploy.sh open
+     First visit shows a "Make your space" page -- pick a passphrase
+     there and you're in.
 MSG
 }
 

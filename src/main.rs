@@ -13,7 +13,7 @@ use anyhow::Context;
 use clap::{Parser, Subcommand};
 
 use crate::space::session::SessionStore;
-use crate::space::Space;
+use crate::space::users::{normalise_email, UsersRegistry};
 use crate::state::AppState;
 
 #[derive(Parser, Debug)]
@@ -29,18 +29,26 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Command {
-    /// Initialise a new space (creates .space.toml, seed note, first git commit).
+    /// Register a new user from the CLI. Mints a UUID, creates the per-user
+    /// space directory, and records the email→UUID mapping in `.users.toml`.
+    /// The browser registration page is the primary path; this is for
+    /// scripted setups.
     Init {
+        /// Root directory holding `.users.toml` and the per-user subdirs.
         #[arg(long, default_value = "./data")]
         space_dir: PathBuf,
-        /// Passphrase. If omitted, prompted interactively.
+        /// Email — used as the unique identifier on the login screen.
+        #[arg(long)]
+        email: String,
+        /// Passphrase. If omitted, prompted interactively (with confirm).
         #[arg(long)]
         passphrase: Option<String>,
-        /// Owner display name shown on the unlock screen.
-        #[arg(long, default_value = "ada@home.lan")]
-        owner: String,
+        /// Optional display name. Defaults to the email.
+        #[arg(long)]
+        owner: Option<String>,
     },
-    /// Serve the space over HTTP.
+    /// Serve over HTTP. Tolerates an empty data dir — the registration page
+    /// brings the first user to life.
     Serve {
         #[arg(long, default_value = "./data")]
         space_dir: PathBuf,
@@ -61,14 +69,20 @@ fn main() -> anyhow::Result<()> {
     match cli.command {
         Command::Init {
             space_dir,
+            email,
             passphrase,
             owner,
-        } => cmd_init(space_dir, passphrase, owner),
+        } => cmd_init(space_dir, email, passphrase, owner),
         Command::Serve { space_dir, listen } => cmd_serve(space_dir, listen),
     }
 }
 
-fn cmd_init(space_dir: PathBuf, passphrase: Option<String>, owner: String) -> anyhow::Result<()> {
+fn cmd_init(
+    root: PathBuf,
+    email: String,
+    passphrase: Option<String>,
+    owner: Option<String>,
+) -> anyhow::Result<()> {
     let passphrase = match passphrase {
         Some(p) => p,
         None => {
@@ -84,25 +98,46 @@ fn cmd_init(space_dir: PathBuf, passphrase: Option<String>, owner: String) -> an
     if passphrase.is_empty() {
         anyhow::bail!("passphrase must not be empty");
     }
+    let normalised = normalise_email(&email).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let display_owner = owner
+        .map(|o| o.trim().to_string())
+        .filter(|o| !o.is_empty())
+        .unwrap_or_else(|| normalised.clone());
+
+    std::fs::create_dir_all(&root).context("create space-dir root")?;
+    let mut registry = UsersRegistry::load(&root).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let entry = registry
+        .add(&root, &normalised)
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let space_dir = UsersRegistry::space_dir_for(&root, &entry.uuid);
 
     space::init::init_space(space::init::InitOptions {
         space_dir: space_dir.clone(),
         passphrase: SecretString::from(passphrase),
-        owner,
+        owner: display_owner,
     })
     .map_err(|e| anyhow::anyhow!("{e}"))?;
 
-    println!("Space initialised at {}", space_dir.display());
+    println!(
+        "Registered {} → {}\n  space at {}",
+        entry.email,
+        entry.uuid,
+        space_dir.display()
+    );
     Ok(())
 }
 
 #[tokio::main(flavor = "multi_thread")]
 async fn cmd_serve(space_dir: PathBuf, listen: SocketAddr) -> anyhow::Result<()> {
-    let space = Space::open(space_dir).map_err(|e| anyhow::anyhow!("{e}"))?;
-    let state = AppState {
-        space,
-        sessions: SessionStore::new(),
-    };
+    // `serve` is allowed to start against an empty data root; the registration
+    // page (POST /api/auth/init) brings it to life. Just make sure the
+    // directory itself exists so the init handler can write into it.
+    std::fs::create_dir_all(&space_dir).context("create space-dir")?;
+    let state =
+        AppState::new(space_dir, SessionStore::new()).map_err(|e| anyhow::anyhow!("{e}"))?;
+    if !state.any_users() {
+        tracing::info!("No users registered yet; serving the registration page only.");
+    }
     let app = routes::build_router(state);
 
     tracing::info!("Listening on http://{listen}");

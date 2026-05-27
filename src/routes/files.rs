@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use axum::routing::delete;
 
 use crate::error::{AppError, AppResult};
-use crate::routes::auth::require_passphrase;
+use crate::routes::auth::require_session;
 use crate::space::{
     create, delete as delete_mod, download, excerpt, history, meta, mkdir, read, rename, tree,
     upload, write,
@@ -39,8 +39,8 @@ struct TreeResponse {
 }
 
 async fn get_tree(State(state): State<AppState>, jar: CookieJar) -> AppResult<Json<TreeResponse>> {
-    require_passphrase(&state, &jar)?;
-    let tree = tree::build_tree(&state.space)?;
+    let (_, space) = require_session(&state, &jar)?;
+    let tree = tree::build_tree(&space)?;
     Ok(Json(TreeResponse { tree }))
 }
 
@@ -61,8 +61,8 @@ async fn get_read(
     jar: CookieJar,
     Query(q): Query<ReadQuery>,
 ) -> AppResult<Json<ReadResponse>> {
-    let pass = require_passphrase(&state, &jar)?;
-    let result = read::read_file(&state.space, &pass, &q.path)?;
+    let (pass, space) = require_session(&state, &jar)?;
+    let result = read::read_file(&space, &pass, &q.path)?;
     Ok(Json(ReadResponse {
         path: result.path,
         content: result.content,
@@ -88,9 +88,9 @@ async fn put_write(
     jar: CookieJar,
     Json(req): Json<WriteRequest>,
 ) -> AppResult<Json<WriteResponse>> {
-    let pass = require_passphrase(&state, &jar)?;
+    let (pass, space) = require_session(&state, &jar)?;
     let result = write::write_file(
-        &state.space,
+        &space,
         &pass,
         &req.path,
         &req.content,
@@ -118,8 +118,8 @@ async fn post_create(
     jar: CookieJar,
     Json(req): Json<CreateRequest>,
 ) -> AppResult<Json<CreateResponse>> {
-    let pass = require_passphrase(&state, &jar)?;
-    let result = create::create_file(&state.space, &pass, &req.folder, req.title.as_deref())?;
+    let (pass, space) = require_session(&state, &jar)?;
+    let result = create::create_file(&space, &pass, &req.folder, req.title.as_deref())?;
     Ok(Json(CreateResponse { path: result.path }))
 }
 
@@ -138,8 +138,8 @@ async fn get_excerpts(
     State(state): State<AppState>,
     jar: CookieJar,
 ) -> AppResult<Json<ExcerptsResponse>> {
-    let pass = require_passphrase(&state, &jar)?;
-    let raw = excerpt::build_excerpts(&state.space, &pass)?;
+    let (pass, space) = require_session(&state, &jar)?;
+    let raw = excerpt::build_excerpts(&space, &pass)?;
     let excerpts = raw
         .into_iter()
         .map(|(k, v)| {
@@ -174,7 +174,7 @@ async fn post_upload(
     jar: CookieJar,
     mut multipart: Multipart,
 ) -> AppResult<Json<UploadResponse>> {
-    let pass = require_passphrase(&state, &jar)?;
+    let (pass, space) = require_session(&state, &jar)?;
 
     let mut folder: Option<String> = None;
     let mut files: Vec<(String, Vec<u8>)> = Vec::new();
@@ -217,7 +217,7 @@ async fn post_upload(
 
     let mut results = Vec::with_capacity(files.len());
     for (name, bytes) in files {
-        let r = upload::store_upload(&state.space, &pass, &folder, &name, &bytes)?;
+        let r = upload::store_upload(&space, &pass, &folder, &name, &bytes)?;
         results.push(UploadResult {
             path: r.path,
             size: r.size,
@@ -236,8 +236,8 @@ async fn get_download(
     jar: CookieJar,
     Query(q): Query<DownloadQuery>,
 ) -> AppResult<Response> {
-    let pass = require_passphrase(&state, &jar)?;
-    let file = download::fetch_decrypted(&state.space, &pass, &q.path)?;
+    let (pass, space) = require_session(&state, &jar)?;
+    let file = download::fetch_decrypted(&space, &pass, &q.path)?;
     let mime = mime_guess::from_path(&file.path).first_or_octet_stream();
     let base_name = std::path::Path::new(&file.path)
         .file_name()
@@ -278,8 +278,8 @@ async fn get_history(
     jar: CookieJar,
     Query(q): Query<HistoryQuery>,
 ) -> AppResult<Json<HistoryResponse>> {
-    require_passphrase(&state, &jar)?;
-    let entries = history::file_history(&state.space, &q.path)?
+    let (_, space) = require_session(&state, &jar)?;
+    let entries = history::file_history(&space, &q.path)?
         .into_iter()
         .map(|e| HistoryEntryDto {
             commit: e.commit,
@@ -308,8 +308,8 @@ async fn post_move(
     jar: CookieJar,
     Json(req): Json<MoveRequest>,
 ) -> AppResult<Json<MoveResponse>> {
-    let pass = require_passphrase(&state, &jar)?;
-    let r = rename::rename_path(&state.space, &pass, &req.from, &req.to)?;
+    let (pass, space) = require_session(&state, &jar)?;
+    let r = rename::rename_path(&space, &pass, &req.from, &req.to)?;
     Ok(Json(MoveResponse {
         path: r.path,
         is_directory: r.is_directory,
@@ -331,8 +331,8 @@ async fn delete_file(
     jar: CookieJar,
     Json(req): Json<DeleteRequest>,
 ) -> AppResult<Json<DeleteResponse>> {
-    let pass = require_passphrase(&state, &jar)?;
-    let r = delete_mod::delete_to_trash(&state.space, &pass, &req.path)?;
+    let (pass, space) = require_session(&state, &jar)?;
+    let r = delete_mod::delete_to_trash(&space, &pass, &req.path)?;
     Ok(Json(DeleteResponse {
         trash_path: r.trash_path,
     }))
@@ -348,8 +348,8 @@ async fn post_mkdir(
     jar: CookieJar,
     Json(req): Json<MkdirRequest>,
 ) -> AppResult<StatusCode> {
-    require_passphrase(&state, &jar)?;
-    mkdir::create_folder(&state.space, &req.path)?;
+    let (_, space) = require_session(&state, &jar)?;
+    mkdir::create_folder(&space, &req.path)?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -364,8 +364,8 @@ struct MetaResponse {
 }
 
 async fn get_meta(State(state): State<AppState>, jar: CookieJar) -> AppResult<Json<MetaResponse>> {
-    let pass = require_passphrase(&state, &jar)?;
-    let idx = meta::load(&state.space, &pass)?;
+    let (pass, space) = require_session(&state, &jar)?;
+    let idx = meta::load(&space, &pass)?;
     let meta = idx
         .paths
         .into_iter()
@@ -385,7 +385,7 @@ async fn put_meta(
     jar: CookieJar,
     Json(req): Json<PutMetaRequest>,
 ) -> AppResult<StatusCode> {
-    let pass = require_passphrase(&state, &jar)?;
-    meta::set_tags(&state.space, &pass, &req.path, req.tags)?;
+    let (pass, space) = require_session(&state, &jar)?;
+    meta::set_tags(&space, &pass, &req.path, req.tags)?;
     Ok(StatusCode::NO_CONTENT)
 }

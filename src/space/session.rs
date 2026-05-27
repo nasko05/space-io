@@ -4,11 +4,19 @@ use age::secrecy::SecretString;
 use dashmap::DashMap;
 use uuid::Uuid;
 
-/// In-memory session store: session_id → live passphrase.
-/// Lifetime ends when the process exits or when the user locks.
+/// One live unlock. Stores the passphrase (needed to decrypt files) and the
+/// UUID of the user's space (needed to route requests to the right
+/// directory). Lifetime ends when the process exits or when the user locks.
+#[derive(Clone)]
+pub struct Session {
+    pub passphrase: SecretString,
+    pub user_uuid: Uuid,
+}
+
+/// In-memory session store. `session_id → Session`.
 #[derive(Clone, Default)]
 pub struct SessionStore {
-    inner: Arc<DashMap<Uuid, SecretString>>,
+    inner: Arc<DashMap<Uuid, Session>>,
 }
 
 impl SessionStore {
@@ -16,13 +24,19 @@ impl SessionStore {
         Self::default()
     }
 
-    pub fn create(&self, passphrase: SecretString) -> Uuid {
+    pub fn create(&self, passphrase: SecretString, user_uuid: Uuid) -> Uuid {
         let id = Uuid::new_v4();
-        self.inner.insert(id, passphrase);
+        self.inner.insert(
+            id,
+            Session {
+                passphrase,
+                user_uuid,
+            },
+        );
         id
     }
 
-    pub fn get(&self, id: &Uuid) -> Option<SecretString> {
+    pub fn get(&self, id: &Uuid) -> Option<Session> {
         self.inner.get(id).map(|r| r.clone())
     }
 
@@ -43,17 +57,19 @@ mod tests {
     #[test]
     fn create_returns_unique_ids() {
         let store = SessionStore::new();
-        let a = store.create(secret("one"));
-        let b = store.create(secret("two"));
+        let a = store.create(secret("one"), Uuid::new_v4());
+        let b = store.create(secret("two"), Uuid::new_v4());
         assert_ne!(a, b);
     }
 
     #[test]
-    fn get_returns_stored_passphrase() {
+    fn get_returns_stored_session() {
         let store = SessionStore::new();
-        let id = store.create(secret("mine"));
+        let user = Uuid::new_v4();
+        let id = store.create(secret("mine"), user);
         let s = store.get(&id).expect("present");
-        assert_eq!(s.expose_secret(), "mine");
+        assert_eq!(s.passphrase.expose_secret(), "mine");
+        assert_eq!(s.user_uuid, user);
     }
 
     #[test]
@@ -66,7 +82,7 @@ mod tests {
     #[test]
     fn drop_removes_the_session() {
         let store = SessionStore::new();
-        let id = store.create(secret("one"));
+        let id = store.create(secret("one"), Uuid::new_v4());
         store.drop(&id);
         assert!(store.get(&id).is_none());
     }
@@ -81,7 +97,7 @@ mod tests {
     fn store_clones_share_state() {
         let a = SessionStore::new();
         let b = a.clone();
-        let id = a.create(secret("shared"));
+        let id = a.create(secret("shared"), Uuid::new_v4());
         assert!(b.get(&id).is_some());
     }
 }
