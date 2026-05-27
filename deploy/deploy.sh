@@ -55,12 +55,52 @@ STACK_NAME="${HEARTH_STACK:-hearth}"
 REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-us-east-1}}"
 PROFILE="${HEARTH_AWS_PROFILE:-${AWS_PROFILE:-}}"
 KEY_PAIR="${HEARTH_KEYPAIR:-}"
+KEY_PATH="${HEARTH_KEY_PATH:-}"
 ALLOWED_CIDR="${HEARTH_ALLOWED_CIDR:-}"
 INSTANCE_TYPE="${HEARTH_INSTANCE_TYPE:-t4g.nano}"
 DATA_GIB="${HEARTH_DATA_GIB:-8}"
 REPO_URL="${HEARTH_REPO_URL:-https://github.com/nasko05/space-io.git}"
 REPO_REF="${HEARTH_REPO_REF:-main}"
 TEMPLATE="$(dirname "$0")/cloudformation.yaml"
+
+# If the operator created the key pair via `aws ec2 create-key-pair` they
+# typically saved it to ~/.ssh/<keypair>.pem (that's what our README says to
+# do). Auto-detect that path so plain `ssh` doesn't fall back to id_rsa /
+# id_ecdsa and trip "Permission denied (publickey)".
+if [ -z "$KEY_PATH" ] && [ -n "$KEY_PAIR" ] && [ -f "$HOME/.ssh/${KEY_PAIR}.pem" ]; then
+  KEY_PATH="$HOME/.ssh/${KEY_PAIR}.pem"
+fi
+
+# Silently load KEY_PATH into ssh-agent (if one is running) so other tools
+# -- plain `ssh`, `scp`, `rsync`, your editor's remote plugin -- also pick
+# it up. Belt and braces with the explicit -i flag we still thread into
+# every ssh invocation below: the agent is the convenience layer, -i is the
+# correctness layer.
+ensure_key_in_agent() {
+  [ -z "$KEY_PATH" ] && return 0
+  [ -f "$KEY_PATH" ] || return 0
+  [ "${HEARTH_NO_SSH_ADD:-}" = "1" ] && return 0
+  command -v ssh-add >/dev/null 2>&1 || return 0
+  # ssh-add -l exits 2 when no agent is reachable; 0 = some keys; 1 = none.
+  ssh-add -l >/dev/null 2>&1
+  local rc=$?
+  if [ $rc -eq 2 ]; then
+    return 0  # no agent running, skip silently; -i will still work
+  fi
+  # Compute the key's SHA256 fingerprint and check the agent for it.
+  local fp
+  fp=$(ssh-keygen -lf "$KEY_PATH" 2>/dev/null | awk '{print $2}')
+  if [ -n "$fp" ] && ssh-add -l 2>/dev/null | grep -qF "$fp"; then
+    return 0  # already loaded
+  fi
+  # On macOS persist into Keychain so a reboot doesn't undo it.
+  if [ "$(uname -s)" = "Darwin" ] && ssh-add --apple-use-keychain "$KEY_PATH" 2>/dev/null; then
+    echo "Loaded $KEY_PATH into ssh-agent (persisted in macOS Keychain)."
+  elif ssh-add "$KEY_PATH" 2>/dev/null; then
+    echo "Loaded $KEY_PATH into ssh-agent."
+  fi
+}
+ensure_key_in_agent
 
 usage() {
   cat <<'USAGE'
@@ -95,9 +135,15 @@ AWS auth (any one is enough; --profile and --region win over env):
 
 Optional env:
   HEARTH_STACK          CloudFormation stack name (default: hearth)
+  HEARTH_KEY_PATH       Path to the SSH private key for the keypair.
+                        Auto-detected as ~/.ssh/${HEARTH_KEYPAIR}.pem
+                        if present; set explicitly otherwise.
+  HEARTH_NO_SSH_ADD     Set to 1 to skip the implicit `ssh-add` of the
+                        resolved key into your ssh-agent. The script
+                        still threads -i into its own ssh calls.
   HEARTH_ALLOWED_CIDR   CIDR allowed to reach SSH/Hearth
                         (default: your current public IP /32)
-  HEARTH_INSTANCE_TYPE  EC2 type (default: t4g.nano — ARM, cheapest)
+  HEARTH_INSTANCE_TYPE  EC2 type (default: t4g.nano -- ARM, cheapest)
   HEARTH_DATA_GIB       data volume size in GiB (default: 8)
   HEARTH_REPO_URL       git URL the instance clones (default: this repo)
   HEARTH_REPO_REF       branch or tag (default: main)
@@ -252,19 +298,37 @@ instance_ip() {
     --query 'Stacks[0].Outputs[?OutputKey==`PublicAddress`].OutputValue' --output text 2>/dev/null
 }
 
+# Build the ssh argv prefix. Always wraps -o StrictHostKeyChecking=accept-new
+# so a fresh EIP doesn't prompt; threads -i + IdentitiesOnly=yes when a key
+# path is resolved (so ssh-agent's many keys don't burn through MaxAuthTries
+# before AWS lets us in).
+SSH_BASE_OPTS=(-o StrictHostKeyChecking=accept-new)
+ssh_to() {
+  local ip=$1; shift
+  if [ -n "$KEY_PATH" ]; then
+    if [ ! -f "$KEY_PATH" ]; then
+      echo "error: HEARTH_KEY_PATH does not exist: $KEY_PATH" >&2
+      exit 1
+    fi
+    exec ssh "${SSH_BASE_OPTS[@]}" -i "$KEY_PATH" -o IdentitiesOnly=yes \
+      "ec2-user@$ip" "$@"
+  else
+    exec ssh "${SSH_BASE_OPTS[@]}" "ec2-user@$ip" "$@"
+  fi
+}
+
 cmd_ssh() {
   local ip
   ip=$(instance_ip)
   [ -n "$ip" ] || { echo "stack has no PublicAddress output yet" >&2; exit 1; }
-  exec ssh -o StrictHostKeyChecking=accept-new "ec2-user@$ip"
+  ssh_to "$ip"
 }
 
 cmd_logs() {
   local ip
   ip=$(instance_ip)
   [ -n "$ip" ] || { echo "stack has no PublicAddress output yet" >&2; exit 1; }
-  exec ssh -o StrictHostKeyChecking=accept-new "ec2-user@$ip" \
-    'sudo tail -n 200 -f /var/log/hearth-bootstrap.log'
+  ssh_to "$ip" 'sudo tail -n 200 -f /var/log/hearth-bootstrap.log'
 }
 
 # Best-effort "open this URL in the default browser" across mac / linux / wsl.
@@ -304,16 +368,25 @@ WARN
 
   local url="http://127.0.0.1:7777"
   cat <<MSG
-Opening an SSH tunnel to ec2-user@${ip} (local 7777 → remote 7777).
+Opening an SSH tunnel to ec2-user@${ip} (local 7777 -> remote 7777).
 A browser tab should open at ${url} in ~1 second.
 Press Ctrl-C in this terminal to close the tunnel.
 MSG
+  if [ -n "$KEY_PATH" ] && [ ! -f "$KEY_PATH" ]; then
+    echo "error: HEARTH_KEY_PATH does not exist: $KEY_PATH" >&2
+    exit 1
+  fi
   # Open the browser after a short delay so it has a connection to land on.
   (sleep 2 && open_url "$url") &
-  exec ssh -N -L 7777:127.0.0.1:7777 \
-    -o StrictHostKeyChecking=accept-new \
-    -o ExitOnForwardFailure=yes \
-    "ec2-user@$ip"
+  local -a ssh_args=(
+    -N -L 7777:127.0.0.1:7777
+    -o StrictHostKeyChecking=accept-new
+    -o ExitOnForwardFailure=yes
+  )
+  if [ -n "$KEY_PATH" ]; then
+    ssh_args+=(-i "$KEY_PATH" -o IdentitiesOnly=yes)
+  fi
+  exec ssh "${ssh_args[@]}" "ec2-user@$ip"
 }
 
 parse_flags "$@"
