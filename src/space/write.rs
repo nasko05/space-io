@@ -28,11 +28,12 @@ pub fn write_file(
 
     let ciphertext = age_io::encrypt_bytes(content.as_bytes(), passphrase)?;
     std::fs::write(&on_disk, &ciphertext)?;
+    space.cache().invalidate(&on_disk.to_string_lossy());
 
     let summary = message
         .map(|m| m.to_string())
         .unwrap_or_else(|| format!("Edit: {rel_path}"));
-    commit_all(&root, &summary)?;
+    space.with_repo(|repo| commit_all(repo, &summary))?;
 
     let updated = std::fs::metadata(&on_disk)
         .and_then(|m| m.modified())

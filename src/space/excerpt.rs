@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use age::secrecy::SecretString;
 use walkdir::WalkDir;
@@ -15,8 +16,10 @@ pub struct Excerpt {
 
 const EXCERPT_CHARS: usize = 180;
 
-/// Walk every `.md.age` file, decrypt, and return a `path → excerpt` map.
-/// Title is the first `# ...` line; excerpt is the first ~180 chars of body.
+/// Walk every `.md.age` file, decrypt (with cache), and return a `path →
+/// excerpt` map. Title is the first `# ...` line; excerpt is the first ~180
+/// chars of body. Cached plaintext keyed by `path + mtime` keeps repeated
+/// excerpt rebuilds cheap.
 pub fn build_excerpts(
     space: &Space,
     passphrase: &SecretString,
@@ -26,6 +29,7 @@ pub fn build_excerpts(
     if !root.is_dir() {
         return Ok(out);
     }
+    let cache = space.cache();
 
     for entry in WalkDir::new(&root).into_iter().filter_map(Result::ok) {
         if !entry.file_type().is_file() {
@@ -53,16 +57,28 @@ pub fn build_excerpts(
             .trim_end_matches(ENC_EXT)
             .to_string();
 
-        let bytes = match std::fs::read(path) {
-            Ok(b) => b,
-            Err(_) => continue,
+        let mtime = match entry.metadata().ok().and_then(|m| m.modified().ok()) {
+            Some(t) => t,
+            None => continue,
         };
-        let plaintext = match age_io::decrypt_bytes(&bytes, passphrase) {
-            Ok(p) => p,
-            Err(_) => continue,
-        };
-        let Ok(text) = String::from_utf8(plaintext) else {
-            continue;
+        let cache_key = path.to_string_lossy().into_owned();
+        let text = if let Some(cached) = cache.get(&cache_key, mtime) {
+            cached
+        } else {
+            let bytes = match std::fs::read(path) {
+                Ok(b) => b,
+                Err(_) => continue,
+            };
+            let plaintext = match age_io::decrypt_bytes(&bytes, passphrase) {
+                Ok(p) => p,
+                Err(_) => continue,
+            };
+            let Ok(text) = String::from_utf8(plaintext) else {
+                continue;
+            };
+            let arc: Arc<str> = Arc::from(text);
+            cache.put(cache_key.clone(), mtime, arc.clone());
+            arc
         };
 
         let title = extract_title(&text);

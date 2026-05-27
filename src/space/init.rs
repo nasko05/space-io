@@ -6,7 +6,7 @@ use rand::RngCore;
 use crate::config::SpaceConfig;
 use crate::crypto::{age_io, kdf};
 use crate::error::{AppError, AppResult};
-use crate::space::git::commit_all;
+use crate::space::git::{commit_all, open as git_open};
 
 const SEED_REL_PATH: &str = "Journal/2026/welcome.md";
 const SEED_CONTENT: &str = "# Welcome to your space
@@ -85,7 +85,8 @@ pub fn init_space(opts: InitOptions) -> AppResult<()> {
     let ciphertext = age_io::encrypt_bytes(SEED_CONTENT.as_bytes(), &opts.passphrase)?;
     std::fs::write(&seed_path, &ciphertext)?;
 
-    commit_all(&root, "Initial commit — welcome note")?;
+    let repo = git_open(&root)?;
+    commit_all(&repo, "Initial commit — welcome note")?;
 
     Ok(())
 }

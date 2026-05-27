@@ -1,5 +1,6 @@
 import { KeyboardEvent, useEffect, useRef, useState } from 'react';
 import { Close } from '../icons/Icon';
+import { useAsyncDialog } from '../../lib/useAsyncDialog';
 import styles from './dialog.module.css';
 
 interface Props {
@@ -25,16 +26,13 @@ export function TagsDialog({
 }: Props) {
   const [tags, setTags] = useState<string[]>(initialTags);
   const [draft, setDraft] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { busy, error, run } = useAsyncDialog(open, 'tag update failed');
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     if (open) {
       setTags(initialTags);
       setDraft('');
-      setBusy(false);
-      setError(null);
       const t = window.setTimeout(() => inputRef.current?.focus(), 0);
       return () => window.clearTimeout(t);
     }
@@ -66,22 +64,14 @@ export function TagsDialog({
   }
 
   async function save() {
-    setBusy(true);
-    setError(null);
-    try {
-      // Commit any in-progress draft into the tag set before saving.
-      const finalTags = (() => {
-        const t = draft.trim();
-        if (!t) return tags;
-        if (tags.some((x) => x.toLowerCase() === t.toLowerCase())) return tags;
-        return [...tags, t];
-      })();
-      await onSave(finalTags);
-      onClose();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'tag update failed');
-      setBusy(false);
-    }
+    // Commit any in-progress draft into the tag set before saving.
+    const finalTags = (() => {
+      const t = draft.trim();
+      if (!t) return tags;
+      if (tags.some((x) => x.toLowerCase() === t.toLowerCase())) return tags;
+      return [...tags, t];
+    })();
+    await run(() => onSave(finalTags), { onSuccess: onClose });
   }
 
   if (!open) return null;

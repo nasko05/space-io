@@ -51,7 +51,7 @@ pub fn save(space: &Space, passphrase: &SecretString, index: &MetaIndex) -> AppR
         std::fs::create_dir_all(parent)?;
     }
     std::fs::write(&p, &ciphertext)?;
-    commit_all(&space.root(), "meta: update")?;
+    space.with_repo(|repo| commit_all(repo, "meta: update"))?;
     Ok(())
 }
 

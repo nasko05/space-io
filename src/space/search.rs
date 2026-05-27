@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use age::secrecy::SecretString;
 use walkdir::WalkDir;
 
@@ -20,11 +22,13 @@ pub struct SearchHit {
 /// semantics, case-insensitive), and return up to `MAX_HITS` ordered by a
 /// tiny score: 3 points for a title hit, 1 point per body match.
 ///
-/// This is a deliberate "walk-and-grep" instead of a persistent tantivy
-/// index — keeping the index in memory only would mean a startup rebuild
-/// for every restart, and persisting it would leak plaintext titles/bodies
-/// to disk in violation of the SPEC's "server stores ciphertext only"
-/// guarantee. Re-evaluate if the corpus crosses ~10k notes.
+/// We deliberately walk-and-grep instead of maintaining a persistent
+/// tantivy index — keeping the index in memory only would mean a startup
+/// rebuild for every restart, and persisting it would leak plaintext
+/// titles/bodies to disk in violation of the SPEC's "server stores
+/// ciphertext only" guarantee. Plaintext is cached in memory per
+/// (path, mtime) so repeat searches don't re-decrypt unchanged files.
+/// Re-evaluate if the corpus crosses ~10k notes.
 pub fn search(space: &Space, passphrase: &SecretString, query: &str) -> AppResult<Vec<SearchHit>> {
     let tokens: Vec<String> = query
         .split_whitespace()
@@ -39,6 +43,7 @@ pub fn search(space: &Space, passphrase: &SecretString, query: &str) -> AppResul
     if !root.is_dir() {
         return Ok(vec![]);
     }
+    let cache = space.cache();
 
     let mut hits: Vec<SearchHit> = Vec::new();
 
@@ -66,15 +71,28 @@ pub fn search(space: &Space, passphrase: &SecretString, query: &str) -> AppResul
             .trim_end_matches(ENC_EXT)
             .to_string();
 
-        let Ok(bytes) = std::fs::read(path) else {
-            continue;
+        let mtime = match entry.metadata().ok().and_then(|m| m.modified().ok()) {
+            Some(t) => t,
+            None => continue,
         };
-        let Ok(plaintext) = age_io::decrypt_bytes(&bytes, passphrase) else {
-            continue;
+        let cache_key = path.to_string_lossy().into_owned();
+        let text: Arc<str> = if let Some(cached) = cache.get(&cache_key, mtime) {
+            cached
+        } else {
+            let Ok(bytes) = std::fs::read(path) else {
+                continue;
+            };
+            let Ok(plaintext) = age_io::decrypt_bytes(&bytes, passphrase) else {
+                continue;
+            };
+            let Ok(text) = String::from_utf8(plaintext) else {
+                continue;
+            };
+            let arc: Arc<str> = Arc::from(text);
+            cache.put(cache_key, mtime, arc.clone());
+            arc
         };
-        let Ok(text) = String::from_utf8(plaintext) else {
-            continue;
-        };
+
         let lower = text.to_ascii_lowercase();
         let title = extract_title(&text);
         let title_lower = title.as_deref().map(|t| t.to_ascii_lowercase());

@@ -1,13 +1,16 @@
 use std::path::Path;
 
+use git2::Repository;
+
 use crate::error::{AppError, AppResult};
 
-/// Stage everything under `repo_path` and create a commit. Used by `init`,
-/// `write`, and `create` to keep the space as a git repository where every
-/// edit is a commit.
-pub fn commit_all(repo_path: &Path, message: &str) -> AppResult<()> {
-    let repo = git2::Repository::open(repo_path)
-        .map_err(|e| AppError::Internal(format!("git open: {e}")))?;
+/// Stage everything under `repo` and create a commit. Callers come from
+/// `init`, `write`, `create`, `delete`, `rename`, `meta`, and `upload` to
+/// keep the space as a git repository where every edit is a commit.
+///
+/// The repository handle is held by `Space` so we don't pay the
+/// `Repository::open` cost (scan packs, parse refs) on every write.
+pub fn commit_all(repo: &Repository, message: &str) -> AppResult<()> {
     let mut index = repo
         .index()
         .map_err(|e| AppError::Internal(format!("git index: {e}")))?;
@@ -25,13 +28,21 @@ pub fn commit_all(repo_path: &Path, message: &str) -> AppResult<()> {
         .map_err(|e| AppError::Internal(format!("git find_tree: {e}")))?;
     let sig = git2::Signature::now("hearth", "hearth@local")
         .map_err(|e| AppError::Internal(format!("git signature: {e}")))?;
+    // If HEAD resolves to a commit, that's our parent. If HEAD is missing
+    // (root commit) we proceed with no parents. Anything else — a HEAD that
+    // points at something that won't peel — is a real failure and must
+    // bubble up: silently treating it as "no parents" would orphan history.
     let parents: Vec<git2::Commit> = match repo.head() {
-        Ok(head) => head
-            .peel_to_commit()
-            .ok()
-            .map(|c| vec![c])
-            .unwrap_or_default(),
-        Err(_) => vec![],
+        Ok(head) => match head.peel_to_commit() {
+            Ok(c) => vec![c],
+            Err(e) => return Err(AppError::Internal(format!("git peel head: {e}"))),
+        },
+        Err(e) if e.code() == git2::ErrorCode::UnbornBranch
+            || e.code() == git2::ErrorCode::NotFound =>
+        {
+            vec![]
+        }
+        Err(e) => return Err(AppError::Internal(format!("git head: {e}"))),
     };
     let parent_refs: Vec<&git2::Commit> = parents.iter().collect();
     repo.commit(Some("HEAD"), &sig, &sig, message, &tree, &parent_refs)
@@ -39,15 +50,20 @@ pub fn commit_all(repo_path: &Path, message: &str) -> AppResult<()> {
     Ok(())
 }
 
+/// Open a repository, used at startup to populate the cache in `Space`.
+pub fn open(repo_path: &Path) -> AppResult<Repository> {
+    Repository::open(repo_path).map_err(|e| AppError::Internal(format!("git open: {e}")))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use tempfile::TempDir;
 
-    fn init_repo() -> TempDir {
+    fn init_repo() -> (TempDir, Repository) {
         let dir = TempDir::new().unwrap();
-        git2::Repository::init(dir.path()).unwrap();
-        dir
+        let repo = git2::Repository::init(dir.path()).unwrap();
+        (dir, repo)
     }
 
     fn count_commits(repo_path: &Path) -> usize {
@@ -61,28 +77,27 @@ mod tests {
 
     #[test]
     fn first_commit_creates_root_commit() {
-        let dir = init_repo();
+        let (dir, repo) = init_repo();
         std::fs::write(dir.path().join("first.txt"), b"hello").unwrap();
-        commit_all(dir.path(), "initial").unwrap();
+        commit_all(&repo, "initial").unwrap();
         assert_eq!(count_commits(dir.path()), 1);
     }
 
     #[test]
     fn second_commit_extends_the_history() {
-        let dir = init_repo();
+        let (dir, repo) = init_repo();
         std::fs::write(dir.path().join("a.txt"), b"a").unwrap();
-        commit_all(dir.path(), "a").unwrap();
+        commit_all(&repo, "a").unwrap();
         std::fs::write(dir.path().join("b.txt"), b"b").unwrap();
-        commit_all(dir.path(), "b").unwrap();
+        commit_all(&repo, "b").unwrap();
         assert_eq!(count_commits(dir.path()), 2);
     }
 
     #[test]
     fn commit_uses_author_metadata() {
-        let dir = init_repo();
+        let (dir, repo) = init_repo();
         std::fs::write(dir.path().join("x"), b"x").unwrap();
-        commit_all(dir.path(), "msg").unwrap();
-        let repo = git2::Repository::open(dir.path()).unwrap();
+        commit_all(&repo, "msg").unwrap();
         let head = repo.head().unwrap().peel_to_commit().unwrap();
         assert_eq!(head.author().name(), Some("hearth"));
         assert_eq!(head.author().email(), Some("hearth@local"));
@@ -91,22 +106,13 @@ mod tests {
 
     #[test]
     fn commit_picks_up_a_new_file() {
-        let dir = init_repo();
+        let (dir, repo) = init_repo();
         std::fs::write(dir.path().join("first.txt"), b"a").unwrap();
-        commit_all(dir.path(), "first").unwrap();
+        commit_all(&repo, "first").unwrap();
         std::fs::write(dir.path().join("second.txt"), b"b").unwrap();
-        commit_all(dir.path(), "second").unwrap();
-        let repo = git2::Repository::open(dir.path()).unwrap();
+        commit_all(&repo, "second").unwrap();
         let head = repo.head().unwrap().peel_to_tree().unwrap();
         assert!(head.get_path(Path::new("first.txt")).is_ok());
         assert!(head.get_path(Path::new("second.txt")).is_ok());
-    }
-
-    #[test]
-    fn commit_on_missing_repo_errors() {
-        let dir = TempDir::new().unwrap();
-        // No git2::Repository::init — should fail open.
-        let err = commit_all(dir.path(), "x").unwrap_err();
-        assert!(matches!(err, AppError::Internal(_)));
     }
 }

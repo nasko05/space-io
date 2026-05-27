@@ -5,13 +5,39 @@ function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+// Block any URL scheme that can execute script (`javascript:`, `data:`,
+// `vbscript:`, `file:`). For anything else: http(s), mailto, anchors,
+// relative/absolute paths, we let it through after attribute-escaping the
+// embedded quotes so the closing `"` of href= can't be smuggled.
+function escapeAttr(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function safeHref(raw: string): string {
+  const trimmed = raw.trim();
+  if (trimmed === '') return '#';
+  // Reject any control character — a tab/newline inside `java\tscript:` is
+  // tolerated by some browsers as the literal scheme.
+  if (/[\x00-\x1f\x7f]/.test(trimmed)) return '#';
+  // Schemes we always block.
+  if (/^\s*(javascript|data|vbscript|file)\s*:/i.test(trimmed)) return '#';
+  // Allow-list: explicit safe schemes, anchors, or relative URLs (which
+  // never have a colon before the first slash/?/# — those are the only
+  // separators that can terminate a relative path component).
+  if (/^(https?:|mailto:|#|\/)/i.test(trimmed)) return escapeAttr(trimmed);
+  if (/^[^:]*([/?#]|$)/.test(trimmed)) return escapeAttr(trimmed);
+  return '#';
+}
+
 function inline(s: string): string {
   return escapeHtml(s)
     .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
     .replace(/\*([^*]+)\*/g, '<em>$1</em>')
     .replace(/`([^`]+)`/g, '<code>$1</code>')
     .replace(/\[\[([^\]]+)\]\]/g, '<a class="wikilink" href="#">$1</a>')
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>');
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, label: string, url: string) => {
+      return `<a href="${safeHref(url)}">${label}</a>`;
+    });
 }
 
 export function renderMarkdown(src: string): string {

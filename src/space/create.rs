@@ -2,35 +2,10 @@ use age::secrecy::SecretString;
 use time::OffsetDateTime;
 
 use crate::crypto::age_io;
-use crate::error::{AppError, AppResult};
+use crate::error::AppResult;
 use crate::space::git::commit_all;
-use crate::space::paths::{resolve_under, with_age_suffix, ENC_EXT};
+use crate::space::paths::{find_unique_name, resolve_under, sanitise_title, with_age_suffix};
 use crate::space::Space;
-
-/// Sanitise an optional title into a filesystem-safe stem. Empty input yields
-/// `None`, signalling the caller should fall back to a time-based name.
-fn sanitise(title: &str) -> Option<String> {
-    let trimmed = title.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    let mut out = String::with_capacity(trimmed.len());
-    for ch in trimmed.chars() {
-        if ch.is_ascii_alphanumeric() || ch == ' ' || ch == '-' || ch == '_' {
-            out.push(ch);
-        } else if ch == ',' || ch == '.' || ch == '!' || ch == '?' {
-            // skip
-        } else {
-            out.push('-');
-        }
-    }
-    let out = out.split_whitespace().collect::<Vec<_>>().join(" ");
-    if out.is_empty() {
-        None
-    } else {
-        Some(out)
-    }
-}
 
 #[derive(Debug)]
 pub struct CreateResult {
@@ -49,22 +24,10 @@ pub fn create_file(
 
     let now = OffsetDateTime::now_utc();
     let stem = title
-        .and_then(sanitise)
+        .and_then(sanitise_title)
         .unwrap_or_else(|| format!("Untitled {:02}-{:02}", now.hour(), now.minute()));
 
-    // Find a non-colliding filename.
-    let mut filename = format!("{stem}.md");
-    let mut counter = 2;
-    while folder_resolved
-        .join(format!("{filename}{ENC_EXT}"))
-        .exists()
-    {
-        filename = format!("{stem} ({counter}).md");
-        counter += 1;
-        if counter > 999 {
-            return Err(AppError::Internal("too many name collisions".into()));
-        }
-    }
+    let filename = find_unique_name(&folder_resolved, &stem, "md")?;
 
     let rel_path = if folder.is_empty() {
         filename.clone()
@@ -76,7 +39,7 @@ pub fn create_file(
     let on_disk = with_age_suffix(&folder_resolved.join(&filename));
     let ciphertext = age_io::encrypt_bytes(initial.as_bytes(), passphrase)?;
     std::fs::write(&on_disk, &ciphertext)?;
-    commit_all(&root, &format!("Create: {rel_path}"))?;
+    space.with_repo(|repo| commit_all(repo, &format!("Create: {rel_path}")))?;
 
     Ok(CreateResult { path: rel_path })
 }
@@ -84,33 +47,8 @@ pub fn create_file(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::AppError;
     use crate::space::test_helpers::make_space;
-
-    #[test]
-    fn sanitise_preserves_simple_titles() {
-        assert_eq!(sanitise("My Note"), Some("My Note".into()));
-    }
-
-    #[test]
-    fn sanitise_strips_punctuation() {
-        assert_eq!(sanitise("Hello, world!"), Some("Hello world".into()));
-    }
-
-    #[test]
-    fn sanitise_replaces_unsupported_chars_with_dash() {
-        assert_eq!(sanitise("a/b\\c"), Some("a-b-c".into()));
-    }
-
-    #[test]
-    fn sanitise_returns_none_for_empty() {
-        assert_eq!(sanitise(""), None);
-        assert_eq!(sanitise("   "), None);
-    }
-
-    #[test]
-    fn sanitise_collapses_whitespace() {
-        assert_eq!(sanitise("hello   world"), Some("hello world".into()));
-    }
 
     #[test]
     fn untitled_when_no_title_is_provided() {

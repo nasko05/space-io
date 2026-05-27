@@ -4,6 +4,11 @@ use crate::error::{AppError, AppResult};
 
 pub const ENC_EXT: &str = ".age";
 
+/// Maximum length we'll accept for a single filename segment. 200 bytes
+/// fits comfortably under common filesystem limits (255 on ext4/APFS) with
+/// headroom for the `.age` suffix.
+pub const MAX_FILENAME: usize = 200;
+
 /// Resolve a relative path against `root`, rejecting `..`, absolute paths,
 /// and anything that escapes root after canonicalisation.
 pub fn resolve_under(root: &Path, rel: &str) -> AppResult<PathBuf> {
@@ -23,21 +28,19 @@ pub fn resolve_under(root: &Path, rel: &str) -> AppResult<PathBuf> {
                 }
             }
             Err(_) => {
-                if let Some(parent) = out.parent() {
-                    if parent.exists() {
-                        let canonical_parent =
-                            parent.canonicalize().map_err(|_| AppError::Forbidden)?;
-                        if !canonical_parent.starts_with(&canonical_root) {
-                            return Err(AppError::Forbidden);
-                        }
-                    } else if !parent.starts_with(&canonical_root) {
-                        // Parent doesn't exist yet; ensure the prefix stays
-                        // inside root by comparing the resolved buffer.
-                        if !out.starts_with(&canonical_root) {
-                            return Err(AppError::Forbidden);
-                        }
+                // The target itself doesn't exist (e.g. we're about to
+                // create it). Walk up until we hit an ancestor that does,
+                // canonicalise *that*, and confirm it sits under the root.
+                let mut walker = out.as_path();
+                let mut ancestor = loop {
+                    match walker.parent() {
+                        Some(parent) if parent.exists() => break parent.to_path_buf(),
+                        Some(parent) => walker = parent,
+                        None => return Err(AppError::Forbidden),
                     }
-                } else {
+                };
+                ancestor = ancestor.canonicalize().map_err(|_| AppError::Forbidden)?;
+                if !ancestor.starts_with(&canonical_root) {
                     return Err(AppError::Forbidden);
                 }
             }
@@ -51,6 +54,101 @@ pub fn with_age_suffix(p: &Path) -> PathBuf {
     let mut s = p.as_os_str().to_owned();
     s.push(ENC_EXT);
     PathBuf::from(s)
+}
+
+/// Sanitise a *literal* uploaded filename — the contents of a single
+/// segment, never a relative path. Rejects path separators, NULs, and
+/// leading dots; truncates to `MAX_FILENAME` bytes.
+///
+/// This is the "no surprises" mode: the input is preserved character for
+/// character. Used by upload.rs where the user supplied a real filename
+/// (`Q3 report.pdf`) and we shouldn't be opinionated about Unicode.
+pub fn sanitise_filename(input: &str) -> AppResult<String> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return Err(AppError::BadRequest("empty filename".into()));
+    }
+    let mut out = String::with_capacity(trimmed.len());
+    for ch in trimmed.chars() {
+        if ch == '/' || ch == '\\' || ch == '\0' {
+            return Err(AppError::BadRequest("filename contains separator".into()));
+        }
+        out.push(ch);
+    }
+    if out.starts_with('.') {
+        return Err(AppError::BadRequest(
+            "filename cannot start with '.'".into(),
+        ));
+    }
+    if out.len() > MAX_FILENAME {
+        out.truncate(MAX_FILENAME);
+    }
+    Ok(out)
+}
+
+/// Sanitise a *note title* into a filename stem. Punctuation is stripped,
+/// unsupported chars become '-', whitespace collapses to single spaces.
+/// Returns `None` on empty input so callers can fall back to a generated
+/// name like `Untitled 09-23`.
+pub fn sanitise_title(title: &str) -> Option<String> {
+    let trimmed = title.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let mut out = String::with_capacity(trimmed.len());
+    for ch in trimmed.chars() {
+        if ch.is_ascii_alphanumeric() || ch == ' ' || ch == '-' || ch == '_' {
+            out.push(ch);
+        } else if ch == ',' || ch == '.' || ch == '!' || ch == '?' {
+            // skip
+        } else {
+            out.push('-');
+        }
+    }
+    let out = out.split_whitespace().collect::<Vec<_>>().join(" ");
+    if out.is_empty() {
+        None
+    } else {
+        Some(out)
+    }
+}
+
+/// Split `name` into its stem and extension. `("photo.jpg") → ("photo",
+/// "jpg")`; names with no extension (or a leading/trailing `.`) yield an
+/// empty extension.
+pub fn split_stem_ext(name: &str) -> (String, String) {
+    match name.rfind('.') {
+        Some(i) if i > 0 && i < name.len() - 1 => {
+            (name[..i].to_string(), name[i + 1..].to_string())
+        }
+        _ => (name.to_string(), String::new()),
+    }
+}
+
+/// Find a non-colliding name in `folder` by trying `stem.ext`, then `stem
+/// (2).ext`, `stem (3).ext`, … up to 999. The encrypted-side `.age` suffix
+/// is appended internally for the exists-check so callers pass the
+/// visible name.
+pub fn find_unique_name(folder: &Path, stem: &str, ext: &str) -> AppResult<String> {
+    let initial = if ext.is_empty() {
+        stem.to_string()
+    } else {
+        format!("{stem}.{ext}")
+    };
+    if !folder.join(format!("{initial}{ENC_EXT}")).exists() {
+        return Ok(initial);
+    }
+    for counter in 2..=999 {
+        let candidate = if ext.is_empty() {
+            format!("{stem} ({counter})")
+        } else {
+            format!("{stem} ({counter}).{ext}")
+        };
+        if !folder.join(format!("{candidate}{ENC_EXT}")).exists() {
+            return Ok(candidate);
+        }
+    }
+    Err(AppError::Internal("too many filename collisions".into()))
 }
 
 #[cfg(test)]
@@ -141,6 +239,16 @@ mod tests {
     }
 
     #[test]
+    fn nonexistent_target_validated_via_first_existing_ancestor() {
+        // Build a path several levels deeper than anything that exists on
+        // disk; resolve_under should still accept it because the first
+        // existing ancestor is the legit Journal folder.
+        let root = make_root();
+        let out = resolve_under(root.path(), "Journal/2026/deep/new/note.md").expect("ok");
+        assert!(out.starts_with(root.path()));
+    }
+
+    #[test]
     fn with_age_suffix_appends_correctly() {
         assert_eq!(
             with_age_suffix(Path::new("foo/bar.md")).to_string_lossy(),
@@ -150,5 +258,104 @@ mod tests {
             with_age_suffix(Path::new("/abs/baz")).to_string_lossy(),
             "/abs/baz.age"
         );
+    }
+
+    #[test]
+    fn sanitise_filename_passes_simple_names() {
+        assert_eq!(sanitise_filename("ok.txt").unwrap(), "ok.txt");
+    }
+
+    #[test]
+    fn sanitise_filename_rejects_path_separators() {
+        assert!(sanitise_filename("a/b").is_err());
+        assert!(sanitise_filename("a\\b").is_err());
+        assert!(sanitise_filename("a\0b").is_err());
+    }
+
+    #[test]
+    fn sanitise_filename_rejects_dotfiles() {
+        assert!(sanitise_filename(".env").is_err());
+    }
+
+    #[test]
+    fn sanitise_filename_rejects_empty() {
+        assert!(sanitise_filename("").is_err());
+        assert!(sanitise_filename("   ").is_err());
+    }
+
+    #[test]
+    fn sanitise_filename_truncates_long_names() {
+        let long = "a".repeat(500);
+        let result = sanitise_filename(&long).unwrap();
+        assert!(result.len() <= MAX_FILENAME);
+    }
+
+    #[test]
+    fn sanitise_title_preserves_simple_titles() {
+        assert_eq!(sanitise_title("My Note"), Some("My Note".into()));
+    }
+
+    #[test]
+    fn sanitise_title_strips_punctuation() {
+        assert_eq!(sanitise_title("Hello, world!"), Some("Hello world".into()));
+    }
+
+    #[test]
+    fn sanitise_title_replaces_unsupported_chars_with_dash() {
+        assert_eq!(sanitise_title("a/b\\c"), Some("a-b-c".into()));
+    }
+
+    #[test]
+    fn sanitise_title_returns_none_for_empty() {
+        assert_eq!(sanitise_title(""), None);
+        assert_eq!(sanitise_title("   "), None);
+    }
+
+    #[test]
+    fn sanitise_title_collapses_whitespace() {
+        assert_eq!(sanitise_title("hello   world"), Some("hello world".into()));
+    }
+
+    #[test]
+    fn split_stem_ext_pulls_extension() {
+        assert_eq!(split_stem_ext("a.txt"), ("a".into(), "txt".into()));
+        assert_eq!(split_stem_ext("photo.jpg"), ("photo".into(), "jpg".into()));
+    }
+
+    #[test]
+    fn split_stem_ext_handles_no_extension() {
+        assert_eq!(split_stem_ext("README"), ("README".into(), String::new()));
+    }
+
+    #[test]
+    fn split_stem_ext_handles_dot_only_at_start_or_end() {
+        assert_eq!(split_stem_ext(".hidden"), (".hidden".into(), String::new()));
+        assert_eq!(split_stem_ext("foo."), ("foo.".into(), String::new()));
+    }
+
+    #[test]
+    fn find_unique_name_returns_initial_when_free() {
+        let dir = TempDir::new().unwrap();
+        let name = find_unique_name(dir.path(), "note", "md").unwrap();
+        assert_eq!(name, "note.md");
+    }
+
+    #[test]
+    fn find_unique_name_picks_first_free_paren_suffix() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("note.md.age"), b"x").unwrap();
+        let name = find_unique_name(dir.path(), "note", "md").unwrap();
+        assert_eq!(name, "note (2).md");
+        fs::write(dir.path().join("note (2).md.age"), b"x").unwrap();
+        let name = find_unique_name(dir.path(), "note", "md").unwrap();
+        assert_eq!(name, "note (3).md");
+    }
+
+    #[test]
+    fn find_unique_name_handles_extensionless_input() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("README.age"), b"x").unwrap();
+        let name = find_unique_name(dir.path(), "README", "").unwrap();
+        assert_eq!(name, "README (2)");
     }
 }

@@ -1,3 +1,4 @@
+pub mod cache;
 pub mod create;
 pub mod delete;
 pub mod download;
@@ -8,6 +9,7 @@ pub mod init;
 pub mod meta;
 pub mod mkdir;
 pub mod paths;
+pub mod rate_limit;
 pub mod read;
 pub mod rename;
 pub mod search;
@@ -20,10 +22,11 @@ pub mod write;
 pub(crate) mod test_helpers;
 
 use std::path::PathBuf;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 
 use crate::config::{PasskeyConfig, SpaceConfig};
 use crate::error::{AppError, AppResult};
+use crate::space::cache::DecryptedCache;
 
 #[derive(Clone)]
 pub struct Space {
@@ -33,6 +36,14 @@ pub struct Space {
 struct SpaceInner {
     space_dir: PathBuf,
     config: RwLock<SpaceConfig>,
+    /// Cached git repository. Opening a repo scans pack indices and parses
+    /// refs; we do it once at startup and hand callers a borrowed handle.
+    /// git2::Repository is `!Sync`, hence the `Mutex`.
+    repo: Mutex<git2::Repository>,
+    /// Decrypted plaintext cache for search and excerpt builders. Lives
+    /// here so it's tied to the unlocked vault and dropped when `Space`
+    /// is dropped.
+    decrypted: DecryptedCache,
 }
 
 impl Space {
@@ -45,16 +56,40 @@ impl Space {
                 root.display()
             )));
         }
+        let repo = git::open(&root)?;
         Ok(Self {
             inner: Arc::new(SpaceInner {
                 space_dir,
                 config: RwLock::new(config),
+                repo: Mutex::new(repo),
+                decrypted: DecryptedCache::new(),
             }),
         })
     }
 
+    /// Shared cache for decrypted markdown bodies. Read by `search` and
+    /// `excerpt`; invalidated by `write` / `delete` / `rename`.
+    pub fn cache(&self) -> &DecryptedCache {
+        &self.inner.decrypted
+    }
+
     pub fn root(&self) -> PathBuf {
         SpaceConfig::space_root(&self.inner.space_dir)
+    }
+
+    /// Run a closure against the cached git repository under the internal
+    /// mutex. Callers should keep the closure short — we serialise writes
+    /// across the whole vault on this lock.
+    pub fn with_repo<R, F>(&self, f: F) -> AppResult<R>
+    where
+        F: FnOnce(&git2::Repository) -> AppResult<R>,
+    {
+        let guard = self
+            .inner
+            .repo
+            .lock()
+            .map_err(|_| AppError::Internal("git repo mutex poisoned".into()))?;
+        f(&guard)
     }
 
     /// Cheap snapshot of the current on-disk config — clone so callers can

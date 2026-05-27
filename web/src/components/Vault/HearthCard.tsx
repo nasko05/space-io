@@ -5,6 +5,7 @@ import {
 } from 'react';
 import { FileText, FilePdf, FileDocx, Image as ImageIcon, Video, Play } from '../icons/Icon';
 import { ExcerptItem, TreeFile } from '../../api/client';
+import { formatSize } from '../../lib/format';
 import styles from './HearthCard.module.css';
 
 interface Props {
@@ -208,8 +209,3 @@ function formatWhen(iso: string): string {
   return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-}

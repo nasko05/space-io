@@ -1,4 +1,6 @@
-use axum::extract::State;
+use std::net::SocketAddr;
+
+use axum::extract::{ConnectInfo, State};
 use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::{delete, get, post};
@@ -22,6 +24,15 @@ pub fn router() -> Router<AppState> {
         .route("/auth/passkey/info", get(passkey_info))
         .route("/auth/passkey/register", post(passkey_register))
         .route("/auth/passkey", delete(passkey_delete))
+}
+
+fn session_cookie(state: &AppState, value: impl Into<String>) -> Cookie<'static> {
+    let mut cookie = Cookie::new(SESSION_COOKIE, value.into());
+    cookie.set_http_only(true);
+    cookie.set_same_site(SameSite::Strict);
+    cookie.set_path("/");
+    cookie.set_secure(state.config.cookie_secure);
+    cookie
 }
 
 #[derive(Serialize)]
@@ -52,9 +63,24 @@ struct UnlockRequest {
 
 async fn unlock(
     State(state): State<AppState>,
+    ConnectInfo(remote): ConnectInfo<SocketAddr>,
     jar: CookieJar,
     Json(req): Json<UnlockRequest>,
 ) -> AppResult<impl IntoResponse> {
+    // Throttle brute force per source IP. We count attempts *before* doing
+    // the scrypt work so a flood doesn't pin the worker pool.
+    if let Some(retry_after) = state.unlock_limiter.check(remote.ip()) {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::RETRY_AFTER,
+            HeaderValue::from_str(&retry_after.as_secs().max(1).to_string())
+                .unwrap_or_else(|_| HeaderValue::from_static("60")),
+        );
+        return Err(AppError::TooManyRequests {
+            retry_after_secs: retry_after.as_secs().max(1),
+        });
+    }
+
     let cfg = state.space.config();
     let salt = hex::decode(&cfg.salt_verify_hex)
         .map_err(|_| AppError::Internal("bad salt hex in config".into()))?;
@@ -64,22 +90,33 @@ async fn unlock(
         return Err(AppError::Internal("verifier length mismatch".into()));
     }
 
-    let derived =
-        kdf::derive_verifier(&req.passphrase, &salt, cfg.kdf_log_n, cfg.kdf_r, cfg.kdf_p)?;
+    // scrypt is CPU-bound (~150 ms at our default params) — running it on
+    // the async worker would block every other request on the same thread.
+    let passphrase_for_kdf = req.passphrase.clone();
+    let log_n = cfg.kdf_log_n;
+    let r = cfg.kdf_r;
+    let p = cfg.kdf_p;
+    let derived = tokio::task::spawn_blocking(move || {
+        kdf::derive_verifier(&passphrase_for_kdf, &salt, log_n, r, p)
+    })
+    .await
+    .map_err(|e| AppError::Internal(format!("scrypt join: {e}")))??;
+
     let mut expected_arr = [0u8; kdf::VERIFIER_LEN];
     expected_arr.copy_from_slice(&expected);
     if !kdf::verify(&derived, &expected_arr) {
         return Err(AppError::WrongPassphrase);
     }
 
+    // A successful unlock clears the throttling so a typo earlier in the
+    // window doesn't penalise the next legitimate sign-in.
+    state.unlock_limiter.clear(remote.ip());
+
     let id = state
         .sessions
         .create(age::secrecy::SecretString::from(req.passphrase));
 
-    let mut cookie = Cookie::new(SESSION_COOKIE, id.to_string());
-    cookie.set_http_only(true);
-    cookie.set_same_site(SameSite::Strict);
-    cookie.set_path("/");
+    let cookie = session_cookie(&state, id.to_string());
     let jar = jar.add(cookie);
 
     let mut headers = HeaderMap::new();
@@ -97,10 +134,7 @@ async fn lock(State(state): State<AppState>, jar: CookieJar) -> impl IntoRespons
             state.sessions.drop(&id);
         }
     }
-    let mut cookie = Cookie::new(SESSION_COOKIE, "");
-    cookie.set_path("/");
-    cookie.set_http_only(true);
-    cookie.set_same_site(SameSite::Strict);
+    let cookie = session_cookie(&state, "");
     let jar = jar.remove(cookie);
     let mut headers = HeaderMap::new();
     for c in jar.iter() {

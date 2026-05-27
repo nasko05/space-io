@@ -7,14 +7,16 @@ mod state;
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use age::secrecy::SecretString;
 use anyhow::Context;
 use clap::{Parser, Subcommand};
 
+use crate::space::rate_limit::RateLimiter;
 use crate::space::session::SessionStore;
 use crate::space::Space;
-use crate::state::AppState;
+use crate::state::{AppConfig, AppState};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -99,17 +101,48 @@ fn cmd_init(space_dir: PathBuf, passphrase: Option<String>, owner: String) -> an
 #[tokio::main(flavor = "multi_thread")]
 async fn cmd_serve(space_dir: PathBuf, listen: SocketAddr) -> anyhow::Result<()> {
     let space = Space::open(space_dir).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let sessions = SessionStore::new();
+    let unlock_limiter = RateLimiter::new();
+    let config = AppConfig::from_env();
+    if !config.cookie_secure {
+        tracing::warn!(
+            "HEARTH_INSECURE_COOKIES=1: session cookies will not be marked Secure. \
+             Acceptable for localhost dev only — any production deploy should run \
+             behind TLS and leave this unset."
+        );
+    }
     let state = AppState {
         space,
-        sessions: SessionStore::new(),
+        sessions: sessions.clone(),
+        unlock_limiter: unlock_limiter.clone(),
+        config,
     };
+
+    // Periodically sweep expired sessions and rate-limit windows so the
+    // in-memory tables don't grow unbounded if a host stays up for weeks.
+    let sweep_sessions = sessions.clone();
+    let sweep_limiter = unlock_limiter.clone();
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(Duration::from_secs(5 * 60));
+        loop {
+            tick.tick().await;
+            sweep_sessions.sweep_expired();
+            sweep_limiter.sweep();
+        }
+    });
+
     let app = routes::build_router(state);
 
     tracing::info!("Listening on http://{listen}");
     let listener = tokio::net::TcpListener::bind(listen)
         .await
         .context("bind")?;
-    axum::serve(listener, app).await.context("serve")?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await
+    .context("serve")?;
     Ok(())
 }
 

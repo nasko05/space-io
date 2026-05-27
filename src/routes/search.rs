@@ -4,7 +4,7 @@ use axum::{Json, Router};
 use axum_extra::extract::cookie::CookieJar;
 use serde::{Deserialize, Serialize};
 
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 use crate::routes::auth::require_passphrase;
 use crate::space::search;
 use crate::state::AppState;
@@ -36,7 +36,10 @@ async fn get_search(
     Query(q): Query<SearchQuery>,
 ) -> AppResult<Json<SearchResponse>> {
     let pass = require_passphrase(&state, &jar)?;
-    let hits = search::search(&state.space, &pass, &q.q)?
+    let space = state.space.clone();
+    let hits = tokio::task::spawn_blocking(move || search::search(&space, &pass, &q.q))
+        .await
+        .map_err(|e| AppError::Internal(format!("search join: {e}")))??
         .into_iter()
         .map(|h| SearchHitDto {
             path: h.path,

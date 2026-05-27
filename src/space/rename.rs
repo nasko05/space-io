@@ -42,8 +42,10 @@ pub fn rename_path(
             std::fs::create_dir_all(parent)?;
         }
         std::fs::rename(&from_file, &to_file)?;
+        space.cache().invalidate(&from_file.to_string_lossy());
+        space.cache().invalidate(&to_file.to_string_lossy());
         meta::rewrite_paths(space, passphrase, from, to, false)?;
-        commit_all(&root, &format!("move: {from} → {to}"))?;
+        space.with_repo(|repo| commit_all(repo, &format!("move: {from} → {to}")))?;
         return Ok(MoveResult {
             path: to.to_string(),
             is_directory: false,
@@ -58,8 +60,9 @@ pub fn rename_path(
             std::fs::create_dir_all(parent)?;
         }
         std::fs::rename(&from_resolved, &to_resolved)?;
+        space.cache().clear();
         meta::rewrite_paths(space, passphrase, from, to, true)?;
-        commit_all(&root, &format!("move folder: {from} → {to}"))?;
+        space.with_repo(|repo| commit_all(repo, &format!("move folder: {from} → {to}")))?;
         return Ok(MoveResult {
             path: to.to_string(),
             is_directory: true,
