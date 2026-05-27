@@ -196,7 +196,17 @@ export function Reader({
     if (mode === 'edit') textareaRef.current?.focus();
   }, [mode]);
 
-  const allTitles = useMemo(() => Array.from(titleToPath.keys()), [titleToPath]);
+  // Build paired (original, lowered) titles once per `titleToPath` change so
+  // the autocomplete filter doesn't lowercase every title on every keystroke
+  // — the old code did N string allocations per character typed inside a
+  // wikilink, which was the noticeable hitch with 1000+ notes.
+  const titleIndex = useMemo(() => {
+    const list: { title: string; lower: string }[] = [];
+    for (const t of titleToPath.keys()) {
+      list.push({ title: t, lower: t.toLowerCase() });
+    }
+    return list;
+  }, [titleToPath]);
 
   function recomputeAutocomplete(value: string, caret: number) {
     // Find the most recent `[[` to the left of the caret with no closing `]]`
@@ -217,9 +227,13 @@ export function Reader({
           return;
         }
         const q = between.toLowerCase();
-        const hits = allTitles
-          .filter((t) => t.toLowerCase().includes(q))
-          .slice(0, WIKILINK_MAX_SUGGESTIONS);
+        const hits: string[] = [];
+        for (const entry of titleIndex) {
+          if (entry.lower.includes(q)) {
+            hits.push(entry.title);
+            if (hits.length >= WIKILINK_MAX_SUGGESTIONS) break;
+          }
+        }
         if (hits.length === 0) {
           setAc(EMPTY_AC);
           return;

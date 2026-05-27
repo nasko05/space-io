@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::crypto::age_io;
 use crate::error::{AppError, AppResult};
-use crate::space::git::commit_all;
+use crate::space::git::commit_paths;
 use crate::space::paths::with_age_suffix;
 use crate::space::Space;
 
@@ -100,11 +100,20 @@ pub fn write_index(space: &Space, passphrase: &SecretString, index: &MetaIndex) 
 
 /// Write the index to disk, commit "meta: update", and refresh the cache.
 /// The default save path for tag operations where the meta change is the
-/// only thing happening.
+/// only thing happening. Staging is narrowed to the meta blob so the
+/// commit doesn't scan the entire working tree.
 pub fn save(space: &Space, passphrase: &SecretString, index: &MetaIndex) -> AppResult<()> {
     write_index(space, passphrase, index)?;
-    space.with_repo(|repo| commit_all(repo, "meta: update"))
+    space.with_repo(|repo| {
+        commit_paths(
+            repo,
+            "meta: update",
+            [std::path::PathBuf::from(META_BLOB_REL)],
+        )
+    })
 }
+
+const META_BLOB_REL: &str = ".space-meta.toml.age";
 
 /// Apply a sequence of `(path, tags)` updates atomically: one load, one
 /// save, one commit, regardless of how many files are touched. Empty tags

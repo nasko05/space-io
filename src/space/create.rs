@@ -3,7 +3,7 @@ use time::OffsetDateTime;
 
 use crate::crypto::age_io;
 use crate::error::AppResult;
-use crate::space::git::commit_all;
+use crate::space::git::commit_paths;
 use crate::space::paths::{find_unique_name, resolve_under, sanitise_title, with_age_suffix};
 use crate::space::Space;
 
@@ -39,7 +39,11 @@ pub fn create_file(
     let on_disk = with_age_suffix(&folder_resolved.join(&filename));
     let ciphertext = age_io::encrypt_bytes(initial.as_bytes(), passphrase)?;
     std::fs::write(&on_disk, &ciphertext)?;
-    space.with_repo(|repo| commit_all(repo, &format!("Create: {rel_path}")))?;
+    let staged = on_disk
+        .strip_prefix(&root)
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|_| on_disk.clone());
+    space.with_repo(|repo| commit_paths(repo, &format!("Create: {rel_path}"), [staged]))?;
 
     Ok(CreateResult { path: rel_path })
 }
