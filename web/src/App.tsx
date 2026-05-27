@@ -357,6 +357,28 @@ export function App() {
     [],
   );
 
+  const rollbackFile = useCallback(
+    async (path: string, commit: string) => {
+      if (view.kind !== 'unlocked') return;
+      await api.rollback(path, commit);
+      // Server wrote a new commit on top of HEAD with the old content. Pull
+      // the fresh file + refresh the tree so the rail / Today list reflect
+      // the restored excerpt, then re-open the file in the Reader so the
+      // editor's local state isn't stuck on the pre-rollback content.
+      const file = await api.read(path);
+      void refreshTree();
+      void refreshExcerpts();
+      previousPathRef.current = path;
+      setView({
+        kind: 'unlocked',
+        owner: view.owner,
+        email: view.email,
+        surface: { kind: 'reader', file, initialMode: 'preview' },
+      });
+    },
+    [refreshExcerpts, refreshTree, view],
+  );
+
   const onSelectVaultFile = useCallback(
     (file: TreeFile) => {
       if (file.kind === 'md') {
@@ -632,6 +654,7 @@ export function App() {
           onOpenSearch={openSearch}
           onLock={onLock}
           onSave={saveFile}
+          onRollback={rollbackFile}
           onWikilinkMiss={onWikilinkMiss}
           onOpenPasskey={openPasskey}
           hasPasskey={hasPasskey}

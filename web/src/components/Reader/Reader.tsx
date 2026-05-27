@@ -22,6 +22,7 @@ import {
   Pencil,
   Search,
   Sparkle,
+  Split,
   Tag,
 } from '../icons/Icon';
 import { extractTitle, stripFirstH1 } from '../../lib/markdown';
@@ -29,11 +30,13 @@ import { saveStatusLabel, useAutosave } from '../../lib/useAutosave';
 import { CalendarView, TodayEntry } from '../../lib/calendar';
 import styles from './Reader.module.css';
 
+type ReaderMode = 'preview' | 'edit' | 'split';
+
 interface Props {
   path: string;
   content: string;
   updated: string | null;
-  initialMode?: 'preview' | 'edit';
+  initialMode?: ReaderMode;
   calendar: CalendarView;
   entries: TodayEntry[];
   entriesLabel: string;
@@ -47,6 +50,7 @@ interface Props {
   onOpenSearch: () => void;
   onLock: () => void;
   onSave: (path: string, content: string) => Promise<void>;
+  onRollback?: (path: string, commit: string) => Promise<void>;
   onWikilinkMiss?: (title: string) => void;
   onOpenPasskey?: () => void;
   hasPasskey?: boolean;
@@ -90,6 +94,7 @@ export function Reader({
   onOpenSearch,
   onLock,
   onSave,
+  onRollback,
   onWikilinkMiss,
   onOpenPasskey,
   hasPasskey,
@@ -97,7 +102,7 @@ export function Reader({
   onToggleTheme,
 }: Props) {
   const [content, setContent] = useState(initialContent);
-  const [mode, setMode] = useState<'preview' | 'edit'>(initialMode);
+  const [mode, setMode] = useState<ReaderMode>(initialMode);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [ac, setAc] = useState<AutocompleteState>(EMPTY_AC);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -193,7 +198,7 @@ export function Reader({
   );
 
   useEffect(() => {
-    if (mode === 'edit') textareaRef.current?.focus();
+    if (mode === 'edit' || mode === 'split') textareaRef.current?.focus();
   }, [mode]);
 
   // Build paired (original, lowered) titles once per `titleToPath` change so
@@ -362,9 +367,74 @@ export function Reader({
   const isEmpty = content.length === 0 || content.trim().length === 0;
   const saveLabel = saveStatusLabel(status);
 
+  // Same editor JSX is reused in single-pane edit and the left side of
+  // split. Extracted so the textarea + autocomplete share a single source
+  // of truth (caret handling, key bindings) regardless of layout.
+  const editorPane = (
+    <div className={styles.editorWrap}>
+      <textarea
+        ref={textareaRef}
+        className={styles.editor}
+        value={content}
+        onChange={onContentChange}
+        onKeyDown={onTextareaKeyDown}
+        onClick={(e) => recomputeAutocomplete(content, e.currentTarget.selectionStart)}
+        onSelect={(e) => recomputeAutocomplete(content, e.currentTarget.selectionStart)}
+        onBlur={() => window.setTimeout(() => setAc(EMPTY_AC), 120)}
+        spellCheck
+        placeholder="Begin where you are."
+      />
+      {ac.open && (
+        <div className={styles.autocomplete} role="listbox">
+          <div className={styles.autocompleteLabel}>
+            Link to a note · ↑↓ to choose, ↵ to insert, esc to dismiss
+          </div>
+          {ac.hits.map((title, i) => (
+            <button
+              key={title}
+              type="button"
+              role="option"
+              aria-selected={i === ac.activeIdx}
+              className={`${styles.autoItem} ${i === ac.activeIdx ? styles.autoItemActive : ''}`}
+              onMouseEnter={() => setAc((s) => ({ ...s, activeIdx: i }))}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                insertSuggestion(title);
+              }}
+            >
+              {title}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+
+  const datelineBlock = (
+    <div className={styles.dateline}>
+      <span>{formatDateline(updated)}</span>
+      <span className={styles.datelineRule} />
+      <span className={styles.tags}>
+        <Tag size={11} /> journal · {mode === 'preview' ? 'morning-pages' : 'drafting'}
+      </span>
+    </div>
+  );
+
+  const titleHeadline = (
+    <h1 className={styles.title}>
+      {titleParts[0]}
+      {titleParts.length > 1 && (
+        <>
+          ,<br />
+          <em>{titleParts.slice(1).join(', ')}</em>
+        </>
+      )}
+    </h1>
+  );
+
   return (
     <HearthShell
-      mode={mode === 'edit' ? 'editing' : 'reading'}
+      mode={mode === 'preview' ? 'reading' : 'editing'}
       onLock={onLock}
       theme={theme}
       onToggleTheme={onToggleTheme}
@@ -443,6 +513,14 @@ export function Reader({
               </button>
               <button
                 type="button"
+                className={`${styles.toolBtn} ${mode === 'split' ? styles.toolBtnActive : ''}`}
+                onClick={() => setMode('split')}
+                title="Editor + preview side by side"
+              >
+                <Split size={12} /> Split
+              </button>
+              <button
+                type="button"
                 className={`${styles.toolBtn} ${mode === 'edit' ? styles.toolBtnActive : ''}`}
                 onClick={() => setMode('edit')}
               >
@@ -452,90 +530,52 @@ export function Reader({
           </div>
 
           <div className={styles.contentRow}>
-            <div className={styles.column}>
-              <article className={styles.article}>
-                <div className={styles.dateline}>
-                  <span>{formatDateline(updated)}</span>
-                  <span className={styles.datelineRule} />
-                  <span className={styles.tags}>
-                    <Tag size={11} /> journal · {mode === 'edit' ? 'drafting' : 'morning-pages'}
-                  </span>
+            {mode === 'split' ? (
+              <div className={styles.splitRow}>
+                <div className={`${styles.column} ${styles.splitPaneLeft}`}>
+                  <article className={`${styles.article} ${styles.articleSplit}`}>
+                    {datelineBlock}
+                    {titleHeadline}
+                    {editorPane}
+                  </article>
                 </div>
+                <div className={`${styles.column} ${styles.splitPaneRight}`}>
+                  <article className={`${styles.article} ${styles.articleSplit}`}>
+                    {datelineBlock}
+                    {titleHeadline}
+                    <Markdown source={bodySource} onWikilinkClick={handleWikilinkClick} />
+                  </article>
+                </div>
+              </div>
+            ) : (
+              <div className={styles.column}>
+                <article className={styles.article}>
+                  {datelineBlock}
 
-                {mode === 'edit' && isEmpty ? (
-                  <div className={styles.placeholderTitle}>
-                    A title for today…
-                    <span className={styles.cursor} />
-                  </div>
-                ) : (
-                  <h1 className={styles.title}>
-                    {titleParts[0]}
-                    {titleParts.length > 1 && (
-                      <>
-                        ,<br />
-                        <em>{titleParts.slice(1).join(', ')}</em>
-                      </>
-                    )}
-                  </h1>
-                )}
+                  {mode === 'edit' && isEmpty ? (
+                    <div className={styles.placeholderTitle}>
+                      A title for today…
+                      <span className={styles.cursor} />
+                    </div>
+                  ) : (
+                    titleHeadline
+                  )}
 
-                {mode === 'edit' && isEmpty && (
-                  <div className={styles.prompts}>
-                    <div className={styles.promptsLabel}>Three prompts, in case you're stuck</div>
-                    {[
-                      'What’s on the windowsill of your mind today?',
-                      'Something small you noticed and want to keep.',
-                      'A sentence you read this week that stayed.',
-                    ].map((p, i) => (
-                      <div key={i} className={styles.prompt}>
-                        <span className={styles.promptIndex}>{i + 1}.</span>
-                        {p}
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {mode === 'preview' ? (
-                  <Markdown source={bodySource} onWikilinkClick={handleWikilinkClick} />
-                ) : (
-                  <div className={styles.editorWrap}>
-                    <textarea
-                      ref={textareaRef}
-                      className={styles.editor}
-                      value={content}
-                      onChange={onContentChange}
-                      onKeyDown={onTextareaKeyDown}
-                      onClick={(e) => recomputeAutocomplete(content, e.currentTarget.selectionStart)}
-                      onSelect={(e) => recomputeAutocomplete(content, e.currentTarget.selectionStart)}
-                      onBlur={() => window.setTimeout(() => setAc(EMPTY_AC), 120)}
-                      spellCheck
-                      placeholder="Begin where you are."
-                    />
-                    {ac.open && (
-                      <div className={styles.autocomplete} role="listbox">
-                        <div className={styles.autocompleteLabel}>
-                          Link to a note · ↑↓ to choose, ↵ to insert, esc to dismiss
+                  {mode === 'edit' && isEmpty && (
+                    <div className={styles.prompts}>
+                      <div className={styles.promptsLabel}>Three prompts, in case you're stuck</div>
+                      {[
+                        'What’s on the windowsill of your mind today?',
+                        'Something small you noticed and want to keep.',
+                        'A sentence you read this week that stayed.',
+                      ].map((p, i) => (
+                        <div key={i} className={styles.prompt}>
+                          <span className={styles.promptIndex}>{i + 1}.</span>
+                          {p}
                         </div>
-                        {ac.hits.map((title, i) => (
-                          <button
-                            key={title}
-                            type="button"
-                            role="option"
-                            aria-selected={i === ac.activeIdx}
-                            className={`${styles.autoItem} ${i === ac.activeIdx ? styles.autoItemActive : ''}`}
-                            onMouseEnter={() => setAc((s) => ({ ...s, activeIdx: i }))}
-                            onMouseDown={(e) => {
-                              e.preventDefault();
-                              insertSuggestion(title);
-                            }}
-                          >
-                            {title}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
+                      ))}
+                    </div>
+                  )}
 
                 {mode === 'preview' && !isEmpty && linkedTitles.length > 0 && (
                   <div className={styles.linkedFrom}>
@@ -553,19 +593,21 @@ export function Reader({
                     ))}
                   </div>
                 )}
-              </article>
-            </div>
+                </article>
+              </div>
+            )}
 
             {historyOpen && (
               <HistoryPanel
                 open={historyOpen}
                 path={path}
                 onClose={() => setHistoryOpen(false)}
+                onRollback={onRollback}
               />
             )}
           </div>
 
-          {mode === 'edit' && (
+          {(mode === 'edit' || mode === 'split') && (
             <div className={styles.inkBar}>
               <button
                 type="button"

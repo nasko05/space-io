@@ -12,6 +12,7 @@ pub mod paths;
 pub mod rate_limit;
 pub mod read;
 pub mod rename;
+pub mod rollback;
 pub mod search;
 pub mod session;
 pub mod tree;

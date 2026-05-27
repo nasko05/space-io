@@ -7,12 +7,41 @@ interface Props {
   open: boolean;
   path: string | null;
   onClose: () => void;
+  /** Called after a successful rollback so the parent can reload the file
+   *  and refresh the tree. Without this the rail / Today list would still
+   *  show the pre-rollback excerpt until the next manual refresh. */
+  onRollback?: (path: string, commit: string) => Promise<void>;
 }
 
-export function HistoryPanel({ open, path, onClose }: Props) {
+export function HistoryPanel({ open, path, onClose, onRollback }: Props) {
   const [entries, setEntries] = useState<HistoryEntry[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [restoring, setRestoring] = useState<string | null>(null);
+
+  async function restore(commit: string) {
+    if (!path || !onRollback || restoring) return;
+    if (
+      !window.confirm(
+        `Restore this file to ${commit.slice(0, 7)}? A new commit is added on top — nothing is lost.`,
+      )
+    ) {
+      return;
+    }
+    setRestoring(commit);
+    setError(null);
+    try {
+      await onRollback(path, commit);
+      // Refresh the history list so the new "Rollback …" commit shows up
+      // at the top.
+      const { entries } = await api.history(path);
+      setEntries(entries);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'rollback failed');
+    } finally {
+      setRestoring(null);
+    }
+  }
 
   useEffect(() => {
     if (!open || !path) return;
@@ -76,6 +105,17 @@ export function HistoryPanel({ open, path, onClose }: Props) {
                   {i === 0 && <span className={styles.entryHead}>HEAD</span>}
                 </div>
               </div>
+              {i !== 0 && onRollback && (
+                <button
+                  type="button"
+                  className={styles.restoreBtn}
+                  onClick={() => void restore(e.commit)}
+                  disabled={restoring !== null}
+                  title="Restore the file to this version"
+                >
+                  {restoring === e.commit ? 'Restoring…' : 'Restore'}
+                </button>
+              )}
             </li>
           ))}
         </ol>
