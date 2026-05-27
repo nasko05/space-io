@@ -17,24 +17,20 @@ const IV_LENGTH = 12;
 /**
  * Determine the effective RP ID for WebAuthn operations.
  *
- * The WebAuthn spec requires `rp.id` to be a "valid domain string". IP
- * addresses (including `127.0.0.1` and `::1`) are NOT valid domain strings
- * and will cause a SecurityError if explicitly passed. However, loopback
- * addresses are allowed when the browser derives the RP ID from the origin
- * itself (i.e., when `rp.id` is omitted).
+ * WebAuthn requires `rp.id` to be a "registrable domain suffix" of the
+ * origin. IP addresses (including 127.0.0.1) are NEVER valid RP IDs — not
+ * even when omitted (the browser still derives one from the origin and
+ * rejects it). The only loopback address that works is `localhost`, which
+ * has a spec-level exemption.
  *
- * Returns `undefined` for loopback IPs (meaning: omit from options, let
- * browser default to the origin's effective domain). Returns the hostname
- * string for `localhost` and all other valid domain names.
+ * Returns 'localhost' for any loopback address so the credential can be
+ * created/retrieved. For production domains, returns the hostname as-is.
  */
-function getEffectiveRpId(): string | undefined {
+function getEffectiveRpId(): string {
   const host = window.location.hostname;
-  // Loopback IPs: omit rp.id so the browser defaults to the effective domain
-  // without triggering the "valid domain string" check.
   if (host === '127.0.0.1' || host === '::1') {
-    return undefined;
+    return 'localhost';
   }
-  // 'localhost' and regular domain names are valid RP IDs.
   return host;
 }
 
@@ -116,10 +112,7 @@ export function webauthnStatus(): WebAuthnStatus {
   const host = window.location.hostname;
   const origin = window.location.origin;
   if (host === 'localhost' || host === '127.0.0.1' || host === '::1') {
-    // Report the effective RP ID that will actually be used (or '<omitted>'
-    // when we let the browser derive it from the origin).
-    const effectiveRpId = getEffectiveRpId() ?? host;
-    return { ok: true, origin, rpId: effectiveRpId, isLoopback: true };
+    return { ok: true, origin, rpId: getEffectiveRpId(), isLoopback: true };
   }
   const isIpV4 = /^\d{1,3}(\.\d{1,3}){3}$/.test(host);
   const isIpV6 = host.includes(':') || host.startsWith('[');
@@ -150,7 +143,7 @@ function wrapWebAuthnError(stage: 'create' | 'get', err: unknown): Error {
   // Pull the rp.id we tried + the origin so the message says exactly what
   // failed, not just "something failed".
   const origin = typeof window !== 'undefined' ? window.location.origin : '<no-window>';
-  const rpId = typeof window !== 'undefined' ? (getEffectiveRpId() ?? '<browser-default>') : '<no-window>';
+  const rpId = typeof window !== 'undefined' ? getEffectiveRpId() : '<no-window>';
 
   if (err instanceof DOMException) {
     const name = err.name;
@@ -197,11 +190,7 @@ export async function registerPasskey(
   const challenge = crypto.getRandomValues(new Uint8Array(32));
   const userId = await sha256(new TextEncoder().encode(`hearth:${owner}`));
 
-  const rpId = getEffectiveRpId();
-  // Build the RP descriptor; omit `id` for loopback IPs so the browser
-  // derives it from the origin (avoids SecurityError on IP addresses).
-  const rp: { name: string; id?: string } = { name: 'SpaceIO' };
-  if (rpId !== undefined) rp.id = rpId;
+  const rp = { name: 'SpaceIO', id: getEffectiveRpId() };
 
   let cred: PublicKeyCredential | null;
   try {
@@ -258,24 +247,17 @@ export async function unlockWithPasskey(input: AuthenticateInput): Promise<strin
   const wrapped = b64UrlToBytes(input.wrappedPassphraseB64);
   const challenge = crypto.getRandomValues(new Uint8Array(32));
 
-  const rpId = getEffectiveRpId();
-  // Build assertion options; omit `rpId` for loopback IPs (same rationale
-  // as registration — IP addresses are not valid RP IDs per the spec).
-  const publicKeyBase = {
-    challenge,
-    allowCredentials: [{ id: credentialId, type: 'public-key' as const }],
-    userVerification: 'preferred' as const,
-    timeout: 60_000,
-    extensions: { prf: { eval: { first: prfSalt } } },
-  };
-  const publicKeyOptions = rpId !== undefined
-    ? { ...publicKeyBase, rpId }
-    : publicKeyBase;
-
   let assertion: PublicKeyCredential | null;
   try {
     assertion = (await navigator.credentials.get({
-      publicKey: publicKeyOptions,
+      publicKey: {
+        challenge,
+        rpId: getEffectiveRpId(),
+        allowCredentials: [{ id: credentialId, type: 'public-key' as const }],
+        userVerification: 'preferred' as const,
+        timeout: 60_000,
+        extensions: { prf: { eval: { first: prfSalt } } },
+      },
     } as CredentialRequestOptions)) as PublicKeyCredential | null;
   } catch (err) {
     throw wrapWebAuthnError('get', err);
