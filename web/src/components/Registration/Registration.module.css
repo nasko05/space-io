@@ -157,11 +157,13 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  height: 38px;
-  padding: 0 12px;
-  background: rgba(255, 255, 255, 0.5);
-  border: 1px solid var(--rule);
-  border-radius: 7px;
+  height: 44px;
+  padding: 0 14px;
+  background: var(--surface);
+  border: 1.5px solid var(--accent);
+  border-radius: 8px;
+  box-shadow: 0 0 0 4px rgba(178, 90, 58, 0.08);
+  transition: border-color 0.12s, box-shadow 0.12s;
 }
 
 .avatar {
@@ -177,8 +179,9 @@
   outline: none;
   background: transparent;
   font-family: var(--font-serif);
-  font-size: 14.5px;
+  font-size: 18px;
   color: var(--ink);
+  min-width: 0;
 }
 
 .identityInput::placeholder {

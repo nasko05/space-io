@@ -20,6 +20,7 @@ import {
 import {
   buildCalendar,
   CalendarView,
+  dateTitle,
   entriesForToday,
   findFileForDay,
   TodayEntry,
@@ -365,12 +366,38 @@ export function App() {
   );
 
   const selectDay = useCallback(
-    (day: number) => {
+    async (day: number) => {
       if (view.kind !== 'unlocked') return;
-      const target = findFileForDay(tree, now.getFullYear(), now.getMonth(), day);
-      if (target) void selectFile(target.path);
+      const year = now.getFullYear();
+      const month = now.getMonth();
+      const target = findFileForDay(tree, year, month, day);
+      if (target) {
+        void selectFile(target.path);
+        return;
+      }
+      // Nothing on this day yet — create a date-titled note in the year's
+      // Journal folder and drop straight into the editor. Works for past,
+      // present, and future days; collisions resolve to "(2)"-suffixed
+      // filenames on the server.
+      try {
+        const title = dateTitle(year, month, day);
+        const { path } = await api.create(`Journal/${year}`, title);
+        const file = await api.read(path);
+        await refreshTree();
+        void refreshExcerpts();
+        previousPathRef.current = path;
+        setView({
+          kind: 'unlocked',
+          owner: view.owner,
+          email: view.email,
+          surface: { kind: 'reader', file, initialMode: 'edit' },
+        });
+      } catch (err) {
+        console.error('failed to create entry for day', err);
+        setToast(err instanceof Error ? err.message : 'Could not open day');
+      }
     },
-    [now, selectFile, tree, view],
+    [now, refreshExcerpts, refreshTree, selectFile, tree, view],
   );
 
   const onUploaded = useCallback(async () => {
