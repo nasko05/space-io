@@ -1,6 +1,13 @@
 export interface AuthStatus {
   unlocked: boolean;
   owner: string;
+  has_passkey: boolean;
+}
+
+export interface PasskeyInfo {
+  credential_id_b64: string;
+  prf_salt_b64: string;
+  wrapped_passphrase_b64: string;
 }
 
 export interface TreeFile {
@@ -204,6 +211,29 @@ export const api = {
   async history(path: string): Promise<{ entries: HistoryEntry[] }> {
     return json(
       await fetch(`/api/files/history?path=${encodeURIComponent(path)}`, {
+        credentials: 'same-origin',
+      }),
+    );
+  },
+  async passkeyInfo(): Promise<PasskeyInfo | null> {
+    const res = await fetch('/api/auth/passkey/info', { credentials: 'same-origin' });
+    if (res.status === 404) return null;
+    return json(res);
+  },
+  async registerPasskey(payload: PasskeyInfo): Promise<void> {
+    await json(
+      await fetch('/api/auth/passkey/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify(payload),
+      }),
+    );
+  },
+  async deletePasskey(): Promise<void> {
+    await json(
+      await fetch('/api/auth/passkey', {
+        method: 'DELETE',
         credentials: 'same-origin',
       }),
     );

@@ -16,6 +16,23 @@ pub struct SpaceConfig {
     pub kdf_log_n: u8,
     pub kdf_r: u32,
     pub kdf_p: u32,
+    /// Optional WebAuthn-passkey unlock material. The server stores only
+    /// opaque ciphertext + PRF salt; the actual decryption happens in the
+    /// browser via the WebAuthn PRF extension.
+    #[serde(default)]
+    pub passkey: Option<PasskeyConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PasskeyConfig {
+    /// Base64url-encoded WebAuthn credential ID (returned during create).
+    pub credential_id_b64: String,
+    /// Base64-encoded 32-byte random salt fed to the PRF extension on every
+    /// register/authenticate.
+    pub prf_salt_b64: String,
+    /// Base64-encoded `iv (12B) || ciphertext` of the passphrase, wrapped
+    /// under a key derived from the PRF output via HKDF.
+    pub wrapped_passphrase_b64: String,
 }
 
 impl SpaceConfig {

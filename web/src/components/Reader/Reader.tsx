@@ -45,6 +45,8 @@ interface Props {
   onLock: () => void;
   onSave: (path: string, content: string) => Promise<void>;
   onWikilinkMiss?: (title: string) => void;
+  onOpenPasskey?: () => void;
+  hasPasskey?: boolean;
 }
 
 const WIKILINK_MAX_SUGGESTIONS = 6;
@@ -81,6 +83,8 @@ export function Reader({
   onLock,
   onSave,
   onWikilinkMiss,
+  onOpenPasskey,
+  hasPasskey,
 }: Props) {
   const [content, setContent] = useState(initialContent);
   const [mode, setMode] = useState<'preview' | 'edit'>(initialMode);
@@ -241,6 +245,8 @@ export function Reader({
             void flush();
             onOpenVault();
           }}
+          onOpenPasskey={onOpenPasskey}
+          hasPasskey={hasPasskey}
           activeSurface="reader"
         />
         <main className={styles.main}>

@@ -71,6 +71,7 @@ pub fn init_space(opts: InitOptions) -> AppResult<()> {
         kdf_log_n: kdf::DEFAULT_LOG_N,
         kdf_r: kdf::DEFAULT_R,
         kdf_p: kdf::DEFAULT_P,
+        passkey: None,
     };
     cfg.save(space_dir)?;
 

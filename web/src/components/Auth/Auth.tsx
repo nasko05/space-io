@@ -2,29 +2,36 @@ import { FormEvent, useState } from 'react';
 import { WindowChrome } from '../WindowChrome/WindowChrome';
 import { Chevron, Eye } from '../icons/Icon';
 import { api, ApiError } from '../../api/client';
+import { isPasskeySupported, unlockWithPasskey } from '../../lib/passkey';
 import styles from './Auth.module.css';
 
 interface Props {
   owner: string;
+  hasPasskey: boolean;
   onUnlocked: () => void;
 }
 
-// Ported from dir-1-hearth.jsx:515-666. Replaces the decorative bullet display
-// with a real <input type="password">; passkey block (originally 636-653) is
-// deferred to Phase 2.
-export function Auth({ owner, onUnlocked }: Props) {
+// Ported from dir-1-hearth.jsx:515-666. Passkey panel (formerly 636-653) is
+// shown when the server reports a registered passkey; click triggers a
+// WebAuthn PRF assertion and recovers the wrapped passphrase locally.
+export function Auth({ owner, hasPasskey, onUnlocked }: Props) {
   const [passphrase, setPassphrase] = useState('');
   const [visible, setVisible] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [passkeyBusy, setPasskeyBusy] = useState(false);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
     if (!passphrase) return;
+    await runUnlock(passphrase);
+  }
+
+  async function runUnlock(secret: string) {
     setBusy(true);
     setError(null);
     try {
-      await api.unlock(passphrase);
+      await api.unlock(secret);
       onUnlocked();
     } catch (err) {
       if (err instanceof ApiError && err.code === 'wrong_passphrase') {
@@ -37,6 +44,35 @@ export function Auth({ owner, onUnlocked }: Props) {
       setBusy(false);
     }
   }
+
+  async function tryPasskey() {
+    if (passkeyBusy) return;
+    setPasskeyBusy(true);
+    setError(null);
+    try {
+      const info = await api.passkeyInfo();
+      if (!info) {
+        setError('No passkey registered.');
+        return;
+      }
+      const recovered = await unlockWithPasskey({
+        credentialIdB64: info.credential_id_b64,
+        prfSaltB64: info.prf_salt_b64,
+        wrappedPassphraseB64: info.wrapped_passphrase_b64,
+      });
+      await runUnlock(recovered);
+    } catch (err) {
+      if (err instanceof Error) {
+        setError(err.message);
+      } else {
+        setError('Passkey unlock failed');
+      }
+    } finally {
+      setPasskeyBusy(false);
+    }
+  }
+
+  const passkeyAvailable = hasPasskey && isPasskeySupported();
 
   return (
     <div className={styles.root}>
@@ -97,7 +133,7 @@ export function Auth({ owner, onUnlocked }: Props) {
                   autoFocus
                   autoComplete="current-password"
                   spellCheck={false}
-                  disabled={busy}
+                  disabled={busy || passkeyBusy}
                   aria-invalid={error ? 'true' : 'false'}
                 />
                 <button
@@ -124,10 +160,44 @@ export function Auth({ owner, onUnlocked }: Props) {
               </div>
             </div>
 
-            <button type="submit" className={styles.submit} disabled={busy || !passphrase}>
+            <button type="submit" className={styles.submit} disabled={busy || passkeyBusy || !passphrase}>
               {busy ? 'Opening…' : 'Open my space'}
               <Chevron size={14} />
             </button>
+
+            {passkeyAvailable && (
+              <button
+                type="button"
+                className={styles.passkeyAlt}
+                onClick={tryPasskey}
+                disabled={busy || passkeyBusy}
+              >
+                <span className={styles.passkeyIcon}>
+                  <svg
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth={1.6}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <rect x="3" y="11" width="18" height="11" rx="2" />
+                    <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                  </svg>
+                </span>
+                <div className={styles.passkeyText}>
+                  <div className={styles.passkeyTitle}>
+                    {passkeyBusy ? 'Waiting for your authenticator…' : 'Or use a passkey'}
+                  </div>
+                  <div className={styles.passkeySub}>
+                    {passkeyBusy ? 'Touch your security key or Touch ID' : 'Touch ID / hardware key'}
+                  </div>
+                </div>
+                <Chevron size={13} />
+              </button>
+            )}
 
             <div className={styles.security}>
               <span>

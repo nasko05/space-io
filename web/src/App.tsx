@@ -2,9 +2,11 @@ import { DragEvent, useCallback, useEffect, useMemo, useRef, useState } from 're
 import { Auth } from './components/Auth/Auth';
 import { Reader } from './components/Reader/Reader';
 import { HearthVault } from './components/Vault/HearthVault';
+import { Preview } from './components/Preview/Preview';
 import { SearchOverlay } from './components/Search/SearchOverlay';
 import { UploadModal } from './components/Upload/UploadModal';
 import { DownloadModal } from './components/Download/DownloadModal';
+import { PasskeyModal } from './components/Passkey/PasskeyModal';
 import {
   api,
   ExcerptMap,
@@ -23,13 +25,14 @@ import {
 
 type View =
   | { kind: 'loading' }
-  | { kind: 'auth'; owner: string }
+  | { kind: 'auth'; owner: string; hasPasskey: boolean }
   | { kind: 'unlocked'; owner: string; surface: Surface }
   | { kind: 'fatal'; message: string };
 
 type Surface =
   | { kind: 'reader'; file: ReadFile; initialMode: 'preview' | 'edit' }
-  | { kind: 'vault'; previousPath: string | null };
+  | { kind: 'vault'; previousPath: string | null }
+  | { kind: 'preview'; file: TreeFile; previousPath: string | null };
 
 const DEFAULT_NEW_FOLDER = (() => `Journal/${new Date().getFullYear()}`)();
 
@@ -38,10 +41,12 @@ export function App() {
   const [tree, setTree] = useState<TreeNode[]>([]);
   const [excerpts, setExcerpts] = useState<ExcerptMap>({});
   const [now, setNow] = useState(() => new Date());
+  const [hasPasskey, setHasPasskey] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false);
   const [uploadInitial, setUploadInitial] = useState<File[] | undefined>(undefined);
   const [downloadFile, setDownloadFile] = useState<TreeFile | null>(null);
+  const [passkeyOpen, setPasskeyOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => {
@@ -66,12 +71,21 @@ export function App() {
     }
   }, []);
 
+  const refreshStatus = useCallback(async () => {
+    try {
+      const status = await api.status();
+      setHasPasskey(status.has_passkey);
+      return status;
+    } catch (err) {
+      console.error('status failed', err);
+      return null;
+    }
+  }, []);
+
   const enterReader = useCallback(
     async (owner: string) => {
       try {
         const t = await refreshTree();
-        // Excerpts power wikilink autocomplete + the Today list — fetch
-        // eagerly so the Reader has them on first paint.
         void refreshExcerpts();
         const leaf = firstMarkdownLeaf(t);
         if (!leaf) {
@@ -109,10 +123,11 @@ export function App() {
       try {
         const status = await api.status();
         if (cancelled) return;
+        setHasPasskey(status.has_passkey);
         if (status.unlocked) {
           await enterReader(status.owner);
         } else {
-          setView({ kind: 'auth', owner: status.owner });
+          setView({ kind: 'auth', owner: status.owner, hasPasskey: status.has_passkey });
         }
       } catch (err) {
         if (cancelled) return;
@@ -145,12 +160,14 @@ export function App() {
     setSearchOpen(false);
     setUploadOpen(false);
     setDownloadFile(null);
-    setView((v) =>
-      v.kind === 'unlocked'
-        ? { kind: 'auth', owner: v.owner }
-        : { kind: 'auth', owner: 'ada@home.lan' },
-    );
-  }, []);
+    setPasskeyOpen(false);
+    const status = await refreshStatus();
+    setView({
+      kind: 'auth',
+      owner: status?.owner ?? (view.kind === 'unlocked' ? view.owner : 'ada@home.lan'),
+      hasPasskey: status?.has_passkey ?? hasPasskey,
+    });
+  }, [hasPasskey, refreshStatus, view]);
 
   const selectFile = useCallback(
     async (path: string) => {
@@ -168,6 +185,19 @@ export function App() {
         console.error('failed to read file', err);
         setToast(err instanceof Error ? err.message : 'Could not open file');
       }
+    },
+    [view],
+  );
+
+  const openPreview = useCallback(
+    (file: TreeFile) => {
+      if (view.kind !== 'unlocked') return;
+      const previous = previousPathRef.current;
+      setView({
+        kind: 'unlocked',
+        owner: view.owner,
+        surface: { kind: 'preview', file, previousPath: previous },
+      });
     },
     [view],
   );
@@ -228,7 +258,6 @@ export function App() {
   const saveFile = useCallback(
     async (path: string, content: string) => {
       await api.write(path, content);
-      // Excerpts power wikilink autocomplete; keep them roughly in sync.
       void refreshExcerpts();
     },
     [refreshExcerpts],
@@ -236,14 +265,13 @@ export function App() {
 
   const onSelectVaultFile = useCallback(
     (file: TreeFile) => {
-      // Markdown opens in the reader; non-text opens the download dialog.
       if (file.kind === 'md') {
         void selectFile(file.path);
       } else {
-        setDownloadFile(file);
+        openPreview(file);
       }
     },
-    [selectFile],
+    [openPreview, selectFile],
   );
 
   const selectDay = useCallback(
@@ -264,7 +292,6 @@ export function App() {
     setToast(`No note titled "${title}" — yet.`);
   }, []);
 
-  // Global keyboard: ⌘K / Ctrl-K opens search when unlocked.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
@@ -280,7 +307,6 @@ export function App() {
     return () => window.removeEventListener('keydown', onKey);
   }, [searchOpen, view]);
 
-  // Global drag-to-upload — only active when unlocked.
   const dragCounter = useRef(0);
   const [dragOverlay, setDragOverlay] = useState(false);
   const handleWindowDragEnter = useCallback(
@@ -316,7 +342,6 @@ export function App() {
     [view],
   );
 
-  // Auto-dismiss toasts.
   useEffect(() => {
     if (!toast) return;
     const t = window.setTimeout(() => setToast(null), 3200);
@@ -333,7 +358,8 @@ export function App() {
   const titleToPath = useMemo(() => buildTitleMap(tree, excerpts), [tree, excerpts]);
 
   if (view.kind === 'loading') return <LoadingScreen />;
-  if (view.kind === 'auth') return <Auth owner={view.owner} onUnlocked={onUnlocked} />;
+  if (view.kind === 'auth')
+    return <Auth owner={view.owner} hasPasskey={view.hasPasskey} onUnlocked={onUnlocked} />;
   if (view.kind === 'fatal') return <FatalScreen message={view.message} />;
 
   const { surface } = view;
@@ -347,7 +373,7 @@ export function App() {
       onDrop={handleWindowDrop}
       style={{ position: 'absolute', inset: 0 }}
     >
-      {surface.kind === 'reader' ? (
+      {surface.kind === 'reader' && (
         <Reader
           path={surface.file.path}
           content={surface.file.content}
@@ -364,8 +390,11 @@ export function App() {
           onLock={onLock}
           onSave={saveFile}
           onWikilinkMiss={onWikilinkMiss}
+          onOpenPasskey={() => setPasskeyOpen(true)}
+          hasPasskey={hasPasskey}
         />
-      ) : (
+      )}
+      {surface.kind === 'vault' && (
         <HearthVault
           tree={tree}
           excerpts={excerpts}
@@ -379,6 +408,23 @@ export function App() {
           onSelectDay={selectDay}
           onNewEntry={newEntry}
           onBackToReader={backFromVault}
+          onOpenPasskey={() => setPasskeyOpen(true)}
+          hasPasskey={hasPasskey}
+        />
+      )}
+      {surface.kind === 'preview' && (
+        <Preview
+          file={surface.file}
+          calendar={calendar}
+          today={today}
+          onSelectFile={selectFile}
+          onSelectDay={selectDay}
+          onNewEntry={newEntry}
+          onOpenVault={openVault}
+          onLock={onLock}
+          onDownload={(f) => setDownloadFile(f)}
+          onOpenPasskey={() => setPasskeyOpen(true)}
+          hasPasskey={hasPasskey}
         />
       )}
 
@@ -407,6 +453,16 @@ export function App() {
         open={downloadFile != null}
         file={downloadFile}
         onClose={() => setDownloadFile(null)}
+      />
+
+      <PasskeyModal
+        open={passkeyOpen}
+        owner={view.owner}
+        hasPasskey={hasPasskey}
+        onClose={() => setPasskeyOpen(false)}
+        onChanged={() => {
+          void refreshStatus();
+        }}
       />
 
       {dragOverlay && (

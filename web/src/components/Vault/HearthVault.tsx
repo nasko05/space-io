@@ -14,6 +14,8 @@ interface Props {
   onSelectDay: (day: number) => void;
   onNewEntry: () => void;
   onBackToReader: () => void;
+  onOpenPasskey?: () => void;
+  hasPasskey?: boolean;
 }
 
 // Ported from dir-1-hearth.jsx:670-765 (HearthVault).
@@ -28,6 +30,8 @@ export function HearthVault({
   onSelectDay,
   onNewEntry,
   onBackToReader,
+  onOpenPasskey,
+  hasPasskey,
 }: Props) {
   const folders: TreeFolder[] = tree.filter((n): n is TreeFolder => n.type === 'folder');
   const totalFiles = countFiles(tree);
@@ -48,6 +52,8 @@ export function HearthVault({
           onOpenVault={() => {
             // already in vault — no-op
           }}
+          onOpenPasskey={onOpenPasskey}
+          hasPasskey={hasPasskey}
           activeSurface="vault"
         />
 

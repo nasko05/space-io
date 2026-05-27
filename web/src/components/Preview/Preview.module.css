@@ -1,0 +1,137 @@
+.layout {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+.main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.toolbar {
+  height: 44px;
+  display: flex;
+  align-items: center;
+  padding: 0 32px;
+  border-bottom: 1px solid var(--rule);
+  gap: 18px;
+  color: var(--mute);
+  font-size: 12px;
+}
+
+.crumb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  flex: 1;
+}
+
+.crumbSeg {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.crumbFile {
+  color: var(--ink);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.toolbarRight {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.meta {
+  color: var(--mute);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.toolBtn {
+  color: var(--ink-2);
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+
+.toolBtn:hover {
+  background: rgba(0, 0, 0, 0.03);
+}
+
+.surface {
+  flex: 1;
+  overflow: auto;
+  padding: 8px 24px 24px;
+  background: var(--paper);
+}
+
+.center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 240px;
+  padding: 40px;
+}
+
+.spinner {
+  font-family: var(--font-serif);
+  font-style: italic;
+  color: var(--mute);
+  font-size: 16px;
+}
+
+.errorBlock {
+  text-align: center;
+}
+
+.errorTitle {
+  font-family: var(--font-serif);
+  font-size: 20px;
+  color: var(--ink);
+  font-weight: 500;
+  margin-bottom: 8px;
+}
+
+.errorBody {
+  font-family: var(--font-serif);
+  font-style: italic;
+  color: var(--mute);
+}
+
+.mediaCenter {
+  display: flex;
+  justify-content: center;
+  padding: 24px 0;
+}
+
+.image {
+  max-width: 100%;
+  max-height: 80vh;
+  border-radius: 4px;
+  box-shadow: 0 6px 24px rgba(40, 25, 10, 0.16);
+}
+
+.video {
+  max-width: 100%;
+  max-height: 80vh;
+  background: #000;
+  border-radius: 4px;
+}
