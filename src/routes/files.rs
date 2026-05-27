@@ -225,8 +225,7 @@ async fn post_upload(
                 .map_err(|e| AppError::BadRequest(format!("read body: {e}")))?;
             if bytes.len() > MAX_UPLOAD_BYTES {
                 return Err(AppError::BadRequest(format!(
-                    "{} exceeds {MAX_UPLOAD_BYTES} bytes",
-                    filename
+                    "{filename} exceeds {MAX_UPLOAD_BYTES} bytes"
                 )));
             }
             files.push((filename, bytes.to_vec()));

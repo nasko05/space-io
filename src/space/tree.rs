@@ -1,12 +1,10 @@
 use std::path::Path;
-use std::time::SystemTime;
 
 use serde::Serialize;
-use time::OffsetDateTime;
 
 use crate::error::{AppError, AppResult};
 use crate::space::paths::ENC_EXT;
-use crate::space::Space;
+use crate::space::{systemtime_iso8601, Space};
 
 /// Mirrors the shape used by the UI mock (diary-data.js fileTree).
 #[derive(Debug, Serialize)]
@@ -107,12 +105,6 @@ fn classify(name: &str) -> String {
         _ => "file",
     }
     .to_string()
-}
-
-fn systemtime_iso8601(t: SystemTime) -> Option<String> {
-    let dt: OffsetDateTime = t.into();
-    dt.format(&time::format_description::well_known::Rfc3339)
-        .ok()
 }
 
 #[cfg(test)]

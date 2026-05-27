@@ -84,15 +84,6 @@ export function buildCalendar(now: Date, tree: TreeNode[]): CalendarView {
   };
 }
 
-export function entriesForToday(
-  now: Date,
-  tree: TreeNode[],
-  excerpts: ExcerptMap,
-  currentPath: string | null,
-): TodayEntry[] {
-  return entriesForDate(now, tree, excerpts, currentPath);
-}
-
 /** Markdown notes whose `updated` timestamp falls on the same calendar day as
  *  `date`. Sorted newest first; the entry currently open in the Reader is
  *  flagged with `current: true`. */

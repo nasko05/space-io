@@ -61,8 +61,7 @@ mod tests {
         let name = r.path.split('/').next_back().unwrap();
         assert!(
             name.starts_with("Untitled "),
-            "expected 'Untitled ...', got {}",
-            name
+            "expected 'Untitled ...', got {name}",
         );
         assert!(name.ends_with(".md"));
     }

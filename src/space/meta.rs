@@ -166,7 +166,7 @@ pub fn set_tags(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::space::test_helpers::make_space;
+    use crate::space::test_helpers::{count_commits, make_space};
 
     #[test]
     fn empty_space_has_no_meta() {
@@ -270,14 +270,5 @@ mod tests {
         let second = load(&s, &p).unwrap();
         assert!(!Arc::ptr_eq(&first, &second));
         assert_eq!(second.paths["a.md"].tags, vec!["two"]);
-    }
-
-    fn count_commits(repo_path: &std::path::Path) -> usize {
-        let repo = git2::Repository::open(repo_path).unwrap();
-        let mut walk = repo.revwalk().unwrap();
-        if walk.push_head().is_err() {
-            return 0;
-        }
-        walk.filter_map(Result::ok).count()
     }
 }

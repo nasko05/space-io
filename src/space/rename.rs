@@ -134,16 +134,7 @@ pub fn rename_paths_bulk(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::space::test_helpers::make_space;
-
-    fn count_commits(repo_path: &std::path::Path) -> usize {
-        let repo = git2::Repository::open(repo_path).unwrap();
-        let mut walk = repo.revwalk().unwrap();
-        if walk.push_head().is_err() {
-            return 0;
-        }
-        walk.filter_map(Result::ok).count()
-    }
+    use crate::space::test_helpers::{count_commits, make_space};
 
     #[test]
     fn renames_a_file() {

@@ -25,11 +25,21 @@ pub(crate) mod test_helpers;
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, RwLock};
+use std::time::SystemTime;
+
+use time::OffsetDateTime;
 
 use crate::config::{PasskeyConfig, SpaceConfig};
 use crate::error::{AppError, AppResult};
 use crate::space::cache::DecryptedCache;
 use crate::space::meta::MetaCache;
+
+/// Format a `SystemTime` as an RFC 3339 string, or `None` if conversion fails.
+pub fn systemtime_iso8601(t: SystemTime) -> Option<String> {
+    let dt: OffsetDateTime = t.into();
+    dt.format(&time::format_description::well_known::Rfc3339)
+        .ok()
+}
 
 #[derive(Clone)]
 pub struct Space {
