@@ -10,17 +10,23 @@ use uuid::Uuid;
 /// a standing vault key for whoever stumbles past the screen.
 pub const SESSION_TTL: Duration = Duration::from_secs(8 * 60 * 60);
 
-struct Entry {
-    passphrase: SecretString,
-    last_seen: Instant,
+/// One live unlock. Bundles everything a request needs to read the user's
+/// space: the passphrase (to decrypt) and the user's UUID (to route to the
+/// right per-user directory). `last_seen` slides forward on every get() so
+/// active sessions stay alive.
+#[derive(Clone)]
+pub struct Session {
+    pub passphrase: SecretString,
+    pub user_uuid: Uuid,
+    pub last_seen: Instant,
 }
 
-/// In-memory session store: session_id → (passphrase, last_seen).
+/// In-memory session store: session_id → Session.
 /// Lifetime ends when the process exits, when the user locks, or when the
 /// session has been idle past `SESSION_TTL`.
 #[derive(Clone, Default)]
 pub struct SessionStore {
-    inner: Arc<DashMap<Uuid, Entry>>,
+    inner: Arc<DashMap<Uuid, Session>>,
 }
 
 impl SessionStore {
@@ -28,12 +34,13 @@ impl SessionStore {
         Self::default()
     }
 
-    pub fn create(&self, passphrase: SecretString) -> Uuid {
+    pub fn create(&self, passphrase: SecretString, user_uuid: Uuid) -> Uuid {
         let id = Uuid::new_v4();
         self.inner.insert(
             id,
-            Entry {
+            Session {
                 passphrase,
+                user_uuid,
                 last_seen: Instant::now(),
             },
         );
@@ -43,7 +50,7 @@ impl SessionStore {
     /// Resolve a session, sliding the TTL window. Returns `None` if the
     /// session is unknown or has expired (in which case the expired entry
     /// is dropped on the spot).
-    pub fn get(&self, id: &Uuid) -> Option<SecretString> {
+    pub fn get(&self, id: &Uuid) -> Option<Session> {
         let now = Instant::now();
         let mut entry = self.inner.get_mut(id)?;
         if now.duration_since(entry.last_seen) > SESSION_TTL {
@@ -52,7 +59,7 @@ impl SessionStore {
             return None;
         }
         entry.last_seen = now;
-        Some(entry.passphrase.clone())
+        Some(entry.clone())
     }
 
     pub fn drop(&self, id: &Uuid) {
@@ -64,7 +71,7 @@ impl SessionStore {
     pub fn sweep_expired(&self) {
         let now = Instant::now();
         self.inner
-            .retain(|_, e| now.duration_since(e.last_seen) <= SESSION_TTL);
+            .retain(|_, s| now.duration_since(s.last_seen) <= SESSION_TTL);
     }
 }
 
@@ -80,17 +87,19 @@ mod tests {
     #[test]
     fn create_returns_unique_ids() {
         let store = SessionStore::new();
-        let a = store.create(secret("one"));
-        let b = store.create(secret("two"));
+        let a = store.create(secret("one"), Uuid::new_v4());
+        let b = store.create(secret("two"), Uuid::new_v4());
         assert_ne!(a, b);
     }
 
     #[test]
-    fn get_returns_stored_passphrase() {
+    fn get_returns_stored_session() {
         let store = SessionStore::new();
-        let id = store.create(secret("mine"));
+        let user = Uuid::new_v4();
+        let id = store.create(secret("mine"), user);
         let s = store.get(&id).expect("present");
-        assert_eq!(s.expose_secret(), "mine");
+        assert_eq!(s.passphrase.expose_secret(), "mine");
+        assert_eq!(s.user_uuid, user);
     }
 
     #[test]
@@ -103,7 +112,7 @@ mod tests {
     #[test]
     fn drop_removes_the_session() {
         let store = SessionStore::new();
-        let id = store.create(secret("one"));
+        let id = store.create(secret("one"), Uuid::new_v4());
         store.drop(&id);
         assert!(store.get(&id).is_none());
     }
@@ -118,14 +127,14 @@ mod tests {
     fn store_clones_share_state() {
         let a = SessionStore::new();
         let b = a.clone();
-        let id = a.create(secret("shared"));
+        let id = a.create(secret("shared"), Uuid::new_v4());
         assert!(b.get(&id).is_some());
     }
 
     #[test]
     fn expired_session_is_evicted_on_get() {
         let store = SessionStore::new();
-        let id = store.create(secret("stale"));
+        let id = store.create(secret("stale"), Uuid::new_v4());
         // Backdate the entry so the next get() trips the TTL.
         store.inner.get_mut(&id).expect("present").last_seen =
             Instant::now() - SESSION_TTL - Duration::from_secs(1);
@@ -137,8 +146,8 @@ mod tests {
     #[test]
     fn sweep_evicts_only_expired_entries() {
         let store = SessionStore::new();
-        let fresh = store.create(secret("fresh"));
-        let stale = store.create(secret("stale"));
+        let fresh = store.create(secret("fresh"), Uuid::new_v4());
+        let stale = store.create(secret("stale"), Uuid::new_v4());
         store.inner.get_mut(&stale).expect("present").last_seen =
             Instant::now() - SESSION_TTL - Duration::from_secs(1);
         store.sweep_expired();

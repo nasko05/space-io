@@ -16,6 +16,7 @@ pub mod search;
 pub mod session;
 pub mod tree;
 pub mod upload;
+pub mod users;
 pub mod write;
 
 #[cfg(test)]

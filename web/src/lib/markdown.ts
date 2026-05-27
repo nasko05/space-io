@@ -135,7 +135,14 @@ export function extractTitle(src: string): string | null {
   return match ? match[1].trim() : null;
 }
 
-/** Pull the source minus the leading H1 line (so we don't render it twice). */
+/** Source minus the first H1 line (so the Reader doesn't render it twice —
+ * once as the styled headline, once inside the markdown body).
+ *
+ * Mirrors `extractTitle` exactly so the two never disagree: `/m` so the
+ * anchor matches the first H1 on any line (after a frontmatter block, a
+ * leading blank line, CRLF endings, etc.), and the trailing
+ * `(?:\r?\n)*` eats any trailing blank lines so the body doesn't start
+ * with a stray gap. */
 export function stripFirstH1(src: string): string {
-  return src.replace(/^# .*\n+/, '');
+  return src.replace(/^# .*(?:\r?\n)*/m, '');
 }

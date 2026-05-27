@@ -1,7 +1,18 @@
 export interface AuthStatus {
+  /** At least one user has registered. */
+  any_users: boolean;
+  /** The current cookie maps to a live session. */
   unlocked: boolean;
+  /** Display name of the unlocked user (empty when locked). */
   owner: string;
+  /** Email of the unlocked user (empty when locked). */
+  email: string;
   has_passkey: boolean;
+}
+
+export interface InitResult {
+  /** UUID assigned to the new user (i.e. the on-disk folder name). */
+  user_uuid: string;
 }
 
 export interface PasskeyInfo {
@@ -96,13 +107,23 @@ export const api = {
   async status(): Promise<AuthStatus> {
     return json(await fetch('/api/auth/status', { credentials: 'same-origin' }));
   },
-  async unlock(passphrase: string): Promise<void> {
+  async unlock(email: string, passphrase: string): Promise<void> {
     await json(
       await fetch('/api/auth/unlock', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
-        body: JSON.stringify({ passphrase }),
+        body: JSON.stringify({ email, passphrase }),
+      }),
+    );
+  },
+  async init(email: string, passphrase: string, owner?: string): Promise<InitResult> {
+    return json(
+      await fetch('/api/auth/init', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ email, passphrase, owner: owner ?? null }),
       }),
     );
   },
@@ -215,8 +236,10 @@ export const api = {
       }),
     );
   },
-  async passkeyInfo(): Promise<PasskeyInfo | null> {
-    const res = await fetch('/api/auth/passkey/info', { credentials: 'same-origin' });
+  async passkeyInfo(email: string): Promise<PasskeyInfo | null> {
+    const res = await fetch(`/api/auth/passkey/info?email=${encodeURIComponent(email)}`, {
+      credentials: 'same-origin',
+    });
     if (res.status === 404) return null;
     return json(res);
   },

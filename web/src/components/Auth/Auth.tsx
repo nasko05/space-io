@@ -6,15 +6,19 @@ import { isPasskeySupported, unlockWithPasskey } from '../../lib/passkey';
 import styles from './Auth.module.css';
 
 interface Props {
-  owner: string;
-  hasPasskey: boolean;
+  /** Whether a "Create another account" link should appear at the bottom. */
+  showRegisterLink?: boolean;
   onUnlocked: () => void;
+  onRegister?: () => void;
 }
 
-// Ported from dir-1-hearth.jsx:515-666. Passkey panel (formerly 636-653) is
-// shown when the server reports a registered passkey; click triggers a
-// WebAuthn PRF assertion and recovers the wrapped passphrase locally.
-export function Auth({ owner, hasPasskey, onUnlocked }: Props) {
+// Multi-tenant login: the user types email + passphrase. The server looks up
+// the email in `data/.users.toml`, opens the corresponding UUID folder, and
+// verifies the passphrase against that user's `.space.toml`. Unknown emails
+// surface as "wrong passphrase" so the form doesn't leak which addresses are
+// registered.
+export function Auth({ showRegisterLink = false, onUnlocked, onRegister }: Props) {
+  const [email, setEmail] = useState('');
   const [passphrase, setPassphrase] = useState('');
   const [visible, setVisible] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -23,19 +27,19 @@ export function Auth({ owner, hasPasskey, onUnlocked }: Props) {
 
   async function submit(e: FormEvent) {
     e.preventDefault();
-    if (!passphrase) return;
-    await runUnlock(passphrase);
+    if (!email.trim() || !passphrase) return;
+    await runUnlock(email.trim(), passphrase);
   }
 
-  async function runUnlock(secret: string) {
+  async function runUnlock(addr: string, secret: string) {
     setBusy(true);
     setError(null);
     try {
-      await api.unlock(secret);
+      await api.unlock(addr, secret);
       onUnlocked();
     } catch (err) {
       if (err instanceof ApiError && err.code === 'wrong_passphrase') {
-        setError('Wrong passphrase');
+        setError('That email and passphrase don’t open anything.');
       } else if (err instanceof Error) {
         setError(err.message);
       } else {
@@ -47,12 +51,16 @@ export function Auth({ owner, hasPasskey, onUnlocked }: Props) {
 
   async function tryPasskey() {
     if (passkeyBusy) return;
+    if (!email.trim()) {
+      setError('Type your email first — that’s how we find the right passkey.');
+      return;
+    }
     setPasskeyBusy(true);
     setError(null);
     try {
-      const info = await api.passkeyInfo();
+      const info = await api.passkeyInfo(email.trim());
       if (!info) {
-        setError('No passkey registered.');
+        setError('No passkey registered for that email.');
         return;
       }
       const recovered = await unlockWithPasskey({
@@ -60,7 +68,7 @@ export function Auth({ owner, hasPasskey, onUnlocked }: Props) {
         prfSaltB64: info.prf_salt_b64,
         wrappedPassphraseB64: info.wrapped_passphrase_b64,
       });
-      await runUnlock(recovered);
+      await runUnlock(email.trim(), recovered);
     } catch (err) {
       if (err instanceof Error) {
         setError(err.message);
@@ -72,7 +80,7 @@ export function Auth({ owner, hasPasskey, onUnlocked }: Props) {
     }
   }
 
-  const passkeyAvailable = hasPasskey && isPasskeySupported();
+  const passkeyAvailable = isPasskeySupported();
 
   return (
     <div className={styles.root}>
@@ -98,7 +106,7 @@ export function Auth({ owner, hasPasskey, onUnlocked }: Props) {
                   strokeWidth={1.2}
                 />
               </svg>
-              <span>1,247 entries · 6 years · self-hosted on home server</span>
+              <span>encrypted at rest · self-hosted on home server</span>
             </div>
           </div>
         </div>
@@ -108,14 +116,26 @@ export function Auth({ owner, hasPasskey, onUnlocked }: Props) {
             <div className={styles.brand}>S</div>
 
             <h1 className={styles.welcome}>Welcome back.</h1>
-            <div className={styles.subhead}>Last opened yesterday at 22:51.</div>
+            <div className={styles.subhead}>Sign in to your space.</div>
 
             <div className={styles.field}>
-              <label className={styles.label}>You</label>
+              <label className={styles.label} htmlFor="email">
+                Email
+              </label>
               <div className={styles.identity}>
                 <div className={styles.avatar} />
-                <span className={styles.identityName}>{owner}</span>
-                <span className={styles.identityAlt}>not you?</span>
+                <input
+                  id="email"
+                  className={styles.identityInput}
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="you@home.lan"
+                  spellCheck={false}
+                  autoComplete="email"
+                  autoFocus
+                  disabled={busy || passkeyBusy}
+                />
               </div>
             </div>
 
@@ -130,7 +150,6 @@ export function Auth({ owner, hasPasskey, onUnlocked }: Props) {
                   type={visible ? 'text' : 'password'}
                   value={passphrase}
                   onChange={(e) => setPassphrase(e.target.value)}
-                  autoFocus
                   autoComplete="current-password"
                   spellCheck={false}
                   disabled={busy || passkeyBusy}
@@ -150,17 +169,19 @@ export function Auth({ owner, hasPasskey, onUnlocked }: Props) {
                 <span className={styles.hintLeft}>
                   <span className={styles.dot} /> on this device only
                 </span>
-                {error ? (
+                {error && (
                   <span className={styles.error} role="alert">
                     {error}
                   </span>
-                ) : (
-                  <a className={styles.recovery}>recovery phrase →</a>
                 )}
               </div>
             </div>
 
-            <button type="submit" className={styles.submit} disabled={busy || passkeyBusy || !passphrase}>
+            <button
+              type="submit"
+              className={styles.submit}
+              disabled={busy || passkeyBusy || !email.trim() || !passphrase}
+            >
               {busy ? 'Opening…' : 'Open my space'}
               <Chevron size={14} />
             </button>
@@ -196,6 +217,12 @@ export function Auth({ owner, hasPasskey, onUnlocked }: Props) {
                   </div>
                 </div>
                 <Chevron size={13} />
+              </button>
+            )}
+
+            {showRegisterLink && onRegister && (
+              <button type="button" className={styles.registerAlt} onClick={onRegister}>
+                Need a new account? Register
               </button>
             )}
 
