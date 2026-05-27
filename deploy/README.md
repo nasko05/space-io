@@ -15,7 +15,56 @@ Monthly cost on `us-east-1` runs about **\$4–\$5** depending on volume size.
 ## Prereqs
 
 - `aws` CLI installed and able to authenticate (see below)
-- An existing EC2 key pair in the target region
+- An EC2 key pair in the target region (see "Get a key pair" below)
+
+## Get a key pair
+
+You need an SSH key pair in EC2 that the instance will trust. The
+script reads its name from `HEARTH_KEYPAIR`. Three ways, pick one:
+
+### A. Generate a new pair in AWS and download the private key
+
+Quickest if you don't already have an SSH key you want to reuse:
+
+```sh
+aws ec2 create-key-pair \
+  --profile dev-creds --region us-east-1 \
+  --key-name hearth \
+  --query 'KeyMaterial' --output text \
+  > ~/.ssh/hearth.pem
+chmod 600 ~/.ssh/hearth.pem
+```
+
+Then put `HEARTH_KEYPAIR=hearth` in `deploy/.env`. Later you'll SSH
+in with `ssh -i ~/.ssh/hearth.pem ec2-user@<ip>` — or the script's
+`deploy/deploy.sh ssh` if `~/.ssh/hearth.pem` is your default key.
+
+### B. Import your existing SSH public key
+
+Nicer if you already have `~/.ssh/id_ed25519` (or `id_rsa`) — no new
+private key to manage, plain `ssh ec2-user@<ip>` Just Works:
+
+```sh
+aws ec2 import-key-pair \
+  --profile dev-creds --region us-east-1 \
+  --key-name hearth \
+  --public-key-material fileb://~/.ssh/id_ed25519.pub
+```
+
+Then `HEARTH_KEYPAIR=hearth` in `deploy/.env`.
+
+### C. Use one you already created
+
+```sh
+aws ec2 describe-key-pairs \
+  --profile dev-creds --region us-east-1 \
+  --query 'KeyPairs[].KeyName' --output table
+```
+
+Pick a name from the list and put it in `HEARTH_KEYPAIR`.
+
+> ⚠️ **Region-scoped.** A key pair lives in one region; if you change
+> `AWS_REGION` later you'll need to create or import it there too.
 
 ## Authentication
 
