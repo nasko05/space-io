@@ -31,13 +31,8 @@ Open `http://127.0.0.1:7777/` and the first visit lands on a
 **registration** page: pick an email + passphrase. The email is mapped
 to a UUID-named subdirectory under `./data/` and the mapping is
 persisted to `./data/.users.toml`, so everything survives restarts.
-
-For scripted setups you can pre-register a user from the CLI:
-
-```sh
-./target/release/hearth init --space-dir ./data \
-  --email you@home.lan --passphrase 'correct horse battery staple'
-```
+Additional users can register from the login screen via the "Register"
+link.
 
 ## Layout
 

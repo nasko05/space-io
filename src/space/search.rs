@@ -45,6 +45,10 @@ pub fn search(space: &Space, passphrase: &SecretString, query: &str) -> AppResul
     }
     let cache = space.cache();
 
+    // Tags live in a single encrypted index at the root; load it once so each
+    // per-file tag check is an in-memory lookup, not another decrypt.
+    let meta_index = crate::space::meta::load(space, passphrase).unwrap_or_default();
+
     let mut hits: Vec<SearchHit> = Vec::new();
 
     for entry in WalkDir::new(&root).into_iter().filter_map(Result::ok) {
@@ -96,6 +100,11 @@ pub fn search(space: &Space, passphrase: &SecretString, query: &str) -> AppResul
         let lower = text.to_ascii_lowercase();
         let title = extract_title(&text);
         let title_lower = title.as_deref().map(|t| t.to_ascii_lowercase());
+        let tags_lower: Vec<String> = meta_index
+            .paths
+            .get(&visible_rel)
+            .map(|m| m.tags.iter().map(|t| t.to_ascii_lowercase()).collect())
+            .unwrap_or_default();
 
         let mut score = 0usize;
         let mut first_idx: Option<usize> = None;
@@ -103,12 +112,16 @@ pub fn search(space: &Space, passphrase: &SecretString, query: &str) -> AppResul
         for tok in &tokens {
             let body_match = lower.find(tok);
             let title_match = title_lower.as_deref().and_then(|t| t.find(tok));
-            if body_match.is_none() && title_match.is_none() {
+            let tag_match = tags_lower.iter().any(|t| t.contains(tok));
+            if body_match.is_none() && title_match.is_none() && !tag_match {
                 all_match = false;
                 break;
             }
             if title_match.is_some() {
                 score += 3;
+            }
+            if tag_match {
+                score += 2;
             }
             if let Some(idx) = body_match {
                 score += 1;
@@ -241,5 +254,45 @@ mod tests {
             make_space_with_note("p", "a.md", "# T\n\nA *star* and **bold** match here.");
         let hits = search(&space, &pass, "match").unwrap();
         assert!(!hits[0].snippet.contains('*'));
+    }
+
+    #[test]
+    fn matches_against_tags() {
+        // Body and title don't contain "garden", but the tag does.
+        let (_dir, space, pass) =
+            make_space_with_note("p", "a.md", "# Sunday\n\nThe quick brown fox.");
+        crate::space::meta::set_tags(&space, &pass, "a.md", vec!["garden".into()]).unwrap();
+        let hits = search(&space, &pass, "garden").unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].path, "a.md");
+    }
+
+    #[test]
+    fn tag_hit_outranks_body_hit() {
+        // Two notes both match "memory" — one as a tag, one in the body. The
+        // tag hit should score higher.
+        let (_dir, space, pass) =
+            make_space_with_note("p", "tagged.md", "# Tagged\n\nshort body");
+        crate::space::meta::set_tags(&space, &pass, "tagged.md", vec!["memory".into()]).unwrap();
+        crate::space::write::write_file(
+            &space,
+            &pass,
+            "body.md",
+            "# Other\n\nThe word memory appears here.",
+            None,
+        )
+        .unwrap();
+        let hits = search(&space, &pass, "memory").unwrap();
+        assert_eq!(hits.len(), 2);
+        assert_eq!(hits[0].path, "tagged.md");
+    }
+
+    #[test]
+    fn tag_match_is_case_insensitive() {
+        let (_dir, space, pass) =
+            make_space_with_note("p", "a.md", "# Sunday\n\nBody.");
+        crate::space::meta::set_tags(&space, &pass, "a.md", vec!["WORK".into()]).unwrap();
+        let hits = search(&space, &pass, "work").unwrap();
+        assert_eq!(hits.len(), 1);
     }
 }

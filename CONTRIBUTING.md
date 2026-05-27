@@ -40,12 +40,12 @@ cargo run -- serve --space-dir ./data --listen 127.0.0.1:7777
 ## Running locally
 
 ```sh
-./target/release/hearth init --space-dir ./data        # one-time, prompts for passphrase
 ./target/release/hearth serve --space-dir ./data       # open http://127.0.0.1:7777
 ```
 
-`./data` is gitignored. You can blow it away and re-init without
-touching the repo.
+The first visit shows a "Make your space" registration page; pick an
+email + passphrase there. `./data` is gitignored, so you can blow it
+away and re-register without touching the repo.
 
 ## CI gates
 

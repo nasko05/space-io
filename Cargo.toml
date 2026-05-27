@@ -41,7 +41,6 @@ hex = "0.4"
 dashmap = "6"
 uuid = { version = "1", features = ["v4", "serde"] }
 time = { version = "0.3", features = ["formatting", "parsing", "serde"] }
-rpassword = "7"
 
 [profile.release]
 lto = "thin"

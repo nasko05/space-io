@@ -74,15 +74,15 @@ export function HearthRail({
           {days.map((d) => {
             const has = calendar.filled.has(d);
             const cur = d === calendar.today;
+            const clickable = !!onSelectDay;
             const className = [
               styles.calCell,
               cur ? styles.calCellCurrent : '',
               has && !cur ? styles.calCellHas : '',
-              (has || cur) && onSelectDay ? styles.calCellClickable : '',
+              clickable ? styles.calCellClickable : '',
             ]
               .filter(Boolean)
               .join(' ');
-            const clickable = (has || cur) && onSelectDay;
             return (
               <button
                 key={d}
@@ -90,7 +90,13 @@ export function HearthRail({
                 className={className}
                 onClick={clickable ? () => onSelectDay?.(d) : undefined}
                 disabled={!clickable}
-                aria-label={clickable ? `Notes from day ${d}` : undefined}
+                aria-label={
+                  clickable
+                    ? has
+                      ? `Notes from day ${d}`
+                      : `Write a note for day ${d}`
+                    : undefined
+                }
               >
                 {d}
                 {has && !cur && <span className={styles.calDot} />}

@@ -35,6 +35,31 @@ export function isPasskeySupported(): boolean {
   );
 }
 
+/** Pre-flight check that fails with a useful message instead of letting the
+ *  browser throw the cryptic "The operation is insecure" SecurityError.
+ *  WebAuthn requires a secure context (HTTPS or localhost) and a domain-style
+ *  hostname — bare IP addresses are rejected by the platform.
+ */
+function ensureWebAuthnUsable(): void {
+  if (typeof window === 'undefined') return;
+  if (!window.isSecureContext) {
+    throw new Error(
+      'Passkeys require a secure context. Open the app over HTTPS, or use the SSH tunnel (deploy/deploy.sh open) so you reach it at 127.0.0.1.',
+    );
+  }
+  const host = window.location.hostname;
+  if (host === 'localhost' || host === '127.0.0.1' || host === '::1') return;
+  // WebAuthn rejects IP-address relying-party IDs. The simplest detection
+  // covers IPv4 dotted-quad; IPv6 literals always contain a colon.
+  const isIpV4 = /^\d{1,3}(\.\d{1,3}){3}$/.test(host);
+  const isIpV6 = host.includes(':') || host.startsWith('[');
+  if (isIpV4 || isIpV6) {
+    throw new Error(
+      'Passkeys need a hostname, not an IP address. Reach the app via a domain (or the SSH tunnel at 127.0.0.1).',
+    );
+  }
+}
+
 /** Create a new passkey and wrap the user's passphrase under its PRF secret. */
 export async function registerPasskey(
   owner: string,
@@ -43,6 +68,7 @@ export async function registerPasskey(
   if (!isPasskeySupported()) {
     throw new Error('Passkeys are not available in this browser.');
   }
+  ensureWebAuthnUsable();
   const prfSalt = crypto.getRandomValues(new Uint8Array(32));
   const challenge = crypto.getRandomValues(new Uint8Array(32));
   const userId = await sha256(new TextEncoder().encode(`hearth:${owner}`));
@@ -91,6 +117,7 @@ export async function unlockWithPasskey(input: AuthenticateInput): Promise<strin
   if (!isPasskeySupported()) {
     throw new Error('Passkeys are not available in this browser.');
   }
+  ensureWebAuthnUsable();
   const credentialId = b64UrlToBytes(input.credentialIdB64);
   const prfSalt = b64UrlToBytes(input.prfSaltB64);
   const wrapped = b64UrlToBytes(input.wrappedPassphraseB64);

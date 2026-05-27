@@ -9,13 +9,11 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use age::secrecy::SecretString;
 use anyhow::Context;
 use clap::{Parser, Subcommand};
 
 use crate::space::rate_limit::RateLimiter;
 use crate::space::session::SessionStore;
-use crate::space::users::{normalise_email, UsersRegistry};
 use crate::state::{AppConfig, AppState};
 
 #[derive(Parser, Debug)]
@@ -31,24 +29,6 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Command {
-    /// Register a new user from the CLI. Mints a UUID, creates the per-user
-    /// space directory, and records the email→UUID mapping in `.users.toml`.
-    /// The browser registration page is the primary path; this is for
-    /// scripted setups.
-    Init {
-        /// Root directory holding `.users.toml` and the per-user subdirs.
-        #[arg(long, default_value = "./data")]
-        space_dir: PathBuf,
-        /// Email — used as the unique identifier on the login screen.
-        #[arg(long)]
-        email: String,
-        /// Passphrase. If omitted, prompted interactively (with confirm).
-        #[arg(long)]
-        passphrase: Option<String>,
-        /// Optional display name. Defaults to the email.
-        #[arg(long)]
-        owner: Option<String>,
-    },
     /// Serve over HTTP. Tolerates an empty data dir — the registration page
     /// brings the first user to life.
     Serve {
@@ -69,64 +49,8 @@ fn main() -> anyhow::Result<()> {
 
     let cli = Cli::parse();
     match cli.command {
-        Command::Init {
-            space_dir,
-            email,
-            passphrase,
-            owner,
-        } => cmd_init(space_dir, email, passphrase, owner),
         Command::Serve { space_dir, listen } => cmd_serve(space_dir, listen),
     }
-}
-
-fn cmd_init(
-    root: PathBuf,
-    email: String,
-    passphrase: Option<String>,
-    owner: Option<String>,
-) -> anyhow::Result<()> {
-    let passphrase = match passphrase {
-        Some(p) => p,
-        None => {
-            let p1 =
-                rpassword::prompt_password("Choose a passphrase: ").context("read passphrase")?;
-            let p2 = rpassword::prompt_password("Confirm: ").context("read passphrase confirm")?;
-            if p1 != p2 {
-                anyhow::bail!("passphrases do not match");
-            }
-            p1
-        }
-    };
-    if passphrase.is_empty() {
-        anyhow::bail!("passphrase must not be empty");
-    }
-    let normalised = normalise_email(&email).map_err(|e| anyhow::anyhow!("{e}"))?;
-    let display_owner = owner
-        .map(|o| o.trim().to_string())
-        .filter(|o| !o.is_empty())
-        .unwrap_or_else(|| normalised.clone());
-
-    std::fs::create_dir_all(&root).context("create space-dir root")?;
-    let mut registry = UsersRegistry::load(&root).map_err(|e| anyhow::anyhow!("{e}"))?;
-    let entry = registry
-        .add(&root, &normalised)
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
-    let space_dir = UsersRegistry::space_dir_for(&root, &entry.uuid);
-
-    space::init::init_space(space::init::InitOptions {
-        space_dir: space_dir.clone(),
-        passphrase: SecretString::from(passphrase),
-        owner: display_owner,
-    })
-    .map_err(|e| anyhow::anyhow!("{e}"))?;
-
-    println!(
-        "Registered {} → {}\n  space at {}",
-        entry.email,
-        entry.uuid,
-        space_dir.display()
-    );
-    Ok(())
 }
 
 #[tokio::main(flavor = "multi_thread")]
@@ -179,6 +103,3 @@ async fn cmd_serve(space_dir: PathBuf, listen: SocketAddr) -> anyhow::Result<()>
     .context("serve")?;
     Ok(())
 }
-
-// CLI is the only entrypoint. cmd_serve uses its own #[tokio::main] so cmd_init
-// can run synchronously without spinning up a runtime.

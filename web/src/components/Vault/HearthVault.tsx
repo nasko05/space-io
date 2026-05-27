@@ -336,12 +336,6 @@ export function HearthVault({
               >
                 <Plus size={12} /> New folder
               </button>
-              <button type="button" className={`${styles.viewBtn} ${styles.viewBtnActive}`}>
-                Shelves
-              </button>
-              <button type="button" className={styles.viewBtn} disabled title="coming soon">
-                Timeline
-              </button>
             </div>
           </header>
 

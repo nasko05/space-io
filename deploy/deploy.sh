@@ -2,7 +2,8 @@
 # Minimal one-command deploy for SpaceIO Hearth on AWS.
 # Creates a CloudFormation stack with one EC2 instance, one security group,
 # one EBS volume, and one Elastic IP. The instance clones the repo and
-# builds it on first boot; you SSH in once to run `init-space.sh`.
+# builds it on first boot; first browser visit lands on the registration
+# page where you pick an email + passphrase — no SSH-in / init dance.
 
 set -euo pipefail
 

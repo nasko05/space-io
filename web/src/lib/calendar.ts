@@ -107,3 +107,9 @@ export function findFileForDay(
   }
   return null;
 }
+
+/** Locale-independent "27 May 2026" — matches the dateline format used in the
+ *  Reader and is safe to feed to the create-file endpoint as a title. */
+export function dateTitle(year: number, month: number, day: number): string {
+  return `${day} ${MONTHS[month]} ${year}`;
+}
