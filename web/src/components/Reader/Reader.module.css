@@ -124,7 +124,15 @@
   font-size: 12px;
   min-width: 240px;
   z-index: 2;
-  pointer-events: none;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+  font-family: inherit;
+}
+
+.searchPill:hover {
+  background: rgba(255, 255, 255, 0.85);
+  border-color: var(--accent-soft);
+  color: var(--ink-2);
 }
 
 .searchPill > span {
@@ -138,6 +146,12 @@
   padding: 1px 5px;
   border: 1px solid var(--rule);
   border-radius: 4px;
+}
+
+.contentRow {
+  flex: 1;
+  display: flex;
+  min-height: 0;
 }
 
 .column {
@@ -255,6 +269,10 @@
   font-weight: 600;
 }
 
+.editorWrap {
+  position: relative;
+}
+
 .editor {
   width: 100%;
   min-height: 60vh;
@@ -267,6 +285,53 @@
   line-height: 1.65;
   color: var(--ink);
   padding: 0;
+}
+
+.autocomplete {
+  position: absolute;
+  left: 0;
+  bottom: -8px;
+  transform: translateY(100%);
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  box-shadow: 0 12px 30px rgba(40, 25, 10, 0.16);
+  padding: 6px 0;
+  z-index: 5;
+  min-width: 260px;
+  font-family: var(--font-sans);
+}
+
+.autocompleteLabel {
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--mute);
+  font-weight: 600;
+  padding: 6px 14px 8px;
+  border-bottom: 1px solid var(--rule);
+  margin-bottom: 4px;
+}
+
+.autoItem {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  padding: 7px 14px;
+  font-family: var(--font-serif);
+  font-size: 14px;
+  font-style: italic;
+  color: var(--ink-2);
+  cursor: pointer;
+  letter-spacing: -0.005em;
+}
+
+.autoItem:hover,
+.autoItemActive {
+  background: var(--warm);
+  color: var(--ink);
 }
 
 .editor::placeholder {
@@ -298,6 +363,14 @@
   color: var(--ink-2);
   border-bottom: 1px solid var(--accent-soft);
   cursor: pointer;
+  background: transparent;
+  font: inherit;
+  padding: 0;
+  transition: border-bottom-color 0.12s;
+}
+
+.linkedLink:hover {
+  border-bottom-color: var(--accent);
 }
 
 /* Floating ink bar — visual only for v1 (dir-1-hearth.jsx:356-377). */

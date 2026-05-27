@@ -1,12 +1,15 @@
-use axum::extract::{Query, State};
+use axum::body::Body;
+use axum::extract::{Multipart, Query, State};
+use axum::http::{header, StatusCode};
+use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use axum_extra::extract::cookie::CookieJar;
 use serde::{Deserialize, Serialize};
 
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 use crate::routes::auth::require_passphrase;
-use crate::space::{create, excerpt, read, tree, write};
+use crate::space::{create, download, excerpt, history, read, tree, upload, write};
 use crate::state::AppState;
 
 pub fn router() -> Router<AppState> {
@@ -16,6 +19,9 @@ pub fn router() -> Router<AppState> {
         .route("/files/write", put(put_write))
         .route("/files/create", post(post_create))
         .route("/files/excerpts", get(get_excerpts))
+        .route("/files/upload", post(post_upload))
+        .route("/files/download", get(get_download))
+        .route("/files/history", get(get_history))
 }
 
 #[derive(Serialize)]
@@ -141,4 +147,143 @@ async fn get_excerpts(
         })
         .collect();
     Ok(Json(ExcerptsResponse { excerpts }))
+}
+
+#[derive(Serialize)]
+struct UploadResult {
+    path: String,
+    size: u64,
+}
+
+#[derive(Serialize)]
+struct UploadResponse {
+    files: Vec<UploadResult>,
+}
+
+const DEFAULT_UPLOAD_FOLDER: &str = "Uploads";
+const MAX_UPLOAD_BYTES: usize = 50 * 1024 * 1024;
+
+async fn post_upload(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    mut multipart: Multipart,
+) -> AppResult<Json<UploadResponse>> {
+    let pass = require_passphrase(&state, &jar)?;
+
+    let mut folder: Option<String> = None;
+    let mut files: Vec<(String, Vec<u8>)> = Vec::new();
+
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(|e| AppError::BadRequest(format!("multipart: {e}")))?
+    {
+        let name = field.name().map(|s| s.to_string()).unwrap_or_default();
+        if name == "folder" {
+            folder = Some(
+                field
+                    .text()
+                    .await
+                    .map_err(|e| AppError::BadRequest(format!("folder field: {e}")))?,
+            );
+        } else if name == "file" || name == "files" || name == "files[]" {
+            let filename = field
+                .file_name()
+                .map(|s| s.to_string())
+                .ok_or_else(|| AppError::BadRequest("file part missing filename".into()))?;
+            let bytes = field
+                .bytes()
+                .await
+                .map_err(|e| AppError::BadRequest(format!("read body: {e}")))?;
+            if bytes.len() > MAX_UPLOAD_BYTES {
+                return Err(AppError::BadRequest(format!(
+                    "{} exceeds {MAX_UPLOAD_BYTES} bytes",
+                    filename
+                )));
+            }
+            files.push((filename, bytes.to_vec()));
+        }
+    }
+    if files.is_empty() {
+        return Err(AppError::BadRequest("no files in multipart body".into()));
+    }
+    let folder = folder.unwrap_or_else(|| DEFAULT_UPLOAD_FOLDER.to_string());
+
+    let mut results = Vec::with_capacity(files.len());
+    for (name, bytes) in files {
+        let r = upload::store_upload(&state.space, &pass, &folder, &name, &bytes)?;
+        results.push(UploadResult {
+            path: r.path,
+            size: r.size,
+        });
+    }
+    Ok(Json(UploadResponse { files: results }))
+}
+
+#[derive(Deserialize)]
+struct DownloadQuery {
+    path: String,
+}
+
+async fn get_download(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Query(q): Query<DownloadQuery>,
+) -> AppResult<Response> {
+    let pass = require_passphrase(&state, &jar)?;
+    let file = download::fetch_decrypted(&state.space, &pass, &q.path)?;
+    let mime = mime_guess::from_path(&file.path).first_or_octet_stream();
+    let base_name = std::path::Path::new(&file.path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(&file.path);
+    let content_disposition = format!(
+        "attachment; filename=\"{}\"",
+        base_name.replace('"', "")
+    );
+    Ok((
+        StatusCode::OK,
+        [
+            (header::CONTENT_TYPE, mime.as_ref().to_string()),
+            (header::CONTENT_DISPOSITION, content_disposition),
+        ],
+        Body::from(file.bytes),
+    )
+        .into_response())
+}
+
+#[derive(Deserialize)]
+struct HistoryQuery {
+    path: String,
+}
+
+#[derive(Serialize)]
+struct HistoryEntryDto {
+    commit: String,
+    message: String,
+    author: String,
+    when: String,
+}
+
+#[derive(Serialize)]
+struct HistoryResponse {
+    entries: Vec<HistoryEntryDto>,
+}
+
+async fn get_history(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Query(q): Query<HistoryQuery>,
+) -> AppResult<Json<HistoryResponse>> {
+    require_passphrase(&state, &jar)?;
+    let entries = history::file_history(&state.space, &q.path)?
+        .into_iter()
+        .map(|e| HistoryEntryDto {
+            commit: e.commit,
+            message: e.message,
+            author: e.author,
+            when: e.when,
+        })
+        .collect();
+    Ok(Json(HistoryResponse { entries }))
 }

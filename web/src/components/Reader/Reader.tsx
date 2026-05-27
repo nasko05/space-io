@@ -1,8 +1,29 @@
-import { ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  ChangeEvent,
+  KeyboardEvent as ReactKeyboardEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { HearthShell } from '../Shell/HearthShell';
 import { HearthRail } from '../Rail/HearthRail';
 import { Markdown } from '../Markdown/Markdown';
-import { Chevron, Clock, Eye, Folder, Image as ImageIcon, Link, Pencil, Search, Sparkle, Tag } from '../icons/Icon';
+import { HistoryPanel } from '../History/HistoryPanel';
+import {
+  Branch,
+  Chevron,
+  Clock,
+  Eye,
+  Folder,
+  Image as ImageIcon,
+  Link,
+  Pencil,
+  Search,
+  Sparkle,
+  Tag,
+} from '../icons/Icon';
 import { extractTitle, stripFirstH1 } from '../../lib/markdown';
 import { saveStatusLabel, useAutosave } from '../../lib/useAutosave';
 import { CalendarView, TodayEntry } from '../../lib/calendar';
@@ -12,21 +33,38 @@ interface Props {
   path: string;
   content: string;
   updated: string | null;
-  // Initial editor mode — "edit" for freshly-created files, "preview" otherwise.
   initialMode?: 'preview' | 'edit';
   calendar: CalendarView;
   today: TodayEntry[];
+  titleToPath: Map<string, string>;
   onSelectFile: (path: string) => void;
   onSelectDay: (day: number) => void;
   onNewEntry: () => void;
   onOpenVault: () => void;
+  onOpenSearch: () => void;
   onLock: () => void;
   onSave: (path: string, content: string) => Promise<void>;
+  onWikilinkMiss?: (title: string) => void;
 }
 
-// Ported from dir-1-hearth.jsx:156-252 (HearthMain), extended for Phase 2 with
-// an edit/preview toggle, debounced autosave, and an empty-state prompts
-// overlay borrowed from HearthNew (dir-1-hearth.jsx:284-382).
+const WIKILINK_MAX_SUGGESTIONS = 6;
+
+interface AutocompleteState {
+  open: boolean;
+  start: number; // character index of the first char after `[[`
+  query: string;
+  hits: string[];
+  activeIdx: number;
+}
+
+const EMPTY_AC: AutocompleteState = {
+  open: false,
+  start: -1,
+  query: '',
+  hits: [],
+  activeIdx: 0,
+};
+
 export function Reader({
   path,
   content: initialContent,
@@ -34,21 +72,26 @@ export function Reader({
   initialMode = 'preview',
   calendar,
   today,
+  titleToPath,
   onSelectFile,
   onSelectDay,
   onNewEntry,
   onOpenVault,
+  onOpenSearch,
   onLock,
   onSave,
+  onWikilinkMiss,
 }: Props) {
   const [content, setContent] = useState(initialContent);
   const [mode, setMode] = useState<'preview' | 'edit'>(initialMode);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [ac, setAc] = useState<AutocompleteState>(EMPTY_AC);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
-  // Reset local state when the user switches files.
   useEffect(() => {
     setContent(initialContent);
     setMode(initialMode);
+    setAc(EMPTY_AC);
   }, [path, initialContent, initialMode]);
 
   const saveFn = useMemo(
@@ -59,7 +102,6 @@ export function Reader({
   );
   const { status, markDirty, flush } = useAutosave({ onSave: saveFn });
 
-  // Cmd/Ctrl+S to flush; nothing else.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
@@ -71,18 +113,104 @@ export function Reader({
     return () => window.removeEventListener('keydown', onKey);
   }, [flush]);
 
-  // Focus the textarea when first entering edit mode on a new file.
   useEffect(() => {
-    if (mode === 'edit') {
-      textareaRef.current?.focus();
-    }
+    if (mode === 'edit') textareaRef.current?.focus();
   }, [mode]);
+
+  const allTitles = useMemo(() => Array.from(titleToPath.keys()), [titleToPath]);
+
+  function recomputeAutocomplete(value: string, caret: number) {
+    // Find the most recent `[[` to the left of the caret with no closing `]]`
+    // or whitespace between.
+    let i = caret - 1;
+    while (i >= 0) {
+      const ch = value[i];
+      if (ch === '\n') {
+        setAc(EMPTY_AC);
+        return;
+      }
+      if (i >= 1 && value[i - 1] === '[' && value[i] === '[') {
+        // i points at the second `[`. Query starts at i + 1.
+        const start = i + 1;
+        const between = value.slice(start, caret);
+        if (between.includes(']') || between.includes('[')) {
+          setAc(EMPTY_AC);
+          return;
+        }
+        const q = between.toLowerCase();
+        const hits = allTitles
+          .filter((t) => t.toLowerCase().includes(q))
+          .slice(0, WIKILINK_MAX_SUGGESTIONS);
+        if (hits.length === 0) {
+          setAc(EMPTY_AC);
+          return;
+        }
+        setAc({ open: true, start, query: between, hits, activeIdx: 0 });
+        return;
+      }
+      i -= 1;
+    }
+    setAc(EMPTY_AC);
+  }
 
   function onContentChange(e: ChangeEvent<HTMLTextAreaElement>) {
     const next = e.target.value;
     setContent(next);
     markDirty(next);
+    recomputeAutocomplete(next, e.target.selectionStart);
   }
+
+  function insertSuggestion(title: string) {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    const start = ac.start;
+    if (start < 0) return;
+    const before = content.slice(0, start);
+    // Replace the in-progress query and add a closing `]]`.
+    const after = content.slice(start + ac.query.length);
+    const insertText = `${title}]]`;
+    const next = `${before}${insertText}${after}`;
+    setContent(next);
+    markDirty(next);
+    setAc(EMPTY_AC);
+    // Restore caret to just after the inserted `]]`.
+    const caret = before.length + insertText.length;
+    window.requestAnimationFrame(() => {
+      ta.focus();
+      ta.setSelectionRange(caret, caret);
+    });
+  }
+
+  function onTextareaKeyDown(e: ReactKeyboardEvent<HTMLTextAreaElement>) {
+    if (!ac.open) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setAc((s) => ({ ...s, activeIdx: Math.min(s.hits.length - 1, s.activeIdx + 1) }));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setAc((s) => ({ ...s, activeIdx: Math.max(0, s.activeIdx - 1) }));
+    } else if (e.key === 'Enter' || e.key === 'Tab') {
+      e.preventDefault();
+      const title = ac.hits[ac.activeIdx];
+      if (title) insertSuggestion(title);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      setAc(EMPTY_AC);
+    }
+  }
+
+  const handleWikilinkClick = useCallback(
+    (title: string) => {
+      const target = titleToPath.get(title);
+      if (target) {
+        void flush();
+        onSelectFile(target);
+      } else {
+        onWikilinkMiss?.(title);
+      }
+    },
+    [flush, onSelectFile, onWikilinkMiss, titleToPath],
+  );
 
   const segments = path.split('/');
   const fileName = segments[segments.length - 1] ?? path;
@@ -147,6 +275,14 @@ export function Reader({
               <span className={styles.meta}>{wordCount} words</span>
               <button
                 type="button"
+                className={`${styles.toolBtn} ${historyOpen ? styles.toolBtnActive : ''}`}
+                onClick={() => setHistoryOpen((v) => !v)}
+                title="Version history"
+              >
+                <Branch size={12} /> History
+              </button>
+              <button
+                type="button"
                 className={`${styles.toolBtn} ${mode === 'preview' ? styles.toolBtnActive : ''}`}
                 onClick={() => {
                   void flush();
@@ -166,78 +302,130 @@ export function Reader({
           </div>
 
           {mode === 'preview' && (
-            <div className={styles.searchPill} aria-hidden>
+            <button
+              type="button"
+              className={styles.searchPill}
+              onClick={onOpenSearch}
+              aria-label="Open search"
+            >
               <Search size={12} />
               <span>Search the whole diary…</span>
               <kbd>⌘K</kbd>
-            </div>
+            </button>
           )}
 
-          <div className={styles.column}>
-            <article className={styles.article}>
-              <div className={styles.dateline}>
-                <span>{formatDateline(updated)}</span>
-                <span className={styles.datelineRule} />
-                <span className={styles.tags}>
-                  <Tag size={11} /> journal · {mode === 'edit' ? 'drafting' : 'morning-pages'}
-                </span>
-              </div>
-
-              {mode === 'edit' && isEmpty ? (
-                <div className={styles.placeholderTitle}>
-                  A title for today…
-                  <span className={styles.cursor} />
+          <div className={styles.contentRow}>
+            <div className={styles.column}>
+              <article className={styles.article}>
+                <div className={styles.dateline}>
+                  <span>{formatDateline(updated)}</span>
+                  <span className={styles.datelineRule} />
+                  <span className={styles.tags}>
+                    <Tag size={11} /> journal · {mode === 'edit' ? 'drafting' : 'morning-pages'}
+                  </span>
                 </div>
-              ) : (
-                <h1 className={styles.title}>
-                  {titleParts[0]}
-                  {titleParts.length > 1 && (
-                    <>
-                      ,<br />
-                      <em>{titleParts.slice(1).join(', ')}</em>
-                    </>
-                  )}
-                </h1>
-              )}
 
-              {mode === 'edit' && isEmpty && (
-                <div className={styles.prompts}>
-                  <div className={styles.promptsLabel}>Three prompts, in case you're stuck</div>
-                  {[
-                    'What’s on the windowsill of your mind today?',
-                    'Something small you noticed and want to keep.',
-                    'A sentence you read this week that stayed.',
-                  ].map((p, i) => (
-                    <div key={i} className={styles.prompt}>
-                      <span className={styles.promptIndex}>{i + 1}.</span>
-                      {p}
-                    </div>
-                  ))}
-                </div>
-              )}
+                {mode === 'edit' && isEmpty ? (
+                  <div className={styles.placeholderTitle}>
+                    A title for today…
+                    <span className={styles.cursor} />
+                  </div>
+                ) : (
+                  <h1 className={styles.title}>
+                    {titleParts[0]}
+                    {titleParts.length > 1 && (
+                      <>
+                        ,<br />
+                        <em>{titleParts.slice(1).join(', ')}</em>
+                      </>
+                    )}
+                  </h1>
+                )}
 
-              {mode === 'preview' ? (
-                <Markdown source={bodySource} />
-              ) : (
-                <textarea
-                  ref={textareaRef}
-                  className={styles.editor}
-                  value={content}
-                  onChange={onContentChange}
-                  spellCheck
-                  placeholder="Begin where you are."
-                />
-              )}
+                {mode === 'edit' && isEmpty && (
+                  <div className={styles.prompts}>
+                    <div className={styles.promptsLabel}>Three prompts, in case you're stuck</div>
+                    {[
+                      'What’s on the windowsill of your mind today?',
+                      'Something small you noticed and want to keep.',
+                      'A sentence you read this week that stayed.',
+                    ].map((p, i) => (
+                      <div key={i} className={styles.prompt}>
+                        <span className={styles.promptIndex}>{i + 1}.</span>
+                        {p}
+                      </div>
+                    ))}
+                  </div>
+                )}
 
-              {mode === 'preview' && !isEmpty && (
-                <div className={styles.linkedFrom}>
-                  <Link size={12} />
-                  <span className={styles.linkedLabel}>Linked from</span>
-                  <a className={styles.linkedLink}>On memory palaces</a>
-                  <a className={styles.linkedLink}>Notes from M.</a>
-                </div>
-              )}
-            </article>
+                {mode === 'preview' ? (
+                  <Markdown source={bodySource} onWikilinkClick={handleWikilinkClick} />
+                ) : (
+                  <div className={styles.editorWrap}>
+                    <textarea
+                      ref={textareaRef}
+                      className={styles.editor}
+                      value={content}
+                      onChange={onContentChange}
+                      onKeyDown={onTextareaKeyDown}
+                      onClick={(e) => recomputeAutocomplete(content, e.currentTarget.selectionStart)}
+                      onSelect={(e) => recomputeAutocomplete(content, e.currentTarget.selectionStart)}
+                      onBlur={() => window.setTimeout(() => setAc(EMPTY_AC), 120)}
+                      spellCheck
+                      placeholder="Begin where you are."
+                    />
+                    {ac.open && (
+                      <div className={styles.autocomplete} role="listbox">
+                        <div className={styles.autocompleteLabel}>
+                          Link to a note · ↑↓ to choose, ↵ to insert, esc to dismiss
+                        </div>
+                        {ac.hits.map((title, i) => (
+                          <button
+                            key={title}
+                            type="button"
+                            role="option"
+                            aria-selected={i === ac.activeIdx}
+                            className={`${styles.autoItem} ${i === ac.activeIdx ? styles.autoItemActive : ''}`}
+                            onMouseEnter={() => setAc((s) => ({ ...s, activeIdx: i }))}
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              insertSuggestion(title);
+                            }}
+                          >
+                            {title}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {mode === 'preview' && !isEmpty && backlinkableTitles(titleFromContent, content, titleToPath).length > 0 && (
+                  <div className={styles.linkedFrom}>
+                    <Link size={12} />
+                    <span className={styles.linkedLabel}>Linked notes</span>
+                    {backlinkableTitles(titleFromContent, content, titleToPath).map((t) => (
+                      <button
+                        key={t}
+                        type="button"
+                        className={styles.linkedLink}
+                        onClick={() => handleWikilinkClick(t)}
+                      >
+                        {t}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </article>
+            </div>
+
+            {historyOpen && (
+              <HistoryPanel
+                open={historyOpen}
+                path={path}
+                onClose={() => setHistoryOpen(false)}
+              />
+            )}
           </div>
 
           {mode === 'edit' && (
@@ -287,4 +475,22 @@ function formatDateline(updated: string | null): string {
   const day = d.toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' });
   const time = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false });
   return `${weekday} · ${day} · ${time}`;
+}
+
+/** Extract the wikilinked titles in the current content that resolve to
+ * actual notes, excluding self-references. */
+function backlinkableTitles(
+  currentTitle: string | null,
+  content: string,
+  titleToPath: Map<string, string>,
+): string[] {
+  const found = new Set<string>();
+  const re = /\[\[([^\]]+)\]\]/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(content)) !== null) {
+    const t = m[1].trim();
+    if (currentTitle && t === currentTitle) continue;
+    if (titleToPath.has(t)) found.add(t);
+  }
+  return Array.from(found);
 }

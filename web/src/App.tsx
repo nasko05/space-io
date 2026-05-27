@@ -1,12 +1,16 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { DragEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Auth } from './components/Auth/Auth';
 import { Reader } from './components/Reader/Reader';
 import { HearthVault } from './components/Vault/HearthVault';
+import { SearchOverlay } from './components/Search/SearchOverlay';
+import { UploadModal } from './components/Upload/UploadModal';
+import { DownloadModal } from './components/Download/DownloadModal';
 import {
   api,
   ExcerptMap,
   firstMarkdownLeaf,
   ReadFile,
+  TreeFile,
   TreeNode,
 } from './api/client';
 import {
@@ -27,18 +31,19 @@ type Surface =
   | { kind: 'reader'; file: ReadFile; initialMode: 'preview' | 'edit' }
   | { kind: 'vault'; previousPath: string | null };
 
-const DEFAULT_NEW_FOLDER = (() => {
-  const year = new Date().getFullYear();
-  return `Journal/${year}`;
-})();
+const DEFAULT_NEW_FOLDER = (() => `Journal/${new Date().getFullYear()}`)();
 
 export function App() {
   const [view, setView] = useState<View>({ kind: 'loading' });
   const [tree, setTree] = useState<TreeNode[]>([]);
   const [excerpts, setExcerpts] = useState<ExcerptMap>({});
   const [now, setNow] = useState(() => new Date());
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const [uploadInitial, setUploadInitial] = useState<File[] | undefined>(undefined);
+  const [downloadFile, setDownloadFile] = useState<TreeFile | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
 
-  // Refresh "now" once a minute so the rail's date can rollover.
   useEffect(() => {
     const t = window.setInterval(() => setNow(new Date()), 60_000);
     return () => window.clearInterval(t);
@@ -53,19 +58,25 @@ export function App() {
   }, []);
 
   const refreshExcerpts = useCallback(async () => {
-    const { excerpts } = await api.excerpts();
-    setExcerpts(excerpts);
+    try {
+      const { excerpts } = await api.excerpts();
+      setExcerpts(excerpts);
+    } catch (err) {
+      console.error('excerpts failed', err);
+    }
   }, []);
 
   const enterReader = useCallback(
     async (owner: string) => {
       try {
         const t = await refreshTree();
+        // Excerpts power wikilink autocomplete + the Today list — fetch
+        // eagerly so the Reader has them on first paint.
+        void refreshExcerpts();
         const leaf = firstMarkdownLeaf(t);
         if (!leaf) {
-          // No notes yet — drop into a fresh draft.
           const { path } = await api.create(DEFAULT_NEW_FOLDER);
-          const t2 = await refreshTree();
+          await refreshTree();
           const file: ReadFile = { path, content: '', updated: null };
           previousPathRef.current = path;
           setView({
@@ -73,7 +84,6 @@ export function App() {
             owner,
             surface: { kind: 'reader', file, initialMode: 'edit' },
           });
-          void t2;
           return;
         }
         const file = await api.read(leaf.path);
@@ -90,10 +100,9 @@ export function App() {
         });
       }
     },
-    [refreshTree],
+    [refreshExcerpts, refreshTree],
   );
 
-  // Bootstrap.
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -128,11 +137,14 @@ export function App() {
     try {
       await api.lock();
     } catch {
-      // ignore — we're locking either way
+      // ignore
     }
     setTree([]);
     setExcerpts({});
     previousPathRef.current = null;
+    setSearchOpen(false);
+    setUploadOpen(false);
+    setDownloadFile(null);
     setView((v) =>
       v.kind === 'unlocked'
         ? { kind: 'auth', owner: v.owner }
@@ -151,9 +163,10 @@ export function App() {
           owner: view.owner,
           surface: { kind: 'reader', file, initialMode: 'preview' },
         });
+        setSearchOpen(false);
       } catch (err) {
-        // Non-fatal: surface in console for now; could become a toast later.
         console.error('failed to read file', err);
+        setToast(err instanceof Error ? err.message : 'Could not open file');
       }
     },
     [view],
@@ -199,6 +212,7 @@ export function App() {
       const { path } = await api.create(DEFAULT_NEW_FOLDER);
       const file = await api.read(path);
       await refreshTree();
+      void refreshExcerpts();
       previousPathRef.current = path;
       setView({
         kind: 'unlocked',
@@ -207,26 +221,107 @@ export function App() {
       });
     } catch (err) {
       console.error('failed to create new entry', err);
+      setToast(err instanceof Error ? err.message : 'Could not create new entry');
     }
-  }, [refreshTree, view]);
+  }, [refreshExcerpts, refreshTree, view]);
 
   const saveFile = useCallback(
     async (path: string, content: string) => {
       await api.write(path, content);
+      // Excerpts power wikilink autocomplete; keep them roughly in sync.
+      void refreshExcerpts();
     },
-    [],
+    [refreshExcerpts],
+  );
+
+  const onSelectVaultFile = useCallback(
+    (file: TreeFile) => {
+      // Markdown opens in the reader; non-text opens the download dialog.
+      if (file.kind === 'md') {
+        void selectFile(file.path);
+      } else {
+        setDownloadFile(file);
+      }
+    },
+    [selectFile],
   );
 
   const selectDay = useCallback(
     (day: number) => {
       if (view.kind !== 'unlocked') return;
       const target = findFileForDay(tree, now.getFullYear(), now.getMonth(), day);
-      if (target) {
-        void selectFile(target.path);
-      }
+      if (target) void selectFile(target.path);
     },
     [now, selectFile, tree, view],
   );
+
+  const onUploaded = useCallback(async () => {
+    await refreshTree();
+    void refreshExcerpts();
+  }, [refreshExcerpts, refreshTree]);
+
+  const onWikilinkMiss = useCallback((title: string) => {
+    setToast(`No note titled "${title}" — yet.`);
+  }, []);
+
+  // Global keyboard: ⌘K / Ctrl-K opens search when unlocked.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        if (view.kind === 'unlocked') {
+          e.preventDefault();
+          setSearchOpen((v) => !v);
+        }
+      } else if (e.key === 'Escape') {
+        if (searchOpen) setSearchOpen(false);
+      }
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [searchOpen, view]);
+
+  // Global drag-to-upload — only active when unlocked.
+  const dragCounter = useRef(0);
+  const [dragOverlay, setDragOverlay] = useState(false);
+  const handleWindowDragEnter = useCallback(
+    (e: DragEvent) => {
+      if (view.kind !== 'unlocked') return;
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      dragCounter.current += 1;
+      setDragOverlay(true);
+    },
+    [view],
+  );
+  const handleWindowDragLeave = useCallback((e: DragEvent) => {
+    e.preventDefault();
+    dragCounter.current -= 1;
+    if (dragCounter.current <= 0) {
+      dragCounter.current = 0;
+      setDragOverlay(false);
+    }
+  }, []);
+  const handleWindowDrop = useCallback(
+    (e: DragEvent) => {
+      if (view.kind !== 'unlocked') return;
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      dragCounter.current = 0;
+      setDragOverlay(false);
+      const files = Array.from(e.dataTransfer?.files ?? []);
+      if (files.length === 0) return;
+      setUploadInitial(files);
+      setUploadOpen(true);
+    },
+    [view],
+  );
+
+  // Auto-dismiss toasts.
+  useEffect(() => {
+    if (!toast) return;
+    const t = window.setTimeout(() => setToast(null), 3200);
+    return () => window.clearTimeout(t);
+  }, [toast]);
 
   const calendar: CalendarView = useMemo(() => buildCalendar(now, tree), [now, tree]);
   const currentPath =
@@ -235,44 +330,141 @@ export function App() {
     () => entriesForToday(now, tree, excerpts, currentPath),
     [now, tree, excerpts, currentPath],
   );
+  const titleToPath = useMemo(() => buildTitleMap(tree, excerpts), [tree, excerpts]);
 
   if (view.kind === 'loading') return <LoadingScreen />;
   if (view.kind === 'auth') return <Auth owner={view.owner} onUnlocked={onUnlocked} />;
   if (view.kind === 'fatal') return <FatalScreen message={view.message} />;
 
   const { surface } = view;
-  if (surface.kind === 'reader') {
-    return (
-      <Reader
-        path={surface.file.path}
-        content={surface.file.content}
-        updated={surface.file.updated}
-        initialMode={surface.initialMode}
-        calendar={calendar}
-        today={today}
-        onSelectFile={selectFile}
-        onSelectDay={selectDay}
-        onNewEntry={newEntry}
-        onOpenVault={openVault}
-        onLock={onLock}
-        onSave={saveFile}
-      />
-    );
-  }
   return (
-    <HearthVault
-      tree={tree}
-      excerpts={excerpts}
-      calendar={calendar}
-      today={today}
-      onSelectFile={(p) => {
-        void selectFile(p);
+    <div
+      onDragEnter={handleWindowDragEnter}
+      onDragOver={(e) => {
+        if (hasFiles(e)) e.preventDefault();
       }}
-      onSelectDay={selectDay}
-      onNewEntry={newEntry}
-      onBackToReader={backFromVault}
-    />
+      onDragLeave={handleWindowDragLeave}
+      onDrop={handleWindowDrop}
+      style={{ position: 'absolute', inset: 0 }}
+    >
+      {surface.kind === 'reader' ? (
+        <Reader
+          path={surface.file.path}
+          content={surface.file.content}
+          updated={surface.file.updated}
+          initialMode={surface.initialMode}
+          calendar={calendar}
+          today={today}
+          titleToPath={titleToPath}
+          onSelectFile={selectFile}
+          onSelectDay={selectDay}
+          onNewEntry={newEntry}
+          onOpenVault={openVault}
+          onOpenSearch={() => setSearchOpen(true)}
+          onLock={onLock}
+          onSave={saveFile}
+          onWikilinkMiss={onWikilinkMiss}
+        />
+      ) : (
+        <HearthVault
+          tree={tree}
+          excerpts={excerpts}
+          calendar={calendar}
+          today={today}
+          onSelectFile={(p) => {
+            const file = findInTree(tree, p);
+            if (file) onSelectVaultFile(file);
+            else void selectFile(p);
+          }}
+          onSelectDay={selectDay}
+          onNewEntry={newEntry}
+          onBackToReader={backFromVault}
+        />
+      )}
+
+      <SearchOverlay
+        open={searchOpen}
+        onClose={() => setSearchOpen(false)}
+        onSelect={(p) => {
+          void selectFile(p);
+        }}
+      />
+
+      <UploadModal
+        open={uploadOpen}
+        initialFiles={uploadInitial}
+        tree={tree}
+        onClose={() => {
+          setUploadOpen(false);
+          setUploadInitial(undefined);
+        }}
+        onUploaded={() => {
+          void onUploaded();
+        }}
+      />
+
+      <DownloadModal
+        open={downloadFile != null}
+        file={downloadFile}
+        onClose={() => setDownloadFile(null)}
+      />
+
+      {dragOverlay && (
+        <div className="hearthDragOverlay">
+          <div className="hearthDragOverlayInner">
+            <div className="hearthDragOverlayIcon">↓</div>
+            <div className="hearthDragOverlayTitle">Drop files anywhere</div>
+            <div className="hearthDragOverlaySub">They'll be encrypted before they hit disk.</div>
+          </div>
+        </div>
+      )}
+
+      {toast && (
+        <div className="hearthToast" role="status">
+          {toast}
+        </div>
+      )}
+    </div>
   );
+}
+
+function hasFiles(e: DragEvent): boolean {
+  const types = e.dataTransfer?.types;
+  if (!types) return false;
+  for (const t of Array.from(types)) {
+    if (t === 'Files') return true;
+  }
+  return false;
+}
+
+function buildTitleMap(tree: TreeNode[], excerpts: ExcerptMap): Map<string, string> {
+  const out = new Map<string, string>();
+  const walk = (nodes: TreeNode[]) => {
+    for (const n of nodes) {
+      if (n.type === 'file' && n.kind === 'md') {
+        const title = excerpts[n.path]?.title ?? n.name.replace(/\.(md|markdown)$/i, '');
+        if (title && !out.has(title)) out.set(title, n.path);
+      } else if (n.type === 'folder') {
+        walk(n.children);
+      }
+    }
+  };
+  walk(tree);
+  return out;
+}
+
+function findInTree(tree: TreeNode[], path: string): TreeFile | null {
+  const walk = (nodes: TreeNode[]): TreeFile | null => {
+    for (const n of nodes) {
+      if (n.type === 'file' && n.path === path) return n;
+      if (n.type === 'folder') {
+        const hit = walk(n.children);
+        if (hit) return hit;
+      }
+    }
+    return null;
+  };
+  return walk(tree);
 }
 
 function LoadingScreen() {
