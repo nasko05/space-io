@@ -271,8 +271,7 @@ mod tests {
     fn tag_hit_outranks_body_hit() {
         // Two notes both match "memory" — one as a tag, one in the body. The
         // tag hit should score higher.
-        let (_dir, space, pass) =
-            make_space_with_note("p", "tagged.md", "# Tagged\n\nshort body");
+        let (_dir, space, pass) = make_space_with_note("p", "tagged.md", "# Tagged\n\nshort body");
         crate::space::meta::set_tags(&space, &pass, "tagged.md", vec!["memory".into()]).unwrap();
         crate::space::write::write_file(
             &space,
@@ -289,8 +288,7 @@ mod tests {
 
     #[test]
     fn tag_match_is_case_insensitive() {
-        let (_dir, space, pass) =
-            make_space_with_note("p", "a.md", "# Sunday\n\nBody.");
+        let (_dir, space, pass) = make_space_with_note("p", "a.md", "# Sunday\n\nBody.");
         crate::space::meta::set_tags(&space, &pass, "a.md", vec!["WORK".into()]).unwrap();
         let hits = search(&space, &pass, "work").unwrap();
         assert_eq!(hits.len(), 1);
