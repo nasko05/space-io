@@ -303,17 +303,25 @@ instance_ip() {
 # path is resolved (so ssh-agent's many keys don't burn through MaxAuthTries
 # before AWS lets us in).
 SSH_BASE_OPTS=(-o StrictHostKeyChecking=accept-new)
+# When invoked as `ssh_to <ip> -- <remote-cmd>`, allocates a TTY so signals
+# (Ctrl-C) propagate to remote children. Without -t a remote `tail -f`
+# survives a local Ctrl-C and leaks until the next instance reboot.
 ssh_to() {
   local ip=$1; shift
+  local -a extra=()
+  if [ "${1:-}" = "--tty" ]; then
+    extra+=(-t)
+    shift
+  fi
   if [ -n "$KEY_PATH" ]; then
     if [ ! -f "$KEY_PATH" ]; then
       echo "error: HEARTH_KEY_PATH does not exist: $KEY_PATH" >&2
       exit 1
     fi
-    exec ssh "${SSH_BASE_OPTS[@]}" -i "$KEY_PATH" -o IdentitiesOnly=yes \
+    exec ssh "${SSH_BASE_OPTS[@]}" "${extra[@]}" -i "$KEY_PATH" -o IdentitiesOnly=yes \
       "ec2-user@$ip" "$@"
   else
-    exec ssh "${SSH_BASE_OPTS[@]}" "ec2-user@$ip" "$@"
+    exec ssh "${SSH_BASE_OPTS[@]}" "${extra[@]}" "ec2-user@$ip" "$@"
   fi
 }
 
@@ -328,7 +336,9 @@ cmd_logs() {
   local ip
   ip=$(instance_ip)
   [ -n "$ip" ] || { echo "stack has no PublicAddress output yet" >&2; exit 1; }
-  ssh_to "$ip" 'sudo tail -n 200 -f /var/log/hearth-bootstrap.log'
+  # --tty so Ctrl-C kills the remote `tail -f` cleanly instead of leaking
+  # zombie tails on every disconnect.
+  ssh_to "$ip" --tty 'sudo tail -n 200 -f /var/log/hearth-bootstrap.log'
 }
 
 # Best-effort "open this URL in the default browser" across mac / linux / wsl.
