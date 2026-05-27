@@ -114,3 +114,102 @@ fn systemtime_iso8601(t: SystemTime) -> Option<String> {
     dt.format(&time::format_description::well_known::Rfc3339)
         .ok()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::space::test_helpers::make_space;
+
+    fn names(nodes: &[TreeNode]) -> Vec<String> {
+        nodes
+            .iter()
+            .map(|n| match n {
+                TreeNode::Folder { name, .. } => name.clone(),
+                TreeNode::File { name, .. } => name.clone(),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn empty_space_returns_empty_tree() {
+        let (_dir, space, _pass) = make_space("p");
+        let t = build_tree(&space).unwrap();
+        assert!(t.is_empty());
+    }
+
+    #[test]
+    fn classifies_known_extensions() {
+        assert_eq!(classify("a.md"), "md");
+        assert_eq!(classify("a.markdown"), "md");
+        assert_eq!(classify("doc.pdf"), "pdf");
+        assert_eq!(classify("d.docx"), "docx");
+        assert_eq!(classify("p.jpg"), "image");
+        assert_eq!(classify("p.PNG"), "image");
+        assert_eq!(classify("v.mp4"), "video");
+        assert_eq!(classify("other.weirdext"), "file");
+    }
+
+    #[test]
+    fn strips_age_suffix_in_tree() {
+        let (dir, space, pass) = make_space("p");
+        crate::space::write::write_file(&space, &pass, "Journal/2026/n.md", "x", None).unwrap();
+        let t = build_tree(&space).unwrap();
+        // root → Journal folder
+        let TreeNode::Folder { name, children, .. } = &t[0] else {
+            panic!("expected folder")
+        };
+        assert_eq!(name, "Journal");
+        let TreeNode::Folder {
+            children: yearly, ..
+        } = &children[0]
+        else {
+            panic!("expected nested folder")
+        };
+        let TreeNode::File {
+            name, path, kind, ..
+        } = &yearly[0]
+        else {
+            panic!("expected file")
+        };
+        assert_eq!(name, "n.md");
+        assert_eq!(path, "Journal/2026/n.md");
+        assert_eq!(kind, "md");
+        let _ = dir;
+    }
+
+    #[test]
+    fn ignores_dotfiles() {
+        let (dir, space, _pass) = make_space("p");
+        let root = dir.path().join("space");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join(".gitkeep"), b"").unwrap();
+        std::fs::write(root.join(".hidden.md.age"), b"junk").unwrap();
+        let t = build_tree(&space).unwrap();
+        assert!(t.is_empty(), "dotfiles should be filtered out");
+    }
+
+    #[test]
+    fn ignores_files_without_age_extension() {
+        let (dir, space, _pass) = make_space("p");
+        let root = dir.path().join("space");
+        std::fs::write(root.join("scratch.md"), b"plaintext leak attempt").unwrap();
+        let t = build_tree(&space).unwrap();
+        assert!(
+            t.is_empty(),
+            "plaintext-tail files should not appear in the tree"
+        );
+    }
+
+    #[test]
+    fn folders_appear_before_files() {
+        let (dir, space, pass) = make_space("p");
+        let root = dir.path().join("space");
+        std::fs::create_dir_all(root.join("Beta")).unwrap();
+        crate::space::write::write_file(&space, &pass, "alpha.md", "x", None).unwrap();
+        let t = build_tree(&space).unwrap();
+        let n = names(&t);
+        let beta_idx = n.iter().position(|x| x == "Beta").unwrap();
+        let alpha_idx = n.iter().position(|x| x == "alpha.md").unwrap();
+        assert!(beta_idx < alpha_idx, "got: {n:?}");
+    }
+}

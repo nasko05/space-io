@@ -12,6 +12,9 @@ pub mod tree;
 pub mod upload;
 pub mod write;
 
+#[cfg(test)]
+pub(crate) mod test_helpers;
+
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
