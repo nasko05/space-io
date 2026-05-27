@@ -275,6 +275,93 @@
   color: var(--ink);
 }
 
+/* --- Nested folder tree nodes --- */
+
+.nestedFolder {
+  position: relative;
+  margin-top: 10px;
+  border-radius: 8px;
+  transition: background 0.12s;
+}
+
+.nestedFolderDrop {
+  background: rgba(178, 90, 58, 0.04);
+  outline: 2px dashed var(--accent);
+  outline-offset: -2px;
+}
+
+.nestedFolderHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+
+.nestedFolderHead:hover {
+  background: rgba(0, 0, 0, 0.03);
+}
+
+.nestedFolderToggle {
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--mute);
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  transition: color 0.12s, background 0.12s;
+  flex-shrink: 0;
+}
+
+.nestedFolderToggle:hover {
+  color: var(--ink-2);
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.nestedFolderIcon {
+  color: var(--accent);
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.nestedFolderName {
+  font-family: var(--font-serif);
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.nestedFolderCount {
+  font-size: 11px;
+  color: var(--mute);
+  font-style: italic;
+  flex-shrink: 0;
+}
+
+.nestedFolderContent {
+  padding: 6px 0 4px 12px;
+  border-left: 1px solid var(--rule);
+  margin-left: 18px;
+}
+
+.nestedFolderOverflow {
+  padding: 6px 0;
+  font-size: 11px;
+  color: var(--mute);
+  font-style: italic;
+}
+
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));

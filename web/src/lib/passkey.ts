@@ -14,6 +14,27 @@
 const HKDF_INFO = 'hearth-passkey-wrap';
 const IV_LENGTH = 12;
 
+/**
+ * WebAuthn cannot work on IP-addressed origins — `rp.id` must be a
+ * registrable domain suffix of the origin, and IPs never qualify.
+ * The only usable loopback origin is `localhost`.
+ *
+ * Call this before any passkey operation; if we're on 127.0.0.1 or ::1 it
+ * redirects to localhost (same port) so WebAuthn will succeed.
+ */
+function ensureLocalhostOrigin(): void {
+  const host = window.location.hostname;
+  if (host === '127.0.0.1' || host === '::1') {
+    const url = new URL(window.location.href);
+    url.hostname = 'localhost';
+    window.location.replace(url.toString());
+  }
+}
+
+function getEffectiveRpId(): string {
+  return window.location.hostname;
+}
+
 export interface RegisterResult {
   credentialIdB64: string;
   prfSaltB64: string;
@@ -44,6 +65,7 @@ export type WebAuthnStatus =
         | 'insecure-context'
         | 'ip-host'
         | 'cross-origin-frame'
+        | 'redirecting'
         | 'ssr';
       message: string;
     };
@@ -91,7 +113,11 @@ export function webauthnStatus(): WebAuthnStatus {
   }
   const host = window.location.hostname;
   const origin = window.location.origin;
-  if (host === 'localhost' || host === '127.0.0.1' || host === '::1') {
+  if (host === '127.0.0.1' || host === '::1') {
+    ensureLocalhostOrigin();
+    return { ok: false, reason: 'redirecting', message: 'Redirecting to localhost for WebAuthn compatibility…' };
+  }
+  if (host === 'localhost') {
     return { ok: true, origin, rpId: host, isLoopback: true };
   }
   const isIpV4 = /^\d{1,3}(\.\d{1,3}){3}$/.test(host);
@@ -123,7 +149,7 @@ function wrapWebAuthnError(stage: 'create' | 'get', err: unknown): Error {
   // Pull the rp.id we tried + the origin so the message says exactly what
   // failed, not just "something failed".
   const origin = typeof window !== 'undefined' ? window.location.origin : '<no-window>';
-  const rpId = typeof window !== 'undefined' ? window.location.hostname : '<no-window>';
+  const rpId = typeof window !== 'undefined' ? getEffectiveRpId() : '<no-window>';
 
   if (err instanceof DOMException) {
     const name = err.name;
@@ -162,6 +188,7 @@ export async function registerPasskey(
   owner: string,
   passphrase: string,
 ): Promise<RegisterResult> {
+  ensureLocalhostOrigin();
   if (!isPasskeySupported()) {
     throw new Error('Passkeys are not available in this browser.');
   }
@@ -170,12 +197,14 @@ export async function registerPasskey(
   const challenge = crypto.getRandomValues(new Uint8Array(32));
   const userId = await sha256(new TextEncoder().encode(`hearth:${owner}`));
 
+  const rp = { name: 'SpaceIO', id: getEffectiveRpId() };
+
   let cred: PublicKeyCredential | null;
   try {
     cred = (await navigator.credentials.create({
       publicKey: {
         challenge,
-        rp: { name: 'SpaceIO', id: window.location.hostname },
+        rp,
         user: {
           id: userId.slice(0, 16),
           name: owner,
@@ -216,6 +245,7 @@ export async function registerPasskey(
 
 /** Use an existing passkey to recover the stored passphrase. */
 export async function unlockWithPasskey(input: AuthenticateInput): Promise<string> {
+  ensureLocalhostOrigin();
   if (!isPasskeySupported()) {
     throw new Error('Passkeys are not available in this browser.');
   }
@@ -230,8 +260,9 @@ export async function unlockWithPasskey(input: AuthenticateInput): Promise<strin
     assertion = (await navigator.credentials.get({
       publicKey: {
         challenge,
-        allowCredentials: [{ id: credentialId, type: 'public-key' }],
-        userVerification: 'preferred',
+        rpId: getEffectiveRpId(),
+        allowCredentials: [{ id: credentialId, type: 'public-key' as const }],
+        userVerification: 'preferred' as const,
         timeout: 60_000,
         extensions: { prf: { eval: { first: prfSalt } } },
       },

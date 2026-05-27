@@ -11,8 +11,11 @@ import { WindowChrome } from '../WindowChrome/WindowChrome';
 import { HearthRail } from '../Rail/HearthRail';
 import { HearthCard } from './HearthCard';
 import {
+  Chevron,
+  ChevronDown,
   Close,
   Download as DownloadIcon,
+  Folder,
   FolderOpen,
   MoreHorizontal,
   Moon,
@@ -33,6 +36,7 @@ import styles from './HearthVault.module.css';
 
 const DRAG_MIME = 'application/x-hearth-path';
 const SHELF_VISIBLE_LIMIT = 12;
+const NESTED_VISIBLE_LIMIT = 6;
 
 interface Props {
   tree: TreeNode[];
@@ -80,7 +84,12 @@ const EMPTY_SELECTION: ReadonlySet<string> = new Set<string>();
 
 interface Shelf {
   folder: TreeFolder;
+  /** Direct files at this folder level (not recursively nested). */
   files: TreeFile[];
+  /** Nested subfolders that have their own collapsible tree sections. */
+  subfolders: TreeFolder[];
+  /** Total count of ALL files recursively under this shelf. */
+  totalCount: number;
 }
 
 export function HearthVault({
@@ -113,19 +122,24 @@ export function HearthVault({
   const [dialog, setDialog] = useState<DialogState>({ kind: 'none' });
 
   // Single tree walk produces both the shelf list (top-level folder → sorted
-  // files) and a totalled count. Doing this in one pass on the tree input
-  // instead of three separate full walks per render was the dominant cost
-  // when the vault held more than a couple hundred files.
+  // files) and a totalled count. Each shelf now separates direct files from
+  // subfolders so the UI can display a nested tree structure.
   const { shelves, totalFiles, knownPaths } = useMemo(() => {
     const shelves: Shelf[] = [];
     let totalFiles = 0;
     const knownPaths = new Set<string>();
     for (const node of tree) {
       if (node.type !== 'folder') continue;
-      const files = collectFilesUnder(node);
-      totalFiles += files.length;
-      for (const f of files) knownPaths.add(f.path);
-      shelves.push({ folder: node, files });
+      // Collect ALL files recursively for count & selection tracking
+      const allFiles = collectFilesUnder(node);
+      totalFiles += allFiles.length;
+      for (const f of allFiles) knownPaths.add(f.path);
+      // Separate direct children: files at this level vs subfolders
+      const directFiles = node.children
+        .filter((c): c is TreeFile => c.type === 'file')
+        .sort((a, b) => Date.parse(b.updated) - Date.parse(a.updated));
+      const subfolders = node.children.filter((c): c is TreeFolder => c.type === 'folder');
+      shelves.push({ folder: node, files: directFiles, subfolders, totalCount: allFiles.length });
     }
     return { shelves, totalFiles, knownPaths };
   }, [tree]);
@@ -464,11 +478,13 @@ export function HearthVault({
                 Your space is empty. Press <em>New entry</em> to write your first note.
               </div>
             )}
-            {shelves.map(({ folder, files }, si) => (
+            {shelves.map(({ folder, files, subfolders, totalCount }, si) => (
               <VaultShelf
                 key={folder.path}
                 folder={folder}
                 files={files}
+                subfolders={subfolders}
+                totalCount={totalCount}
                 index={si}
                 excerpts={excerpts}
                 meta={meta}
@@ -561,6 +577,8 @@ function noop() {}
 interface VaultShelfProps {
   folder: TreeFolder;
   files: TreeFile[];
+  subfolders: TreeFolder[];
+  totalCount: number;
   index: number;
   excerpts: ExcerptMap;
   meta: MetaMap;
@@ -579,6 +597,8 @@ interface VaultShelfProps {
 const VaultShelf = memo(function VaultShelf({
   folder,
   files,
+  subfolders,
+  totalCount,
   index,
   excerpts,
   meta,
@@ -634,7 +654,7 @@ const VaultShelf = memo(function VaultShelf({
           {folder.name}
         </h2>
         <span className={styles.shelfMeta}>
-          — {files.length} {files.length === 1 ? 'item' : 'items'}
+          — {totalCount} {totalCount === 1 ? 'item' : 'items'}
         </span>
         <span className={styles.shelfRule} />
         {files.length > visible.length && (
@@ -656,27 +676,215 @@ const VaultShelf = memo(function VaultShelf({
         </button>
       </div>
 
-      {visible.length === 0 ? (
+      {visible.length === 0 && subfolders.length === 0 ? (
         <div className={styles.shelfEmpty}>
           <em>Nothing here yet.</em> Drag files in, or use New entry / upload.
         </div>
       ) : (
-        <div className={styles.grid}>
-          {visible.map((file) => (
-            <HearthCard
-              key={file.path}
-              file={file}
-              excerpt={excerpts[file.path]}
-              tags={meta[file.path]?.tags}
-              selected={selection.has(file.path)}
-              onOpen={onCardOpen}
-              onContextMenu={onCardContextMenu}
-              onToggleSelect={onCardToggleSelect}
+        <>
+          {visible.length > 0 && (
+            <div className={styles.grid}>
+              {visible.map((file) => (
+                <HearthCard
+                  key={file.path}
+                  file={file}
+                  excerpt={excerpts[file.path]}
+                  tags={meta[file.path]?.tags}
+                  selected={selection.has(file.path)}
+                  onOpen={onCardOpen}
+                  onContextMenu={onCardContextMenu}
+                  onToggleSelect={onCardToggleSelect}
+                />
+              ))}
+            </div>
+          )}
+          {subfolders.map((sub) => (
+            <NestedFolder
+              key={sub.path}
+              folder={sub}
+              depth={1}
+              excerpts={excerpts}
+              meta={meta}
+              selection={selection}
+              onCardOpen={onCardOpen}
+              onCardContextMenu={onCardContextMenu}
+              onCardToggleSelect={onCardToggleSelect}
+              onDropFile={onDropFile}
+              onFolderMenu={onFolderMenu}
             />
           ))}
-        </div>
+        </>
       )}
     </section>
+  );
+});
+
+// --- Nested folder tree node ---
+
+interface NestedFolderProps {
+  folder: TreeFolder;
+  depth: number;
+  excerpts: ExcerptMap;
+  meta: MetaMap;
+  selection: ReadonlySet<string>;
+  onCardOpen: (file: TreeFile) => void;
+  onCardContextMenu: (file: TreeFile, x: number, y: number) => void;
+  onCardToggleSelect: (file: TreeFile, mods: { shift?: boolean; cmd?: boolean }) => void;
+  onDropFile: (folderPath: string, droppedPath: string) => void;
+  onFolderMenu: (folder: TreeFolder, x: number, y: number) => void;
+}
+
+/** Renders a collapsible nested folder within a shelf. Subfolders at depth > 0
+ *  are collapsed by default; expanding reveals direct files and deeper subfolders. */
+const NestedFolder = memo(function NestedFolder({
+  folder,
+  depth,
+  excerpts,
+  meta,
+  selection,
+  onCardOpen,
+  onCardContextMenu,
+  onCardToggleSelect,
+  onDropFile,
+  onFolderMenu,
+}: NestedFolderProps) {
+  const [expanded, setExpanded] = useState(false);
+  const [isDropTarget, setIsDropTarget] = useState(false);
+  const dragDepth = useRef(0);
+
+  // Separate direct children into files and subfolders
+  const directFiles = useMemo(
+    () =>
+      folder.children
+        .filter((c): c is TreeFile => c.type === 'file')
+        .sort((a, b) => Date.parse(b.updated) - Date.parse(a.updated)),
+    [folder.children],
+  );
+  const subfolders = useMemo(
+    () => folder.children.filter((c): c is TreeFolder => c.type === 'folder'),
+    [folder.children],
+  );
+
+  const totalCount = useMemo(() => countFilesUnder(folder), [folder]);
+  const visibleFiles = directFiles.length > NESTED_VISIBLE_LIMIT
+    ? directFiles.slice(0, NESTED_VISIBLE_LIMIT)
+    : directFiles;
+
+  function onDragEnter(e: DragEvent<HTMLElement>) {
+    if (!hasHearthDrag(e)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    dragDepth.current += 1;
+    if (dragDepth.current === 1) setIsDropTarget(true);
+  }
+
+  function onDragOver(e: DragEvent<HTMLElement>) {
+    if (!hasHearthDrag(e)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = 'move';
+  }
+
+  function onDragLeave(e: DragEvent<HTMLElement>) {
+    e.stopPropagation();
+    dragDepth.current = Math.max(0, dragDepth.current - 1);
+    if (dragDepth.current === 0) setIsDropTarget(false);
+  }
+
+  function onDrop(e: DragEvent<HTMLElement>) {
+    e.preventDefault();
+    e.stopPropagation();
+    dragDepth.current = 0;
+    setIsDropTarget(false);
+    onDropFile(folder.path, e.dataTransfer.getData(DRAG_MIME));
+  }
+
+  return (
+    <div
+      className={`${styles.nestedFolder} ${isDropTarget ? styles.nestedFolderDrop : ''}`}
+      style={{ paddingLeft: `${depth * 16}px` }}
+      onDragEnter={onDragEnter}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+    >
+      <div className={styles.nestedFolderHead}>
+        <button
+          type="button"
+          className={styles.nestedFolderToggle}
+          onClick={() => setExpanded((v) => !v)}
+          aria-expanded={expanded}
+          aria-label={`${expanded ? 'Collapse' : 'Expand'} folder ${folder.name}`}
+        >
+          {expanded ? <ChevronDown size={12} /> : <Chevron size={12} />}
+        </button>
+        <span className={styles.nestedFolderIcon}>
+          {expanded ? <FolderOpen size={14} /> : <Folder size={14} />}
+        </span>
+        <span className={styles.nestedFolderName}>{folder.name}</span>
+        <span className={styles.nestedFolderCount}>
+          {totalCount} {totalCount === 1 ? 'item' : 'items'}
+        </span>
+        <button
+          type="button"
+          className={styles.shelfMenuBtn}
+          onClick={(e) => {
+            const r = e.currentTarget.getBoundingClientRect();
+            onFolderMenu(folder, r.right, r.bottom);
+          }}
+          aria-label={`Manage ${folder.name}`}
+          title="Rename, move, or delete this folder"
+        >
+          <MoreHorizontal size={14} />
+        </button>
+      </div>
+
+      {expanded && (
+        <div className={styles.nestedFolderContent}>
+          {visibleFiles.length > 0 && (
+            <div className={styles.grid}>
+              {visibleFiles.map((file) => (
+                <HearthCard
+                  key={file.path}
+                  file={file}
+                  excerpt={excerpts[file.path]}
+                  tags={meta[file.path]?.tags}
+                  selected={selection.has(file.path)}
+                  onOpen={onCardOpen}
+                  onContextMenu={onCardContextMenu}
+                  onToggleSelect={onCardToggleSelect}
+                />
+              ))}
+            </div>
+          )}
+          {directFiles.length > visibleFiles.length && (
+            <div className={styles.nestedFolderOverflow}>
+              +{directFiles.length - visibleFiles.length} more items
+            </div>
+          )}
+          {subfolders.map((sub) => (
+            <NestedFolder
+              key={sub.path}
+              folder={sub}
+              depth={depth + 1}
+              excerpts={excerpts}
+              meta={meta}
+              selection={selection}
+              onCardOpen={onCardOpen}
+              onCardContextMenu={onCardContextMenu}
+              onCardToggleSelect={onCardToggleSelect}
+              onDropFile={onDropFile}
+              onFolderMenu={onFolderMenu}
+            />
+          ))}
+          {visibleFiles.length === 0 && subfolders.length === 0 && (
+            <div className={styles.shelfEmpty}>
+              <em>Empty folder.</em>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   );
 });
 
@@ -735,6 +943,19 @@ function collectFilesUnder(folder: TreeFolder): TreeFile[] {
   // comparison via `new Date(...)` which dominated the sort cost.
   out.sort((a, b) => Date.parse(b.updated) - Date.parse(a.updated));
   return out;
+}
+
+/** Count total files recursively under a folder (without allocating an array). */
+function countFilesUnder(folder: TreeFolder): number {
+  let count = 0;
+  const walk = (nodes: TreeNode[]) => {
+    for (const n of nodes) {
+      if (n.type === 'file') count += 1;
+      else walk(n.children);
+    }
+  };
+  walk(folder.children);
+  return count;
 }
 
 const ROMAN = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X'];
