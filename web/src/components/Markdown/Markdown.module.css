@@ -1,0 +1,100 @@
+.body h1 {
+  font-family: var(--font-serif);
+  font-size: 32px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  margin: 36px 0 14px;
+}
+
+.body h2 {
+  font-family: var(--font-serif);
+  font-size: 22px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  margin: 32px 0 10px;
+  color: var(--ink);
+}
+
+.body h3 {
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--mute);
+  margin: 24px 0 8px;
+}
+
+.body p {
+  margin: 0 0 14px;
+}
+
+.body ul,
+.body ol {
+  margin: 0 0 16px;
+  padding-left: 22px;
+}
+
+.body li {
+  margin: 4px 0;
+}
+
+.body ul li::marker {
+  color: var(--accent);
+}
+
+.body ol li::marker {
+  color: var(--accent);
+  font-variant-numeric: lining-nums;
+  font-family: var(--font-serif);
+  font-style: italic;
+}
+
+.body blockquote {
+  margin: 24px 0;
+  padding: 6px 0 6px 22px;
+  border-left: 2px solid var(--accent);
+  font-style: italic;
+  color: var(--ink-2);
+}
+
+.body blockquote p {
+  margin: 0 0 6px;
+}
+
+.body strong {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.body em {
+  font-style: italic;
+}
+
+.body code {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  background: var(--warm);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+.body :global(.wikilink) {
+  color: var(--accent);
+  text-decoration: none;
+  border-bottom: 1px dashed var(--accent-soft);
+  font-style: italic;
+}
+
+.body hr {
+  border: 0;
+  text-align: center;
+  margin: 32px 0;
+  color: var(--mute);
+}
+
+.body hr::before {
+  content: '✦ ✦ ✦';
+  letter-spacing: 1em;
+  font-size: 10px;
+}

@@ -1,0 +1,19 @@
+:root {
+  --paper: #f6f1e7;
+  --paper-edge: #ede5d4;
+  --paper-warm: #fbf7ee;
+  --ink: #1f1a14;
+  --ink-2: #4a4036;
+  --mute: #857a6a;
+  --rule: #e5dcc6;
+  --accent: #b25a3a;
+  --accent-soft: #e8c8b6;
+  --warm: #f1e9d5;
+  --pin: #c9a55a;
+  --blue: #3a5d7a;
+  --margin: rgba(178, 90, 58, 0.06);
+
+  --font-serif: 'Fraunces', 'Iowan Old Style', Charter, Georgia, serif;
+  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+}

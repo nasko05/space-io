@@ -1,0 +1,10 @@
+/target
+/web/dist
+/web/node_modules
+/web/tsconfig.tsbuildinfo
+/data
+.DS_Store
+*.swp
+*.swo
+.idea/
+.vscode/

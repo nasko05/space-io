@@ -1,0 +1,31 @@
+.root {
+  position: absolute;
+  inset: 0;
+  background: var(--paper);
+  font-family: var(--font-sans);
+  color: var(--ink);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.modeBtn {
+  height: 22px;
+  padding: 0 8px;
+  font-size: 11px;
+  color: var(--ink-2);
+  background: transparent;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  letter-spacing: 0.02em;
+  border-radius: 4px;
+}
+
+.modeBtn:hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.muted {
+  color: var(--mute);
+}

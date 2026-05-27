@@ -1,0 +1,8 @@
+@import './tokens.css';
+@import './reset.css';
+
+@keyframes hearthBlink {
+  50% {
+    opacity: 0;
+  }
+}

@@ -1,0 +1,49 @@
+[package]
+name = "hearth"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "hearth"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { version = "1.40", features = ["macros", "rt-multi-thread", "signal", "fs", "io-util"] }
+axum = { version = "0.7", features = ["macros"] }
+axum-extra = { version = "0.9", features = ["cookie"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["trace", "cors"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+clap = { version = "4", features = ["derive"] }
+anyhow = "1"
+thiserror = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+rust-embed = { version = "8", features = ["interpolate-folder-path"] }
+mime_guess = "2"
+
+# crypto
+age = "0.10"
+scrypt = "0.11"
+rand = "0.8"
+subtle = "2"
+secrecy = { version = "0.10", features = ["serde"] }
+zeroize = "1"
+
+# storage
+walkdir = "2"
+git2 = { version = "0.19", default-features = false }
+hex = "0.4"
+
+# session
+dashmap = "6"
+uuid = { version = "1", features = ["v4", "serde"] }
+time = { version = "0.3", features = ["formatting", "parsing", "serde"] }
+rpassword = "7"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
