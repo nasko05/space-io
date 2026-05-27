@@ -73,6 +73,9 @@ Commands:
   whoami    print the AWS identity + profile + region the script will use
   ssh       open an SSH session to the running instance
   logs      tail the bootstrap log
+  open      open an SSH tunnel + your browser at http://127.0.0.1:7777
+            (use --no-tunnel to open http://<eip>:7777 directly — INSECURE,
+            passphrase travels in cleartext)
 
 Config file:
   deploy/.env is auto-sourced if it exists (use deploy/.env.example as a template).
@@ -217,7 +220,8 @@ Stack is up. Next:
        /opt/space-io/init-space.sh
   4. Start the service:
        sudo systemctl start hearth
-  5. Open the URL from 'deploy/deploy.sh status' in a browser.
+  5. Open the app (encrypted SSH tunnel, browser opens to localhost):
+       deploy/deploy.sh open
 MSG
 }
 
@@ -263,7 +267,69 @@ cmd_logs() {
     'sudo tail -n 200 -f /var/log/hearth-bootstrap.log'
 }
 
+# Best-effort "open this URL in the default browser" across mac / linux / wsl.
+open_url() {
+  local url=$1
+  if command -v open >/dev/null 2>&1; then
+    open "$url" >/dev/null 2>&1 &
+  elif command -v xdg-open >/dev/null 2>&1; then
+    xdg-open "$url" >/dev/null 2>&1 &
+  elif command -v wslview >/dev/null 2>&1; then
+    wslview "$url" >/dev/null 2>&1 &
+  elif command -v start >/dev/null 2>&1; then
+    start "$url" >/dev/null 2>&1 &
+  else
+    echo "Please open: $url"
+  fi
+}
+
+cmd_open() {
+  local use_tunnel=$1  # "yes" | "no"
+  local ip
+  ip=$(instance_ip)
+  [ -n "$ip" ] || { echo "stack has no PublicAddress output yet" >&2; exit 1; }
+
+  if [ "$use_tunnel" = "no" ]; then
+    local url="http://${ip}:7777"
+    cat >&2 <<WARN
+warning: --no-tunnel opens the app over plain HTTP on the public internet.
+         Your passphrase will travel in cleartext.
+         Press Enter to continue, Ctrl-C to abort.
+WARN
+    read -r _
+    open_url "$url"
+    echo "Opened $url"
+    return 0
+  fi
+
+  local url="http://127.0.0.1:7777"
+  cat <<MSG
+Opening an SSH tunnel to ec2-user@${ip} (local 7777 → remote 7777).
+A browser tab should open at ${url} in ~1 second.
+Press Ctrl-C in this terminal to close the tunnel.
+MSG
+  # Open the browser after a short delay so it has a connection to land on.
+  (sleep 2 && open_url "$url") &
+  exec ssh -N -L 7777:127.0.0.1:7777 \
+    -o StrictHostKeyChecking=accept-new \
+    -o ExitOnForwardFailure=yes \
+    "ec2-user@$ip"
+}
+
 parse_flags "$@"
+
+# Pull `open`-only flags off the remaining args so they can be passed
+# *after* the subcommand: `deploy.sh open --no-tunnel`.
+OPEN_USE_TUNNEL="yes"
+FILTERED_ARGS=()
+for a in "${ARGS[@]:-}"; do
+  case "$a" in
+    --no-tunnel) OPEN_USE_TUNNEL="no" ;;
+    --tunnel) OPEN_USE_TUNNEL="yes" ;;
+    *) FILTERED_ARGS+=("$a") ;;
+  esac
+done
+ARGS=("${FILTERED_ARGS[@]:-}")
 
 # Help is the only command that doesn't need the aws / curl toolchain.
 case "${ARGS[0]:-}" in
@@ -280,5 +346,6 @@ case "${ARGS[0]:-}" in
   whoami) cmd_whoami ;;
   ssh) cmd_ssh ;;
   logs) cmd_logs ;;
+  open) cmd_open "$OPEN_USE_TUNNEL" ;;
   *) echo "unknown command: ${ARGS[0]}" >&2; usage; exit 1 ;;
 esac
