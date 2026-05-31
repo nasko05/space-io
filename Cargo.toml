@@ -3,6 +3,10 @@ name = "hearth"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+name = "hearth"
+path = "src/lib.rs"
+
 [[bin]]
 name = "hearth"
 path = "src/main.rs"
@@ -49,3 +53,6 @@ strip = true
 
 [dev-dependencies]
 tempfile = "3"
+# Integration tests poke the live axum router via tower::ServiceExt::oneshot.
+http-body-util = "0.1"
+mime = "0.3"

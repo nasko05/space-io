@@ -170,7 +170,6 @@ function wrapWebAuthnError(stage: 'create' | 'get', err: unknown): Error {
     } else if (name === 'AbortError') {
       hint = ' — the request was aborted.';
     }
-    // eslint-disable-next-line no-console
     console.error(
       `WebAuthn ${stage} failed:`,
       { name, origin, rpId, isSecureContext: window.isSecureContext, inFrame: isInsideCrossOriginFrame() },
@@ -178,7 +177,6 @@ function wrapWebAuthnError(stage: 'create' | 'get', err: unknown): Error {
     );
     return new Error(`${name}${hint}${detail}`);
   }
-  // eslint-disable-next-line no-console
   console.error(`WebAuthn ${stage} failed:`, { origin, rpId }, err);
   return err instanceof Error ? err : new Error(String(err));
 }

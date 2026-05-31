@@ -1,10 +1,3 @@
-mod config;
-mod crypto;
-mod error;
-mod routes;
-mod space;
-mod state;
-
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -12,9 +5,10 @@ use std::time::Duration;
 use anyhow::Context;
 use clap::{Parser, Subcommand};
 
-use crate::space::rate_limit::RateLimiter;
-use crate::space::session::SessionStore;
-use crate::state::{AppConfig, AppState};
+use hearth::routes;
+use hearth::space::rate_limit::RateLimiter;
+use hearth::space::session::SessionStore;
+use hearth::state::{AppConfig, AppState};
 
 #[derive(Parser, Debug)]
 #[command(

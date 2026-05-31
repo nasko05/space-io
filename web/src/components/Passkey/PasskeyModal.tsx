@@ -77,7 +77,6 @@ export function PasskeyModal({ open, email, owner, hasPasskey, onClose, onChange
       setPassphrase('');
       onChanged();
     } catch (err) {
-      // eslint-disable-next-line no-console
       console.error('passkey registration failed:', err);
       setPhase({
         kind: 'error',

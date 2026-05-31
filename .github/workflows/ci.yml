@@ -59,5 +59,12 @@ jobs:
       - name: cargo clippy
         run: cargo clippy --all-targets -- -D warnings
 
-      - name: cargo test
-        run: cargo test --all-targets
+      # Split unit tests (in-module `#[cfg(test)]`) from HTTP integration
+      # tests so a failure in `tests/integration.rs` is immediately distinct
+      # from a regression inside `src/`. Both targets must pass for CI to
+      # go green.
+      - name: cargo test (unit, lib + bin)
+        run: cargo test --lib --bins
+
+      - name: cargo test (integration)
+        run: cargo test --test integration
