@@ -1,4 +1,4 @@
-use axum::body::Body;
+use axum::body::{Body, Bytes};
 use axum::extract::{Multipart, Query, State};
 use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
@@ -211,7 +211,9 @@ async fn post_upload(
     let (pass, space) = require_session(&state, &jar)?;
 
     let mut folder: Option<String> = None;
-    let mut files: Vec<(String, Vec<u8>)> = Vec::new();
+    // Keep the original `Bytes` (ref-counted) instead of copying into a `Vec`;
+    // `store_upload` only needs a `&[u8]`, which `Bytes` derefs to.
+    let mut files: Vec<(String, Bytes)> = Vec::new();
     let mut total_bytes: usize = 0;
 
     while let Some(field) = multipart
@@ -253,7 +255,7 @@ async fn post_upload(
                 )));
             }
             total_bytes = new_total;
-            files.push((filename, bytes.to_vec()));
+            files.push((filename, bytes));
         }
     }
     if files.is_empty() {

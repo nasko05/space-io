@@ -5,7 +5,7 @@ use walkdir::WalkDir;
 
 use crate::crypto::age_io;
 use crate::error::AppResult;
-use crate::space::excerpt::extract_title;
+use crate::space::excerpt::{clean_markup, extract_title};
 use crate::space::paths::ENC_EXT;
 use crate::space::Space;
 
@@ -170,11 +170,7 @@ fn make_snippet(src: &str, around: usize) -> String {
         e += 1;
     }
     let slice = &src[s..e];
-    let cleaned = slice
-        .replace('\n', " ")
-        .replace(['*', '_', '`'], "")
-        .replace("[[", "")
-        .replace("]]", "");
+    let cleaned = clean_markup(&slice.replace('\n', " "));
     let trimmed = cleaned.trim();
     if s > 0 {
         format!("…{trimmed}")

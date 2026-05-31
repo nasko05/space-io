@@ -106,6 +106,52 @@ describe('useAutosave', () => {
     rerender({ onSave: onSave2 });
     expect(result.current.status.kind).toBe('idle');
   });
+
+  it('flushes the pending edit to the previous file when the target changes', async () => {
+    const saveA = vi.fn().mockResolvedValue(undefined);
+    const saveB = vi.fn().mockResolvedValue(undefined);
+    const { result, rerender } = renderHook(({ cb }) => useAutosave({ onSave: cb }), {
+      initialProps: { cb: saveA },
+    });
+
+    // Edit file A, then switch to file B before the debounce timer fires.
+    act(() => {
+      result.current.markDirty('draft for A');
+    });
+    await act(async () => {
+      rerender({ cb: saveB });
+    });
+
+    // A's pending edit must be flushed, not silently dropped...
+    expect(saveA).toHaveBeenCalledTimes(1);
+    expect(saveA).toHaveBeenCalledWith('draft for A');
+    // ...and it must not be misrouted to B.
+    expect(saveB).not.toHaveBeenCalled();
+
+    // The stale timer must not fire a second save afterwards.
+    await act(async () => {
+      vi.advanceTimersByTime(2000);
+    });
+    expect(saveA).toHaveBeenCalledTimes(1);
+    expect(saveB).not.toHaveBeenCalled();
+  });
+
+  it('flushes a pending edit on unmount', async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    const { result, unmount } = renderHook(({ cb }) => useAutosave({ onSave: cb }), {
+      initialProps: { cb: onSave },
+    });
+
+    act(() => {
+      result.current.markDirty('unsaved');
+    });
+    await act(async () => {
+      unmount();
+    });
+
+    expect(onSave).toHaveBeenCalledTimes(1);
+    expect(onSave).toHaveBeenCalledWith('unsaved');
+  });
 });
 
 describe('saveStatusLabel', () => {

@@ -15,8 +15,6 @@ path = "src/main.rs"
 tokio = { version = "1.40", features = ["macros", "rt-multi-thread", "signal", "fs", "io-util"] }
 axum = { version = "0.7", features = ["macros", "multipart"] }
 axum-extra = { version = "0.9", features = ["cookie"] }
-tower = "0.5"
-tower-http = { version = "0.6", features = ["trace", "cors"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.8"
@@ -54,5 +52,6 @@ strip = true
 [dev-dependencies]
 tempfile = "3"
 # Integration tests poke the live axum router via tower::ServiceExt::oneshot.
+tower = "0.5"
 http-body-util = "0.1"
 mime = "0.3"

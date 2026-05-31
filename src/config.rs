@@ -59,7 +59,9 @@ impl SpaceConfig {
         let path = Self::config_path(space_dir);
         let text =
             toml::to_string_pretty(self).map_err(|e| AppError::Internal(format!("toml: {e}")))?;
-        std::fs::write(path, text)?;
+        // Atomic write so a crash can't tear `.space.toml` (salt + verifier hex)
+        // and lock the user out of their own space.
+        crate::fs_atomic::write_atomic(&path, text.as_bytes())?;
         Ok(())
     }
 }
