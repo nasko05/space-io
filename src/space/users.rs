@@ -5,8 +5,9 @@
 //!
 //! No database. The file is read on every relevant request and rewritten on
 //! mutation. Mutations are serialised by the caller (we hold an `RwLock` in
-//! `AppState`), so atomicity is "write whole file, fsync". Good enough for a
-//! self-hosted personal app.
+//! `AppState`) and persisted via `fs_atomic::write_atomic` (write a temp file,
+//! fsync, then atomically rename it over the target), so a crash mid-write
+//! can't tear the registry. Good enough for a self-hosted personal app.
 
 use std::path::{Path, PathBuf};
 
@@ -67,15 +68,15 @@ impl UsersRegistry {
 
     pub fn save(&self, root: &Path) -> AppResult<()> {
         let path = Self::registry_path(root);
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
         let on_disk = OnDisk {
             users: self.users.clone(),
         };
         let text = toml::to_string_pretty(&on_disk)
             .map_err(|e| AppError::Internal(format!("serialise {REGISTRY_FILENAME}: {e}")))?;
-        std::fs::write(&path, text)?;
+        // Atomic write (temp + fsync + rename): a torn `.users.toml` drops the
+        // email→UUID map and makes every space unreachable. `write_atomic`
+        // also creates the parent directory if it doesn't exist yet.
+        crate::fs_atomic::write_atomic(&path, text.as_bytes())?;
         Ok(())
     }
 

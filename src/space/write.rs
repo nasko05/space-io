@@ -4,7 +4,7 @@ use crate::crypto::age_io;
 use crate::error::AppResult;
 use crate::space::git::commit_paths;
 use crate::space::paths::{resolve_under, with_age_suffix};
-use crate::space::Space;
+use crate::space::{systemtime_iso8601, Space};
 
 #[derive(Debug)]
 pub struct WriteResult {
@@ -42,11 +42,7 @@ pub fn write_file(
     let updated = std::fs::metadata(&on_disk)
         .and_then(|m| m.modified())
         .ok()
-        .and_then(|t| {
-            let dt: time::OffsetDateTime = t.into();
-            dt.format(&time::format_description::well_known::Rfc3339)
-                .ok()
-        })
+        .and_then(systemtime_iso8601)
         .unwrap_or_default();
 
     Ok(WriteResult {

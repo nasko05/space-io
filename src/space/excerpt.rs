@@ -94,6 +94,15 @@ pub fn extract_title(src: &str) -> Option<String> {
         .find_map(|l| l.strip_prefix("# ").map(|t| t.trim().to_string()))
 }
 
+/// Strip the lightest markdown so a preview reads as prose: emphasis markers
+/// (`*`, `_`, `` ` ``) and wikilink brackets. Shared by the excerpt builder and
+/// the search-snippet builder so they can't drift apart.
+pub fn clean_markup(s: &str) -> String {
+    s.replace(['*', '_', '`'], "")
+        .replace("[[", "")
+        .replace("]]", "")
+}
+
 fn extract_excerpt(src: &str) -> String {
     let body: String = src
         .lines()
@@ -101,10 +110,7 @@ fn extract_excerpt(src: &str) -> String {
         .take(3)
         .collect::<Vec<_>>()
         .join(" ");
-    let cleaned = body
-        .replace(['*', '_', '`'], "")
-        .replace("[[", "")
-        .replace("]]", "");
+    let cleaned = clean_markup(&body);
     if cleaned.chars().count() <= EXCERPT_CHARS {
         cleaned
     } else {

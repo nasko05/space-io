@@ -18,10 +18,11 @@ use crate::state::AppState;
 
 pub const SESSION_COOKIE: &str = "hearth_session";
 
-/// Smallest passphrase we'll accept on `/auth/init`. The frontend hints at
-/// 8 too, but the backend enforces it so a curl/CLI bypass can't sneak in a
-/// trivially crackable space.
-const MIN_PASSPHRASE_LEN: usize = 8;
+/// Smallest passphrase we'll accept on `/auth/init`. The frontend enforces the
+/// same minimum, but the backend re-checks it so a curl/CLI bypass can't sneak
+/// in a trivially crackable space. Applies to new registrations only; existing
+/// spaces keep whatever they were created with.
+const MIN_PASSPHRASE_LEN: usize = 12;
 
 /// Upper bounds on the JSON-body strings we accept. axum's `Json` extractor
 /// already caps the body at ~2 MB, but a 2 MB email passed `normalise_email`
@@ -356,8 +357,13 @@ async fn passkey_info(
     axum::extract::Query(q): axum::extract::Query<PasskeyInfoQuery>,
 ) -> AppResult<Json<PasskeyInfoResponse>> {
     // Per-IP throttle, same bucket as unlock. The endpoint is unauthenticated
-    // and its 200/404 split leaks whether a given email has a passkey; the
-    // throttle bounds how fast that can be enumerated.
+    // and its 200/404 split leaks whether a given email has a passkey. That
+    // split is inherent to the pre-auth WebAuthn flow — the browser needs the
+    // credential id + PRF salt to start an assertion *before* the user is
+    // authenticated, so we can't hide it without breaking passkey login.
+    // Accepted risk for the self-hosted / trusted-network deployment model;
+    // the per-IP throttle bounds how fast the small, known user set can be
+    // enumerated. The wrapped passphrase remains opaque to the server.
     enforce_throttle(&state, remote)?;
 
     let normalised = normalise_email(&q.email).map_err(|_| AppError::NotFound)?;

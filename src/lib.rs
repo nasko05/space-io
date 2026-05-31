@@ -6,6 +6,7 @@
 pub mod config;
 pub mod crypto;
 pub mod error;
+pub mod fs_atomic;
 pub mod routes;
 pub mod space;
 pub mod state;

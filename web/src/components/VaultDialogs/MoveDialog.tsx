@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Close, FolderOpen, Plus } from '../icons/Icon';
-import { TreeFolder, TreeNode } from '../../api/client';
+import { TreeNode } from '../../api/client';
+import { collectFolders } from '../../lib/tree';
 import { useAsyncDialog } from '../../lib/useAsyncDialog';
 import styles from './dialog.module.css';
 
@@ -13,26 +14,6 @@ interface Props {
   onClose: () => void;
   onMove: (destinationFolder: string) => Promise<void>;
   onCreateFolder: (parent: string, name: string) => Promise<string>;
-}
-
-interface FolderEntry {
-  path: string; // '' for root
-  label: string;
-  depth: number;
-}
-
-function collectFolders(tree: TreeNode[]): FolderEntry[] {
-  const out: FolderEntry[] = [{ path: '', label: '/ (space root)', depth: 0 }];
-  const walk = (nodes: TreeNode[], depth: number) => {
-    const folders = nodes.filter((n): n is TreeFolder => n.type === 'folder');
-    folders.sort((a, b) => a.name.localeCompare(b.name));
-    for (const f of folders) {
-      out.push({ path: f.path, label: f.name, depth });
-      walk(f.children, depth + 1);
-    }
-  };
-  walk(tree, 1);
-  return out;
 }
 
 export function MoveDialog({

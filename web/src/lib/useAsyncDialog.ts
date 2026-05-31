@@ -34,11 +34,15 @@ export function useAsyncDialog(open: boolean, fallbackMessage = 'Action failed')
       setError(null);
       try {
         await action();
-        options?.onSuccess?.();
       } catch (e) {
         setError(e instanceof Error ? e.message : fallbackMessage);
+        return;
+      } finally {
+        // Always clear the busy flag — even on the success path, so a dialog
+        // that stays open (doesn't call onClose in onSuccess) isn't wedged.
         setBusy(false);
       }
+      options?.onSuccess?.();
     },
     [fallbackMessage],
   );

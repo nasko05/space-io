@@ -25,6 +25,24 @@ const FORBIDDEN_TAGS = new Set([
   'base',
   'frame',
   'frameset',
+  // Foreign-content roots (SVG/MathML) get their own HTML parsing rules, which
+  // is the classic mutation-XSS lever: a tree that looks safe after one parse
+  // can re-parse into something executable. mammoth never emits these from a
+  // DOCX, so forbidding them outright closes the hole with no legitimate loss.
+  'svg',
+  'math',
+  // <template>/<noscript> hold inert content that the browser re-parses in a
+  // different mode when the result is re-inserted — another mXSS vector.
+  'template',
+  'noscript',
+  // Form controls can carry formaction/submission behaviour and aren't part of
+  // a rendered document.
+  'form',
+  'input',
+  'button',
+  'textarea',
+  'select',
+  'option',
 ]);
 
 const URL_ATTRS = new Set(['href', 'src', 'xlink:href', 'action', 'formaction']);

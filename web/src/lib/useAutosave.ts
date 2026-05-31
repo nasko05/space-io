@@ -30,8 +30,16 @@ export function useAutosave({ delayMs = 800, onSave }: Options) {
   const onSaveRef = useRef(onSave);
 
   useEffect(() => {
+    // Before repointing at the new target, flush any edit still pending for
+    // the *previous* one. Otherwise switching files within the debounce window
+    // silently discards the last edits. Fire-and-forget — the effect body is
+    // synchronous — using the previous save fn captured before we reassign.
+    const previousSave = onSaveRef.current;
+    const pending = pendingRef.current;
+    if (pending !== null) {
+      void previousSave(pending);
+    }
     onSaveRef.current = onSave;
-    // Drop any pending save when the target changes.
     pendingRef.current = null;
     if (timerRef.current !== null) {
       clearTimeout(timerRef.current);
@@ -96,9 +104,26 @@ export function useAutosave({ delayMs = 800, onSave }: Options) {
   useEffect(
     () => () => {
       if (timerRef.current !== null) clearTimeout(timerRef.current);
+      // Don't lose a pending edit if the editor unmounts mid-debounce.
+      if (pendingRef.current !== null) {
+        void onSaveRef.current(pendingRef.current);
+        pendingRef.current = null;
+      }
     },
     [],
   );
+
+  // Best-effort flush when the tab/window is closing. Browsers won't await an
+  // async handler here, so this is a last-ditch attempt, not a guarantee.
+  useEffect(() => {
+    const flushOnUnload = () => {
+      if (pendingRef.current !== null) {
+        void onSaveRef.current(pendingRef.current);
+      }
+    };
+    window.addEventListener('beforeunload', flushOnUnload);
+    return () => window.removeEventListener('beforeunload', flushOnUnload);
+  }, []);
 
   return { status, markDirty, flush };
 }
