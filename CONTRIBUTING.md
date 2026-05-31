@@ -13,7 +13,8 @@ src/              # axum router, crypto, git, file operations
 web/              # Vite + React + TypeScript frontend
   src/            # components, lib helpers
   dist/           # built bundle (gitignored, embedded into the binary)
-deploy/           # CloudFormation + shell for the minimal AWS deployment
+deploy.sh         # one-command build & run (native or Docker, anywhere)
+Dockerfile        # multi-stage image used by the Docker path
 .github/workflows # CI
 ```
 
@@ -92,9 +93,9 @@ is — open the PR as a draft and ask.
 
 - The server stores **ciphertext only** at rest. Decryption happens in
   memory while a session is held.
-- The passphrase is **never** committed to the repo, sent through
-  CloudFormation parameters, stored in instance metadata, or written
-  to any persistent log.
+- The passphrase is **never** committed to the repo, passed as a
+  deploy parameter or environment variable, baked into an image, or
+  written to any persistent log.
 - WebAuthn is an **alternate path** to recover the passphrase
   end-to-end through the browser, not a key-management replacement.
   The server still encrypts files with the passphrase.

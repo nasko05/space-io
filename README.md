@@ -10,19 +10,38 @@ single-column journal, warm paper tones, big Fraunces serif.
 encrypted note rendered in Hearth typography. Phase 2+ adds the rest of the
 six screens, search, upload/download, version history, and WebAuthn.
 
-## Build
+## Deploy (anywhere)
+
+One script builds everything and serves it — on your laptop, a $5 VPS, a
+Raspberry Pi, or inside Docker. No cloud account required.
 
 ```sh
-# Build the frontend bundle (embedded into the Rust binary in release mode)
-cd web && npm install && npm run build && cd ..
-
-# Build the server
-cargo build --release
+./deploy.sh
 ```
 
-## Use
+It auto-detects what's available: if Docker is installed it builds an image
+and runs a container; otherwise it builds natively (needs Rust + Node). Force
+a path with `--docker` or `--native`. Useful flags:
 
 ```sh
+./deploy.sh --port 8080 --data /srv/hearth     # custom port + data dir
+./deploy.sh --docker --detach                  # background container
+./deploy.sh --build-only                       # build, don't run
+./deploy.sh --help                             # all options
+```
+
+For anything reachable off-localhost, front it with TLS (Caddy, nginx, or a
+Cloudflare Tunnel) and pass `--secure-cookies` — Hearth itself speaks plain
+HTTP and is single-tenant by design.
+
+## Build manually
+
+```sh
+# The frontend bundle is embedded into the Rust binary at compile time,
+# so it must build first.
+cd web && npm install && npm run build && cd ..
+cargo build --release
+
 # Start the server. The data dir is created on demand; no init step needed.
 ./target/release/hearth serve --space-dir ./data --listen 127.0.0.1:7777
 ```

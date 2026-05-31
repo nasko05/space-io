@@ -1,0 +1,14 @@
+# Keep the build context small and reproducible: never ship local build
+# artifacts, dependencies, or the runtime vault into the image.
+target
+data
+web/node_modules
+web/dist
+web/tsconfig.tsbuildinfo
+.git
+.github
+.idea
+.vscode
+**/.DS_Store
+*.swp
+*.swo
