@@ -190,6 +190,18 @@ struct UploadResponse {
 
 const DEFAULT_UPLOAD_FOLDER: &str = "Uploads";
 const MAX_UPLOAD_BYTES: usize = 50 * 1024 * 1024;
+/// Hard cap on the total bytes accepted across all files in a single
+/// multipart request. Without this an authenticated client can paste
+/// arbitrarily many 50 MB files into one POST and pin server memory: the
+/// handler buffers every part in full before encrypting (so the workload
+/// can be committed inside one blocking task), so memory grows with the
+/// total request body, not the per-file cap.
+const MAX_TOTAL_UPLOAD_BYTES: usize = 250 * 1024 * 1024;
+/// Hard cap on the number of files we accept in one multipart batch. Same
+/// motivation as the byte cap — even small files have non-trivial per-file
+/// crypto + git work attached, and we don't want a single request to
+/// monopolise the blocking pool.
+const MAX_UPLOADS_PER_REQUEST: usize = 64;
 
 async fn post_upload(
     State(state): State<AppState>,
@@ -200,6 +212,7 @@ async fn post_upload(
 
     let mut folder: Option<String> = None;
     let mut files: Vec<(String, Vec<u8>)> = Vec::new();
+    let mut total_bytes: usize = 0;
 
     while let Some(field) = multipart
         .next_field()
@@ -215,6 +228,11 @@ async fn post_upload(
                     .map_err(|e| AppError::BadRequest(format!("folder field: {e}")))?,
             );
         } else if name == "file" || name == "files" || name == "files[]" {
+            if files.len() >= MAX_UPLOADS_PER_REQUEST {
+                return Err(AppError::BadRequest(format!(
+                    "too many files in one request (max {MAX_UPLOADS_PER_REQUEST})"
+                )));
+            }
             let filename = field
                 .file_name()
                 .map(|s| s.to_string())
@@ -228,6 +246,13 @@ async fn post_upload(
                     "{filename} exceeds {MAX_UPLOAD_BYTES} bytes"
                 )));
             }
+            let new_total = total_bytes.saturating_add(bytes.len());
+            if new_total > MAX_TOTAL_UPLOAD_BYTES {
+                return Err(AppError::BadRequest(format!(
+                    "request body exceeds {MAX_TOTAL_UPLOAD_BYTES} bytes"
+                )));
+            }
+            total_bytes = new_total;
             files.push((filename, bytes.to_vec()));
         }
     }

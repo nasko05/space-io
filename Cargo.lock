@@ -833,6 +833,8 @@ dependencies = [
  "dashmap 6.2.1",
  "git2",
  "hex",
+ "http-body-util",
+ "mime",
  "mime_guess",
  "rand",
  "rust-embed",

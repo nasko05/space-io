@@ -1,7 +1,8 @@
 use crate::error::{AppError, AppResult};
-use crate::space::paths::ENC_EXT;
+use crate::space::paths::{resolve_under, ENC_EXT};
 use crate::space::Space;
 
+#[derive(Debug)]
 pub struct HistoryEntry {
     pub commit: String,
     pub message: String,
@@ -13,6 +14,12 @@ const MAX_HISTORY: usize = 50;
 
 /// Walk the git log restricted to commits touching `<path>.age`.
 pub fn file_history(space: &Space, rel_path: &str) -> AppResult<Vec<HistoryEntry>> {
+    // Reject path traversal up-front — `tree.get_path("../../etc/passwd.age")`
+    // would already fall through to an empty result, but bouncing the request
+    // here keeps the error model consistent with read/write/delete (the
+    // attacker sees `Forbidden`, not an empty 200) and protects us from any
+    // future code that trusts the validated form of the input.
+    resolve_under(&space.root(), rel_path)?;
     let target = format!("{rel_path}{ENC_EXT}");
     space.with_repo(|repo| {
         let mut walk = repo
@@ -136,5 +143,12 @@ mod tests {
         assert_eq!(h[0].author, "hearth");
         assert!(h[0].when.contains('T'));
         assert_eq!(h[0].commit.len(), 40, "git oid is 40 hex chars");
+    }
+
+    #[test]
+    fn rejects_path_traversal() {
+        let (_dir, space, _) = make_space("p");
+        let err = file_history(&space, "../etc/passwd").unwrap_err();
+        assert!(matches!(err, AppError::Forbidden));
     }
 }

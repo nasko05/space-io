@@ -44,7 +44,11 @@ export function App() {
   const [tree, setTree] = useState<TreeNode[]>([]);
   const [excerpts, setExcerpts] = useState<ExcerptMap>({});
   const [meta, setMeta] = useState<MetaMap>({});
-  const [now, setNow] = useState(() => new Date());
+  // The calendar and the entries list only care about which **day** it is,
+  // so we track a day-stable date that flips only across midnight. Cards
+  // are memoized on `file.updated`, so they don't need a minute-rate tick
+  // to stay accurate — the previous `now` state was unread machinery.
+  const [todayDate, setTodayDate] = useState(() => startOfDay(new Date()));
   const [hasPasskey, setHasPasskey] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false);
@@ -72,7 +76,11 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    const t = window.setInterval(() => setNow(new Date()), 60_000);
+    const tick = () => {
+      const next = startOfDay(new Date());
+      setTodayDate((prev) => (prev.getTime() === next.getTime() ? prev : next));
+    };
+    const t = window.setInterval(tick, 60_000);
     return () => window.clearInterval(t);
   }, []);
 
@@ -232,10 +240,16 @@ export function App() {
     setExcerpts({});
     setMeta({});
     previousPathRef.current = null;
+    // Reset every overlay/modal piece so reopening the app after a lock
+    // never starts inside a half-open dialog or with a stale upload queue
+    // pinned to a now-defunct session.
     setSearchOpen(false);
     setUploadOpen(false);
+    setUploadInitial(undefined);
     setDownloadFile(null);
     setPasskeyOpen(false);
+    setSelectedDay(null);
+    setToast(null);
     const status = await refreshStatus();
     setView({
       kind: 'auth',
@@ -570,15 +584,13 @@ export function App() {
     return () => window.clearTimeout(t);
   }, [toast]);
 
-  // `now` ticks every minute so relative-time labels eventually refresh, but
-  // the calendar and the entries list only care about the calendar date.
-  // Memoize on day-precision so neither rebuilds (and re-renders subtrees)
-  // just because a minute elapsed.
-  const dayKey = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}`;
+  // Memoize on `todayDate` (advances only across midnight) so the calendar
+  // doesn't rebuild on every minute tick. `buildCalendar` and `entriesForDate`
+  // both treat their first arg as a day-precision date — they don't read
+  // hours/minutes — so a day-stable input is exactly what they need.
   const calendar: CalendarView = useMemo(
-    () => buildCalendar(now, tree),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [dayKey, tree],
+    () => buildCalendar(todayDate, tree),
+    [todayDate, tree],
   );
   // If the calendar slides into a new month while a day is pinned (e.g. a
   // long-running session ticks past midnight on the last of the month),
@@ -592,15 +604,11 @@ export function App() {
 
   const currentPath =
     view.kind === 'unlocked' && view.surface.kind === 'reader' ? view.surface.file.path : null;
-  const railEntries: TodayEntry[] = useMemo(
-    () => {
-      const target =
-        selectedDay != null ? new Date(calendar.year, calendar.month, selectedDay) : now;
-      return entriesForDate(target, tree, excerpts, currentPath);
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [dayKey, selectedDay, calendar.year, calendar.month, tree, excerpts, currentPath],
-  );
+  const railEntries: TodayEntry[] = useMemo(() => {
+    const target =
+      selectedDay != null ? new Date(calendar.year, calendar.month, selectedDay) : todayDate;
+    return entriesForDate(target, tree, excerpts, currentPath);
+  }, [todayDate, selectedDay, calendar.year, calendar.month, tree, excerpts, currentPath]);
   const railLabel: string =
     selectedDay != null ? shortDayLabel(calendar.month, selectedDay) : 'Today';
   const titleToPath = useMemo(() => buildTitleMap(tree, excerpts), [tree, excerpts]);
@@ -764,6 +772,13 @@ export function App() {
       )}
     </div>
   );
+}
+
+/** Truncate a `Date` to the start of its calendar day in local time. Used to
+ *  give the calendar/today memos a value that only changes when the day
+ *  actually crosses midnight, not on every minute tick. */
+function startOfDay(d: Date): Date {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
 }
 
 function hasFiles(e: DragEvent): boolean {

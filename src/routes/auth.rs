@@ -381,6 +381,14 @@ struct RegisterPasskeyRequest {
     wrapped_passphrase_b64: String,
 }
 
+/// Generous upper bounds on the base64 strings we'll accept for a passkey
+/// registration. Real-world WebAuthn credentials are well under these caps;
+/// the limits exist so a malicious client can't store megabytes in the
+/// per-user `.space.toml` (which we read into memory on every request).
+const MAX_PASSKEY_CREDENTIAL_LEN: usize = 4 * 1024;
+const MAX_PASSKEY_SALT_LEN: usize = 1024;
+const MAX_PASSKEY_WRAPPED_LEN: usize = 16 * 1024;
+
 /// Persist the passkey wrapping material for the unlocked user. Requires an
 /// active session.
 async fn passkey_register(
@@ -389,6 +397,15 @@ async fn passkey_register(
     Json(req): Json<RegisterPasskeyRequest>,
 ) -> AppResult<StatusCode> {
     let (_, space) = require_session(&state, &jar)?;
+    if req.credential_id_b64.len() > MAX_PASSKEY_CREDENTIAL_LEN {
+        return Err(AppError::BadRequest("credential id too long".into()));
+    }
+    if req.prf_salt_b64.len() > MAX_PASSKEY_SALT_LEN {
+        return Err(AppError::BadRequest("prf salt too long".into()));
+    }
+    if req.wrapped_passphrase_b64.len() > MAX_PASSKEY_WRAPPED_LEN {
+        return Err(AppError::BadRequest("wrapped passphrase too long".into()));
+    }
     space.set_passkey(Some(PasskeyConfig {
         credential_id_b64: req.credential_id_b64,
         prf_salt_b64: req.prf_salt_b64,
