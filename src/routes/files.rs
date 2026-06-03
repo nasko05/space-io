@@ -22,6 +22,7 @@ pub fn router() -> Router<AppState> {
         .route("/files/tree", get(get_tree))
         .route("/files/read", get(get_read))
         .route("/files/write", put(put_write))
+        .route("/files/checkpoint", post(post_checkpoint))
         .route("/files/create", post(post_create))
         .route("/files/excerpts", get(get_excerpts))
         .route(
@@ -99,7 +100,6 @@ async fn get_read(
 struct WriteRequest {
     path: String,
     content: String,
-    message: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -108,20 +108,48 @@ struct WriteResponse {
     updated: String,
 }
 
+/// Autosave. Persists the editor's content to the working tree without
+/// minting a history entry — drafts flow to disk continuously so nothing is
+/// lost, but only an explicit checkpoint (`post_checkpoint`) becomes a commit.
 async fn put_write(
     State(state): State<AppState>,
     jar: CookieJar,
     Json(req): Json<WriteRequest>,
 ) -> AppResult<Json<WriteResponse>> {
     let (pass, space) = require_session(&state, &jar)?;
+    let result =
+        blocking(move || write::save_draft(&space, &pass, &req.path, &req.content)).await?;
+    Ok(Json(WriteResponse {
+        path: result.path,
+        updated: result.updated,
+    }))
+}
+
+#[derive(Deserialize)]
+struct CheckpointRequest {
+    path: String,
+    content: String,
+    message: Option<String>,
+}
+
+/// Create a checkpoint: persist `content` and record it as a commit in the
+/// version history with an optional user-supplied label (text or emoji). This
+/// is the deliberate "save a version I can return to" action, as opposed to
+/// the continuous draft autosave above.
+async fn post_checkpoint(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Json(req): Json<CheckpointRequest>,
+) -> AppResult<Json<WriteResponse>> {
+    let (pass, space) = require_session(&state, &jar)?;
+    let message = req
+        .message
+        .as_deref()
+        .map(str::trim)
+        .filter(|m| !m.is_empty())
+        .map(|m| m.to_string());
     let result = blocking(move || {
-        write::write_file(
-            &space,
-            &pass,
-            &req.path,
-            &req.content,
-            req.message.as_deref(),
-        )
+        write::write_file(&space, &pass, &req.path, &req.content, message.as_deref())
     })
     .await?;
     Ok(Json(WriteResponse {

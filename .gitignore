@@ -8,3 +8,8 @@
 *.swo
 .idea/
 .vscode/
+
+# Local secrets / runtime config. The committed template is .env.example.
+.env
+.env.*
+!.env.example

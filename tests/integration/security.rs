@@ -81,6 +81,11 @@ async fn traversal_rejected_on_every_path_endpoint() {
         ),
         (
             Method::POST,
+            "/api/files/checkpoint",
+            serde_json::json!({ "path": "../escape.md", "content": "x" }),
+        ),
+        (
+            Method::POST,
             "/api/files/move",
             serde_json::json!({ "from": "../escape.md", "to": "ok.md" }),
         ),

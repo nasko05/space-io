@@ -1,3 +1,5 @@
+use std::path::{Path, PathBuf};
+
 use age::secrecy::SecretString;
 
 use crate::crypto::age_io;
@@ -12,6 +14,30 @@ pub struct WriteResult {
     pub updated: String,
 }
 
+/// Persist `content` to the working tree **without** creating a git commit.
+///
+/// This is the autosave path: edits flow to disk continuously (so nothing is
+/// lost on reload or crash — `read_file` reads straight from the working tree)
+/// but they do *not* each become an entry in the version history. A discrete
+/// point in history is only minted when the user explicitly checkpoints via
+/// [`write_file`]. The latest draft always lives on disk; checkpoints are the
+/// snapshots the user chose to keep.
+pub fn save_draft(
+    space: &Space,
+    passphrase: &SecretString,
+    rel_path: &str,
+    content: &str,
+) -> AppResult<WriteResult> {
+    let on_disk = persist_encrypted(space, passphrase, rel_path, content)?;
+    Ok(WriteResult {
+        path: rel_path.to_string(),
+        updated: modified_iso8601(&on_disk),
+    })
+}
+
+/// Persist `content` to the working tree **and** record a commit ("checkpoint")
+/// in the version history. Used by explicit checkpoints, rollback, and the AI
+/// assistant — every one of those is a deliberate, history-worthy change.
 pub fn write_file(
     space: &Space,
     passphrase: &SecretString,
@@ -20,15 +46,7 @@ pub fn write_file(
     message: Option<&str>,
 ) -> AppResult<WriteResult> {
     let root = space.root();
-    let resolved = resolve_under(&root, rel_path)?;
-    if let Some(parent) = resolved.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let on_disk = with_age_suffix(&resolved);
-
-    let ciphertext = age_io::encrypt_bytes(content.as_bytes(), passphrase)?;
-    std::fs::write(&on_disk, &ciphertext)?;
-    space.cache().invalidate(&on_disk.to_string_lossy());
+    let on_disk = persist_encrypted(space, passphrase, rel_path, content)?;
 
     let summary = message
         .map(|m| m.to_string())
@@ -39,16 +57,41 @@ pub fn write_file(
         .unwrap_or_else(|_| on_disk.clone());
     space.with_repo(|repo| commit_paths(repo, &summary, [staged]))?;
 
-    let updated = std::fs::metadata(&on_disk)
+    Ok(WriteResult {
+        path: rel_path.to_string(),
+        updated: modified_iso8601(&on_disk),
+    })
+}
+
+/// Encrypt `content` and write it to `<rel_path>.age` in the working tree,
+/// creating parent directories and invalidating the decrypted cache. Returns
+/// the absolute on-disk path. Shared by [`save_draft`] and [`write_file`] so
+/// the draft and checkpoint paths can't drift in how bytes hit disk.
+fn persist_encrypted(
+    space: &Space,
+    passphrase: &SecretString,
+    rel_path: &str,
+    content: &str,
+) -> AppResult<PathBuf> {
+    let root = space.root();
+    let resolved = resolve_under(&root, rel_path)?;
+    if let Some(parent) = resolved.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let on_disk = with_age_suffix(&resolved);
+
+    let ciphertext = age_io::encrypt_bytes(content.as_bytes(), passphrase)?;
+    std::fs::write(&on_disk, &ciphertext)?;
+    space.cache().invalidate(&on_disk.to_string_lossy());
+    Ok(on_disk)
+}
+
+fn modified_iso8601(on_disk: &Path) -> String {
+    std::fs::metadata(on_disk)
         .and_then(|m| m.modified())
         .ok()
         .and_then(systemtime_iso8601)
-        .unwrap_or_default();
-
-    Ok(WriteResult {
-        path: rel_path.to_string(),
-        updated,
-    })
+        .unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -99,6 +142,53 @@ mod tests {
         write_file(&space, &pass, "n.md", "v1", None).unwrap();
         write_file(&space, &pass, "n.md", "v2", None).unwrap();
         assert_eq!(count_commits(&dir.path().join("space")), 2);
+    }
+
+    #[test]
+    fn save_draft_writes_an_encrypted_blob() {
+        let (dir, space, pass) = make_space("p");
+        save_draft(&space, &pass, "Journal/2026/note.md", "hello").unwrap();
+        let on_disk = dir.path().join("space").join("Journal/2026/note.md.age");
+        assert!(on_disk.is_file());
+        let bytes = std::fs::read(&on_disk).unwrap();
+        assert!(bytes.starts_with(b"age-encryption.org/v1\n"));
+    }
+
+    #[test]
+    fn save_draft_does_not_commit() {
+        let (dir, space, pass) = make_space("p");
+        assert_eq!(count_commits(&dir.path().join("space")), 0);
+        save_draft(&space, &pass, "n.md", "draft one").unwrap();
+        save_draft(&space, &pass, "n.md", "draft two").unwrap();
+        // Autosaves persist to disk but never mint history entries.
+        assert_eq!(count_commits(&dir.path().join("space")), 0);
+    }
+
+    #[test]
+    fn save_draft_then_read_round_trips_the_latest_draft() {
+        let (dir, space, pass) = make_space("p");
+        save_draft(&space, &pass, "n.md", "first").unwrap();
+        save_draft(&space, &pass, "n.md", "second").unwrap();
+        let bytes = std::fs::read(dir.path().join("space/n.md.age")).unwrap();
+        let pt = crate::crypto::age_io::decrypt_bytes(&bytes, &pass).unwrap();
+        assert_eq!(pt, b"second");
+    }
+
+    #[test]
+    fn checkpoint_after_drafts_records_a_single_commit() {
+        let (dir, space, pass) = make_space("p");
+        save_draft(&space, &pass, "n.md", "wip 1").unwrap();
+        save_draft(&space, &pass, "n.md", "wip 2").unwrap();
+        assert_eq!(count_commits(&dir.path().join("space")), 0);
+        write_file(&space, &pass, "n.md", "wip 2", Some("checkpoint")).unwrap();
+        assert_eq!(count_commits(&dir.path().join("space")), 1);
+    }
+
+    #[test]
+    fn save_draft_rejects_path_traversal() {
+        let (_dir, space, pass) = make_space("p");
+        let err = save_draft(&space, &pass, "../etc/x", "x").unwrap_err();
+        assert!(matches!(err, AppError::Forbidden));
     }
 
     #[test]

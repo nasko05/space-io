@@ -1,3 +1,4 @@
+pub mod agent;
 pub mod auth;
 pub mod files;
 pub mod search;
@@ -9,6 +10,7 @@ use crate::state::AppState;
 
 pub fn build_router(state: AppState) -> Router {
     let api = Router::new()
+        .merge(agent::router())
         .merge(auth::router())
         .merge(files::router())
         .merge(search::router())

@@ -114,3 +114,29 @@
     transform: translate(-50%, 0);
   }
 }
+
+/* Floating launcher for the AI assistant drawer. Sits clear of the toast,
+   below the drawer's own z-index so it tucks away when the drawer opens. */
+.hearthAgentFab {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  width: 50px;
+  height: 50px;
+  z-index: 40;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+  box-shadow: 0 10px 28px var(--shadow-strong);
+  transition: filter 0.15s ease, transform 0.15s ease;
+}
+
+.hearthAgentFab:hover {
+  filter: brightness(0.94);
+  transform: translateY(-1px);
+}

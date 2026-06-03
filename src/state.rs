@@ -4,6 +4,7 @@ use std::sync::{Arc, RwLock};
 use dashmap::DashMap;
 use uuid::Uuid;
 
+use crate::agent::AgentConfig;
 use crate::error::{AppError, AppResult};
 use crate::space::rate_limit::RateLimiter;
 use crate::space::session::SessionStore;
@@ -52,6 +53,9 @@ pub struct AppState {
     pub sessions: SessionStore,
     pub unlock_limiter: RateLimiter,
     pub config: AppConfig,
+    /// AI-agent settings, read once from the environment. Holds the provider
+    /// API keys, so it lives behind an `Arc` and never derives `Debug`.
+    pub agent: Arc<AgentConfig>,
 }
 
 impl AppState {
@@ -69,6 +73,7 @@ impl AppState {
             sessions,
             unlock_limiter,
             config,
+            agent: Arc::new(AgentConfig::from_env()),
         })
     }
 

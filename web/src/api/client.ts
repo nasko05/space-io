@@ -79,6 +79,50 @@ export interface HistoryEntry {
   when: string;
 }
 
+// ---- AI agent chat ----
+
+export type AgentRole = 'system' | 'user' | 'assistant' | 'tool';
+
+export interface AgentToolCall {
+  id: string;
+  type?: string;
+  function: { name: string; arguments: string };
+}
+
+/** OpenAI-compatible chat message. The browser owns the running transcript and
+ *  echoes it back on every turn — the server is stateless between turns. */
+export interface AgentMessage {
+  role: AgentRole;
+  content?: string | null;
+  tool_calls?: AgentToolCall[];
+  tool_call_id?: string;
+  name?: string;
+}
+
+/** A vault change the model proposed and the user must approve before it is
+ *  applied. `tool` selects which endpoint the browser calls on approval. */
+export interface AgentPendingAction {
+  tool_call_id: string;
+  tool: string;
+  args: Record<string, unknown>;
+  summary: string;
+}
+
+export interface AgentChatResponse {
+  messages: AgentMessage[];
+  assistant_text: string | null;
+  pending_actions: AgentPendingAction[];
+  done: boolean;
+}
+
+export interface AgentStatus {
+  /** A provider key is present server-side; the assistant is usable. */
+  configured: boolean;
+  /** The chat model id in use. */
+  model: string;
+  web_search: 'brave' | 'builtin' | 'off';
+}
+
 export class ApiError extends Error {
   constructor(public readonly status: number, public readonly code: string, message: string) {
     super(message);
@@ -145,10 +189,26 @@ export const api = {
       }),
     );
   },
-  async write(path: string, content: string, message?: string): Promise<WriteResult> {
+  /** Autosave: persist the editor's content to disk without minting a
+   *  version-history entry. Drafts flow to disk continuously so nothing is
+   *  lost; only an explicit checkpoint becomes a commit. */
+  async saveDraft(path: string, content: string): Promise<WriteResult> {
     return json(
       await fetch('/api/files/write', {
         method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ path, content }),
+      }),
+    );
+  },
+  /** Checkpoint: persist `content` and record it as a labelled point in the
+   *  version history. `message` is the user's label (text or emoji); blank or
+   *  omitted falls back to a default on the server. */
+  async checkpoint(path: string, content: string, message?: string): Promise<WriteResult> {
+    return json(
+      await fetch('/api/files/checkpoint', {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
         body: JSON.stringify({ path, content, message }),
@@ -343,6 +403,19 @@ export const api = {
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
         body: JSON.stringify({ updates }),
+      }),
+    );
+  },
+  async agentStatus(): Promise<AgentStatus> {
+    return json(await fetch('/api/agent/status', { credentials: 'same-origin' }));
+  },
+  async agentChat(messages: AgentMessage[]): Promise<AgentChatResponse> {
+    return json(
+      await fetch('/api/agent/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ messages }),
       }),
     );
   },

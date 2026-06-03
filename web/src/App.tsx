@@ -8,6 +8,8 @@ import { SearchOverlay } from './components/Search/SearchOverlay';
 import { UploadModal } from './components/Upload/UploadModal';
 import { DownloadModal } from './components/Download/DownloadModal';
 import { PasskeyModal } from './components/Passkey/PasskeyModal';
+import { AgentChat } from './components/Agent/AgentChat';
+import { Sparkle } from './components/icons/Icon';
 import {
   api,
   ExcerptMap,
@@ -55,6 +57,7 @@ export function App() {
   const [uploadInitial, setUploadInitial] = useState<File[] | undefined>(undefined);
   const [downloadFile, setDownloadFile] = useState<TreeFile | null>(null);
   const [passkeyOpen, setPasskeyOpen] = useState(false);
+  const [agentOpen, setAgentOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   // Calendar selection. `null` means "show today" (the default); a number
   // pins the rail's entry list to that day-of-month in the displayed
@@ -248,6 +251,7 @@ export function App() {
     setUploadInitial(undefined);
     setDownloadFile(null);
     setPasskeyOpen(false);
+    setAgentOpen(false);
     setSelectedDay(null);
     setToast(null);
     const status = await refreshStatus();
@@ -348,27 +352,41 @@ export function App() {
     }
   }, [refreshExcerpts, refreshTree, view]);
 
+  // Recompute the local title/excerpt for `path` so wikilink autocomplete +
+  // the Today list reflect the latest content without a full server walk-and-
+  // decrypt on every keystroke (the prior implementation made the UI very
+  // slow as the corpus grew). Shared by autosave and checkpoint.
+  const patchExcerpt = useCallback((path: string, content: string) => {
+    const titleMatch = /^# (.+)$/m.exec(content);
+    const title = titleMatch ? titleMatch[1].trim() : null;
+    const bodyLines = content
+      .split('\n')
+      .filter((l) => !l.startsWith('#') && l.trim().length > 0)
+      .slice(0, 3)
+      .join(' ');
+    const excerpt = bodyLines
+      .replace(/[*_`]/g, '')
+      .replace(/\[\[|\]\]/g, '')
+      .slice(0, 180);
+    setExcerpts((cur) => ({ ...cur, [path]: { title, excerpt } }));
+  }, []);
+
+  // Autosave: persist the draft to disk. Does NOT create a history entry.
   const saveFile = useCallback(
     async (path: string, content: string) => {
-      await api.write(path, content);
-      // Locally patch the title/excerpt so wikilink autocomplete + the Today
-      // list reflect the latest content without a full server walk-and-
-      // decrypt on every keystroke (the prior implementation made the UI
-      // very slow as the corpus grew).
-      const titleMatch = /^# (.+)$/m.exec(content);
-      const title = titleMatch ? titleMatch[1].trim() : null;
-      const bodyLines = content
-        .split('\n')
-        .filter((l) => !l.startsWith('#') && l.trim().length > 0)
-        .slice(0, 3)
-        .join(' ');
-      const excerpt = bodyLines
-        .replace(/[*_`]/g, '')
-        .replace(/\[\[|\]\]/g, '')
-        .slice(0, 180);
-      setExcerpts((cur) => ({ ...cur, [path]: { title, excerpt } }));
+      await api.saveDraft(path, content);
+      patchExcerpt(path, content);
     },
-    [],
+    [patchExcerpt],
+  );
+
+  // Checkpoint: persist + record a labelled point in the version history.
+  const checkpointFile = useCallback(
+    async (path: string, content: string, message?: string) => {
+      await api.checkpoint(path, content, message);
+      patchExcerpt(path, content);
+    },
+    [patchExcerpt],
   );
 
   const rollbackFile = useCallback(
@@ -424,6 +442,14 @@ export function App() {
 
   const openSearch = useCallback(() => setSearchOpen(true), []);
   const openPasskey = useCallback(() => setPasskeyOpen(true), []);
+
+  // After the assistant applies an approved change, pull fresh tree/excerpts/
+  // tags so the rail, calendar, and vault reflect it immediately.
+  const onAgentVaultChanged = useCallback(() => {
+    void refreshTree();
+    void refreshExcerpts();
+    void refreshMeta();
+  }, [refreshExcerpts, refreshMeta, refreshTree]);
 
   const onUploaded = useCallback(async () => {
     await refreshTree();
@@ -662,6 +688,7 @@ export function App() {
           onOpenSearch={openSearch}
           onLock={onLock}
           onSave={saveFile}
+          onCheckpoint={checkpointFile}
           onRollback={rollbackFile}
           onWikilinkMiss={onWikilinkMiss}
           onOpenPasskey={openPasskey}
@@ -770,6 +797,24 @@ export function App() {
           {toast}
         </div>
       )}
+
+      {!agentOpen && (
+        <button
+          type="button"
+          className="hearthAgentFab"
+          onClick={() => setAgentOpen(true)}
+          title="Assistant"
+          aria-label="Open the assistant"
+        >
+          <Sparkle size={22} />
+        </button>
+      )}
+
+      <AgentChat
+        open={agentOpen}
+        onClose={() => setAgentOpen(false)}
+        onVaultChanged={onAgentVaultChanged}
+      />
     </div>
   );
 }
