@@ -13,6 +13,12 @@
   --blue: #3a5d7a;
   --margin: rgba(178, 90, 58, 0.06);
 
+  /* Full-screen drag-and-drop overlay. Kept as tokens so the dark theme can
+     swap the warm-paper wash for a dark one instead of flashing a light
+     rectangle over a dark page. */
+  --overlay: rgba(246, 241, 231, 0.85);
+  --overlay-inner: rgba(255, 255, 255, 0.4);
+
   /* Higher-contrast surface used by inputs / cards / modals. In dark mode
      this becomes a near-paper-warm shade so a "white box" doesn't punch
      a hole through the page. */
@@ -25,24 +31,33 @@
   --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
 }
 
+/* Dark theme — a warm, dim-lit study rather than a cold black slab. Three
+   coffee-charcoal grounds climb a gentle elevation ramp (outer frame → page →
+   raised surface) so cards and modals read as *lifted* instead of punched out,
+   and the ink is a candle-warm off-white. Text/usage pairings are tuned to
+   clear WCAG AA: body ink ≈14:1, secondary ≈9:1, muted ≈6:1, and the
+   terracotta accent ≈6:1 on the page ground. */
 :root[data-theme='dark'] {
-  --paper: #1a1612;
-  --paper-edge: #221d17;
-  --paper-warm: #1f1a14;
-  --ink: #ede4d0;
-  --ink-2: #c8bea8;
-  --mute: #8a8073;
-  --rule: #3a322a;
-  --accent: #d97757;
-  --accent-soft: #6b3a2a;
-  --warm: #2a2218;
-  --pin: #d4b572;
-  --blue: #6a8aaa;
-  --margin: rgba(217, 119, 87, 0.08);
+  --paper: #1d1813;
+  --paper-edge: #14100c;
+  --paper-warm: #241e16;
+  --ink: #efe6d6;
+  --ink-2: #ccc0a6;
+  --mute: #a89a82;
+  --rule: #38302a;
+  --accent: #e0855d;
+  --accent-soft: #7d4634;
+  --warm: #2b2318;
+  --pin: #d9ba7c;
+  --blue: #82a2bf;
+  --margin: rgba(224, 133, 93, 0.09);
 
-  --surface: #25201a;
-  --shadow-strong: rgba(0, 0, 0, 0.55);
-  --shadow-soft: rgba(0, 0, 0, 0.25);
+  --overlay: rgba(20, 16, 12, 0.82);
+  --overlay-inner: rgba(255, 255, 255, 0.05);
+
+  --surface: #26201a;
+  --shadow-strong: rgba(0, 0, 0, 0.6);
+  --shadow-soft: rgba(0, 0, 0, 0.3);
 
   color-scheme: dark;
 }

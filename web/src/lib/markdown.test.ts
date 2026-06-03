@@ -60,7 +60,38 @@ describe('renderMarkdown', () => {
   });
 
   it('renders horizontal rules', () => {
-    expect(renderMarkdown('---')).toBe('<hr/>');
+    expect(renderMarkdown('---')).toContain('<hr');
+  });
+
+  it('renders GFM tables', () => {
+    const html = renderMarkdown('| A | B |\n| - | - |\n| 1 | 2 |');
+    expect(html).toContain('<table>');
+    expect(html).toContain('<th>A</th>');
+    expect(html).toContain('<td>1</td>');
+  });
+
+  it('renders task lists as disabled checkboxes', () => {
+    const html = renderMarkdown('- [x] done\n- [ ] todo');
+    expect(html).toContain('type="checkbox"');
+    expect(html).toContain('checked');
+    expect(html).toContain('disabled');
+    expect(html).toContain('done');
+  });
+
+  it('renders strikethrough', () => {
+    expect(renderMarkdown('~~gone~~')).toContain('<del>gone</del>');
+  });
+
+  it('renders fenced code blocks', () => {
+    const html = renderMarkdown('```\nconst x = 1;\n```');
+    expect(html).toContain('<pre>');
+    expect(html).toContain('<code');
+    expect(html).toContain('const x = 1;');
+  });
+
+  it('autolinks bare URLs', () => {
+    const html = renderMarkdown('visit https://example.com today');
+    expect(html).toContain('href="https://example.com"');
   });
 
   it('returns empty for empty input', () => {

@@ -36,9 +36,10 @@ const FORBIDDEN_TAGS = new Set([
   'template',
   'noscript',
   // Form controls can carry formaction/submission behaviour and aren't part of
-  // a rendered document.
+  // a rendered document. (`input` is *conditionally* allowed — see
+  // `isAllowedCheckbox` — so GFM task-list checkboxes survive; it is
+  // deliberately absent from this set and handled separately.)
   'form',
-  'input',
   'button',
   'textarea',
   'select',
@@ -46,6 +47,18 @@ const FORBIDDEN_TAGS = new Set([
 ]);
 
 const URL_ATTRS = new Set(['href', 'src', 'xlink:href', 'action', 'formaction']);
+
+// GFM task lists render as `<input type="checkbox" disabled>`. That single,
+// inert shape is the only `<input>` we allow through; every other input (text,
+// file, hidden, an input without the checkbox type, …) is stripped like the
+// rest of the form controls. When we keep one, we also drop every attribute
+// except the three that define the inert checkbox, so no `onfocus=`,
+// `formaction=`, `value=`, etc. can ride along.
+const CHECKBOX_KEEP_ATTRS = new Set(['type', 'checked', 'disabled']);
+
+function isAllowedCheckbox(el: Element): boolean {
+  return el.tagName.toLowerCase() === 'input' && el.getAttribute('type') === 'checkbox';
+}
 
 function isSafeUrl(raw: string): boolean {
   const trimmed = raw.trim();
@@ -71,6 +84,21 @@ function walk(node: Element) {
     const tag = child.tagName.toLowerCase();
     if (FORBIDDEN_TAGS.has(tag)) {
       child.remove();
+      continue;
+    }
+    // `input` isn't in FORBIDDEN_TAGS so GFM task-list checkboxes can pass, but
+    // only the exact inert-checkbox shape: keep `<input type=checkbox>` (pared
+    // down to its safe attributes), strip any other input outright.
+    if (tag === 'input') {
+      if (!isAllowedCheckbox(child)) {
+        child.remove();
+        continue;
+      }
+      for (const attr of Array.from(child.attributes)) {
+        if (!CHECKBOX_KEEP_ATTRS.has(attr.name.toLowerCase())) {
+          child.removeAttribute(attr.name);
+        }
+      }
       continue;
     }
     // Drop `on*` handlers and unsafe URL attributes.

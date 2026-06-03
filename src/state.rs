@@ -14,8 +14,13 @@ use crate::space::Space;
 /// request handler so we don't sprinkle `std::env::var` lookups around.
 #[derive(Clone, Debug)]
 pub struct AppConfig {
-    /// Mark the session cookie `Secure`. Defaults to `true`; opt out with
-    /// `HEARTH_INSECURE_COOKIES=1` for local plain-HTTP development.
+    /// Whether the session cookie *may* be marked `Secure`. Defaults to
+    /// `true`; opt out with `HEARTH_INSECURE_COOKIES=1` for local plain-HTTP
+    /// development. This is only the operator-level gate — the cookie is
+    /// additionally marked `Secure` *per request* only when the request
+    /// actually arrived over HTTPS (`X-Forwarded-Proto: https`). A `Secure`
+    /// cookie is dropped by the browser over plain HTTP, which would log the
+    /// user out on refresh, so both conditions must hold.
     pub cookie_secure: bool,
 }
 

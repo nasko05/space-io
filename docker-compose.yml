@@ -1,0 +1,25 @@
+# Recommended CI/CD deploy path for Hearth.
+#
+#   docker compose up -d --build
+#
+# This rebuilds the image from the current source and (re)creates the
+# container, while the named volume 'hearth-data' keeps every user's files,
+# notes, and bookmarks. Data lives under /data inside the container and
+# survives image rebuilds and container recreation; the app never overwrites
+# existing data on startup (init_space only creates what's missing).
+services:
+  hearth:
+    build: .
+    image: hearth
+    container_name: hearth
+    ports:
+      - "7777:7777"
+    volumes:
+      - hearth-data:/data
+    restart: unless-stopped
+    # For local HTTP testing (no TLS), allow non-secure cookies:
+    # environment:
+    #   - HEARTH_INSECURE_COOKIES=1
+
+volumes:
+  hearth-data: {}
