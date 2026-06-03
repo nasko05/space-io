@@ -64,6 +64,12 @@ impl ChatMessage {
 /// string per the OpenAI contract (not a parsed object).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolCall {
+    /// Correlates this call with the tool result that answers it. The OpenAI
+    /// contract requires it, but several open-weight models proxied through
+    /// OpenRouter omit it, so we default to empty here and fill in a stable
+    /// placeholder after parsing (see `fill_missing_tool_call_ids`) rather than
+    /// failing the whole response to deserialize.
+    #[serde(default)]
     pub id: String,
     #[serde(rename = "type", default = "default_tool_type")]
     pub kind: String,
@@ -213,12 +219,34 @@ impl OpenRouterClient {
 
         let parsed: ChatResponse = serde_json::from_str(&text)
             .map_err(|e| AppError::Internal(format!("agent provider parse failed: {e}")))?;
-        parsed
+        let mut message = parsed
             .choices
             .into_iter()
             .next()
             .map(|c| c.message)
-            .ok_or_else(|| AppError::Internal("agent provider returned no choices".into()))
+            .ok_or_else(|| AppError::Internal("agent provider returned no choices".into()))?;
+        fill_missing_tool_call_ids(&mut message);
+        Ok(message)
+    }
+}
+
+/// Give every tool call a non-empty `id`.
+///
+/// The OpenAI contract makes `id` mandatory, but open-weight models served
+/// through OpenRouter (the default `qwen/*` model among them) routinely emit
+/// tool calls with the field absent or blank. We need a stable, non-empty id
+/// to thread back to the model as the matching tool result — and, for the
+/// confirm-before-write tools, to round-trip through the browser as a
+/// `tool_call_id`. Synthesise one from the call's position when the provider
+/// leaves it empty; ids the provider did supply are left untouched. Indexing is
+/// per-message, which is all the OpenAI tool-result protocol needs.
+fn fill_missing_tool_call_ids(message: &mut ChatMessage) {
+    if let Some(calls) = message.tool_calls.as_mut() {
+        for (i, call) in calls.iter_mut().enumerate() {
+            if call.id.trim().is_empty() {
+                call.id = format!("call_{i}");
+            }
+        }
     }
 }
 
@@ -288,6 +316,55 @@ mod tests {
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].function.name, "read_file");
         assert_eq!(calls[0].function.arguments, "{\"path\":\"a.md\"}");
+    }
+
+    #[test]
+    fn deserializes_tool_call_with_missing_id() {
+        // Open-weight models proxied through OpenRouter sometimes omit the
+        // OpenAI-mandated `id`. That must parse (to an empty id) rather than
+        // failing the whole response — otherwise the turn 500s.
+        let raw = r#"{
+            "role": "assistant",
+            "content": null,
+            "tool_calls": [
+                {"type":"function","function":{"name":"write_file","arguments":"{}"}}
+            ]
+        }"#;
+        let msg: ChatMessage = serde_json::from_str(raw).expect("must parse without an id");
+        assert_eq!(msg.tool_calls.unwrap()[0].id, "");
+    }
+
+    #[test]
+    fn fill_missing_tool_call_ids_synthesizes_only_blank_ids() {
+        let mut msg: ChatMessage = serde_json::from_str(
+            r#"{"role":"assistant","tool_calls":[
+                {"type":"function","function":{"name":"a","arguments":"{}"}},
+                {"id":"keep","type":"function","function":{"name":"b","arguments":"{}"}},
+                {"id":"   ","type":"function","function":{"name":"c","arguments":"{}"}}
+            ]}"#,
+        )
+        .unwrap();
+        fill_missing_tool_call_ids(&mut msg);
+        let calls = msg.tool_calls.unwrap();
+        assert_eq!(calls[0].id, "call_0", "absent id is synthesised");
+        assert_eq!(calls[1].id, "keep", "a real id is left untouched");
+        assert_eq!(
+            calls[2].id, "call_2",
+            "whitespace-only id is treated as missing"
+        );
+    }
+
+    #[test]
+    fn fill_missing_tool_call_ids_is_a_noop_without_tool_calls() {
+        let mut msg = ChatMessage {
+            role: Role::Assistant,
+            content: Some("plain answer".into()),
+            tool_calls: None,
+            tool_call_id: None,
+            name: None,
+        };
+        fill_missing_tool_call_ids(&mut msg);
+        assert!(msg.tool_calls.is_none());
     }
 
     #[test]
