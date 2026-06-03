@@ -561,7 +561,11 @@ async fn drafts_do_not_create_history_but_checkpoints_do() {
 
     let body = body_json(get_authed(&h, &u, "/api/files/history?path=N/n.md").await).await;
     let entries = body["entries"].as_array().unwrap();
-    assert_eq!(entries.len(), 1, "drafts should not appear in history: {entries:?}");
+    assert_eq!(
+        entries.len(),
+        1,
+        "drafts should not appear in history: {entries:?}"
+    );
 
     // The latest draft is still what reads see.
     let read = body_json(get_authed(&h, &u, "/api/files/read?path=N/n.md").await).await;
@@ -716,7 +720,12 @@ async fn rollback_preserves_an_uncheckpointed_draft() {
     let entries = history["entries"].as_array().unwrap();
     let before_restore = entries
         .iter()
-        .find(|e| e["message"].as_str().unwrap_or("").contains("before restore"))
+        .find(|e| {
+            e["message"]
+                .as_str()
+                .unwrap_or("")
+                .contains("before restore")
+        })
         .expect("draft should have been checkpointed before restore");
     let draft_commit = before_restore["commit"].as_str().unwrap().to_string();
     post_authed(
