@@ -583,6 +583,42 @@ mod tests {
         );
     }
 
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn loop_handles_mutating_tool_call_without_a_provider_id() {
+        // Regression: "create a file" returned 500 because the model's
+        // write_file tool call arrived with no `id` (common with open-weight
+        // models on OpenRouter) and the response failed to deserialise. The
+        // turn must now succeed, proposing the change with a synthesised id.
+        use crate::space::test_helpers::make_space_with_note;
+
+        let base = spawn_mock(vec![serde_json::json!({"choices":[{"message":{
+            "role":"assistant",
+            "content":"I'll create that note.",
+            // Note: the tool call has no "id" field at all.
+            "tool_calls":[{"type":"function","function":{
+                "name":"write_file","arguments":"{\"path\":\"new.md\",\"content\":\"# New\"}"}}]}}]})])
+        .await;
+
+        let mut cfg = test_cfg();
+        cfg.base_url = base;
+
+        let (_dir, space, pass) = make_space_with_note("p", "a.md", "x");
+        let turn = run_turn(&cfg, space, pass, vec![user_msg("make a note called new")])
+            .await
+            .expect("turn must not 500 just because the id was missing");
+
+        assert!(!turn.done);
+        assert_eq!(turn.pending_actions.len(), 1);
+        assert_eq!(turn.pending_actions[0].tool, "write_file");
+        // A non-empty id is essential: the browser echoes it back as the
+        // tool_call_id when it reports the result, and the model needs it to
+        // match the result to its call.
+        assert!(
+            !turn.pending_actions[0].tool_call_id.trim().is_empty(),
+            "a tool_call_id must be present so the result can be correlated"
+        );
+    }
+
     fn test_cfg() -> AgentConfig {
         AgentConfig {
             openrouter_api_key: Some("sk-test".into()),
