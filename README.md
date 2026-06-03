@@ -95,12 +95,28 @@ search to *any* model via its built-in `web` plugin — so search works out of
 the box with just the OpenRouter key. Set `HEARTH_BRAVE_API_KEY` if you'd
 rather the agent call Brave directly with your own key.
 
-In Docker, pass the same variables with `-e`:
+### Using a `.env` file
+
+Rather than exporting variables by hand, drop them in a `.env` file next to
+`deploy.sh` and they're picked up automatically — both for Docker (passed as
+`--env-file`, so secrets never get baked into the image) and for native runs
+(sourced before launch):
 
 ```sh
-./deploy.sh --docker --detach        # then, or instead, run with:
-docker run -e HEARTH_OPENROUTER_API_KEY=sk-or-... -p 7777:7777 -v hearth-data:/data hearth
+cp .env.example .env        # then edit .env and fill in your key
+./deploy.sh                 # auto-loads ./.env
 ```
+
+Point elsewhere with `./deploy.sh --env-file /etc/hearth.env`, or ignore the
+file with `--no-env`. Running `docker run` yourself? Use the same file:
+
+```sh
+docker run --env-file .env -p 7777:7777 -v hearth-data:/data hearth
+```
+
+Write plain `KEY=value` lines with **no quotes** (Docker's `--env-file` keeps
+quotes literally). See `.env.example` for the full, commented list. The real
+`.env` is gitignored.
 
 ## Layout
 
