@@ -14,6 +14,7 @@ pub mod tools;
 
 use age::secrecy::SecretString;
 use serde::Deserialize;
+use time::OffsetDateTime;
 
 use crate::agent::openrouter::{ChatMessage, OpenRouterClient, Role, ToolCall};
 use crate::error::{AppError, AppResult};
@@ -166,7 +167,7 @@ pub async fn run_turn(
     let client = OpenRouterClient::new(cfg, api_key, web_plugin)?;
     let tools = tools::tool_definitions(brave_web);
 
-    let mut messages = with_system_prompt(incoming, cfg);
+    let mut messages = with_system_prompt(incoming, cfg, &current_date_utc());
 
     let mut steps = 0usize;
     let (assistant_text, pending) = loop {
@@ -266,9 +267,13 @@ fn parse_args(raw: &str) -> serde_json::Value {
     serde_json::from_str(raw).unwrap_or(serde_json::Value::Null)
 }
 
-fn with_system_prompt(incoming: Vec<ChatMessage>, cfg: &AgentConfig) -> Vec<ChatMessage> {
+fn with_system_prompt(
+    incoming: Vec<ChatMessage>,
+    cfg: &AgentConfig,
+    today: &str,
+) -> Vec<ChatMessage> {
     let mut out = Vec::with_capacity(incoming.len() + 1);
-    out.push(ChatMessage::system(system_prompt(cfg)));
+    out.push(ChatMessage::system(system_prompt(cfg, today)));
     // Drop any client-supplied system messages — the prompt is ours.
     for m in incoming {
         if m.role != Role::System {
@@ -278,7 +283,23 @@ fn with_system_prompt(incoming: Vec<ChatMessage>, cfg: &AgentConfig) -> Vec<Chat
     out
 }
 
-fn system_prompt(cfg: &AgentConfig) -> String {
+/// The current UTC date as a human sentence fragment, e.g. "Wednesday, 3 June
+/// 2026". Fed into the system prompt so the model resolves "today" against the
+/// real date instead of guessing — or, worse, copying a date out of a note (the
+/// seed welcome note carries a fixed date, which the model otherwise reports as
+/// today). The server stamps everything else in UTC, so we match that here.
+fn current_date_utc() -> String {
+    let now = OffsetDateTime::now_utc();
+    format!(
+        "{}, {} {} {}",
+        now.weekday(),
+        now.day(),
+        now.month(),
+        now.year()
+    )
+}
+
+fn system_prompt(cfg: &AgentConfig, today: &str) -> String {
     let web_line = match cfg.web_search {
         WebSearch::Disabled => "",
         WebSearch::Brave => "\n- You may call web_search to look things up on the public internet.",
@@ -294,6 +315,10 @@ You help the user find, understand, write, and reorganise their notes and files.
 The vault is a tree of files and folders. Paths are relative to the vault root and use '/'. \
 Notes are Markdown and their paths end in `.md`, for example `Journal/2026/welcome.md`. \
 A note's title is its first `# Heading` line.
+
+Today's date is {today} (UTC). Resolve relative references like \"today\", \"yesterday\", or \
+\"this week\" against it. Never infer the current date from the contents of a note — a note \
+may mention any date, and that is not necessarily now.
 
 Read-only tools you may use freely: list_files, read_file, search_notes.
 Tools that change the vault — write_file, move_path, delete_path, create_folder, set_tags — \
@@ -423,11 +448,55 @@ mod tests {
     fn system_prompt_mentions_web_only_when_enabled() {
         let mut cfg = test_cfg();
         cfg.web_search = WebSearch::Disabled;
-        assert!(!system_prompt(&cfg).to_lowercase().contains("internet"));
+        assert!(!system_prompt(&cfg, "Wednesday, 3 June 2026")
+            .to_lowercase()
+            .contains("internet"));
         cfg.web_search = WebSearch::OpenRouterPlugin;
-        assert!(system_prompt(&cfg).to_lowercase().contains("internet"));
+        assert!(system_prompt(&cfg, "Wednesday, 3 June 2026")
+            .to_lowercase()
+            .contains("internet"));
         cfg.web_search = WebSearch::Brave;
-        assert!(system_prompt(&cfg).contains("web_search"));
+        assert!(system_prompt(&cfg, "Wednesday, 3 June 2026").contains("web_search"));
+    }
+
+    #[test]
+    fn system_prompt_states_the_current_date_and_forbids_inferring_it() {
+        let prompt = system_prompt(&test_cfg(), "Wednesday, 3 June 2026");
+        assert!(
+            prompt.contains("Wednesday, 3 June 2026"),
+            "the prompt must tell the model today's date: {prompt}"
+        );
+        // The guard against reading a date out of a note is the actual fix for
+        // the "AI thinks today is the welcome note's date" hallucination.
+        assert!(prompt
+            .to_lowercase()
+            .contains("never infer the current date"));
+    }
+
+    #[test]
+    fn current_date_utc_is_a_weekday_then_date() {
+        // Non-deterministic value, so assert shape rather than an exact string:
+        // "<Weekday>, <day> <Month> <year>".
+        let today = current_date_utc();
+        let parts: Vec<&str> = today.splitn(2, ", ").collect();
+        assert_eq!(parts.len(), 2, "expected 'Weekday, rest': {today}");
+        let weekdays = [
+            "Monday",
+            "Tuesday",
+            "Wednesday",
+            "Thursday",
+            "Friday",
+            "Saturday",
+            "Sunday",
+        ];
+        assert!(weekdays.contains(&parts[0]), "bad weekday in {today}");
+        // The remainder ends in a 4-digit year.
+        let year = parts[1].rsplit(' ').next().unwrap();
+        assert_eq!(year.len(), 4, "expected a 4-digit year in {today}");
+        assert!(
+            year.chars().all(|c| c.is_ascii_digit()),
+            "year not numeric: {today}"
+        );
     }
 
     #[test]
@@ -443,7 +512,7 @@ mod tests {
                 name: None,
             },
         ];
-        let out = with_system_prompt(incoming, &cfg);
+        let out = with_system_prompt(incoming, &cfg, "Wednesday, 3 June 2026");
         // Exactly one system message, and it's ours (first), not the client's.
         let systems: Vec<_> = out.iter().filter(|m| m.role == Role::System).collect();
         assert_eq!(systems.len(), 1);
