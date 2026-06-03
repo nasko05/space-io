@@ -275,3 +275,15 @@ export const HardDrive = (p: IconProps) =>
     1.6,
     p,
   );
+
+export const Send = (p: IconProps) => wrap(<path d="M4 12 20 4l-6 16-3-7-7-1Z" />, 1.6, p);
+
+export const Globe = (p: IconProps) =>
+  wrap(
+    <>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M3 12h18M12 3c2.5 2.5 2.5 15 0 18M12 3c-2.5 2.5-2.5 15 0 18" />
+    </>,
+    1.6,
+    p,
+  );

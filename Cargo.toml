@@ -39,6 +39,12 @@ walkdir = "2"
 git2 = { version = "0.19", default-features = false }
 hex = "0.4"
 
+# agent (LLM chat) — talks to an OpenRouter-compatible chat API and, when a
+# key is configured, the Brave web-search API. rustls keeps us off OpenSSL,
+# and webpki-roots bundles the trusted CA set into the binary so TLS works on
+# minimal hosts (containers, scratch images) with no system cert store.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-native-roots", "rustls-tls-webpki-roots"] }
+
 # session
 dashmap = "6"
 uuid = { version = "1", features = ["v4", "serde"] }

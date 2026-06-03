@@ -3,6 +3,7 @@
 //! wires up; the binary stays the single point of truth for argv parsing
 //! and the tokio runtime.
 
+pub mod agent;
 pub mod config;
 pub mod crypto;
 pub mod error;

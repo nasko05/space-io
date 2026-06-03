@@ -53,6 +53,55 @@ persisted to `./data/.users.toml`, so everything survives restarts.
 Additional users can register from the login screen via the "Register"
 link.
 
+## AI assistant
+
+Hearth ships an optional in-app AI assistant (the spark button, bottom-right).
+It can **read, search, write, move, reorganise, and tag** your notes, and —
+when enabled — **search the web**. It runs as a server-side tool-using agent
+against an [OpenRouter](https://openrouter.ai)-compatible chat model.
+
+Two things are deliberate:
+
+- **You approve every change.** The assistant reads and searches on its own,
+  but anything that *writes, moves, deletes, or retags* a file is shown to you
+  as a proposal first. Approved changes flow through the same endpoints the UI
+  uses, so every edit is a git commit and every delete lands in the trash —
+  fully reversible.
+- **Privacy.** The vault stays encrypted at rest, but when the assistant reads
+  a note its plaintext is sent to your configured model provider (OpenRouter)
+  so it can help. If that trade-off isn't for you, simply leave the key unset —
+  the assistant stays hidden and nothing leaves the machine.
+
+Enable it by setting an API key in the server's environment, then restart:
+
+```sh
+export HEARTH_OPENROUTER_API_KEY=sk-or-...     # required to turn the agent on
+./target/release/hearth serve --space-dir ./data
+```
+
+All agent settings (server-side environment variables):
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `HEARTH_OPENROUTER_API_KEY` | _(unset → agent off)_ | OpenRouter API key. |
+| `HEARTH_AGENT_MODEL` | `qwen/qwen3.6-27b` | Any tool-calling model id on OpenRouter. |
+| `HEARTH_OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` | Point at any OpenAI-compatible endpoint. |
+| `HEARTH_BRAVE_API_KEY` | _(unset)_ | If set, web search uses Brave; otherwise OpenRouter's built-in web plugin. |
+| `HEARTH_AGENT_WEB_SEARCH` | `1` | Set to `0` to disable web search entirely. |
+| `HEARTH_AGENT_MAX_STEPS` | `8` | Max tool rounds the agent runs per message. |
+
+About web search: the Qwen model itself doesn't browse, but OpenRouter adds web
+search to *any* model via its built-in `web` plugin — so search works out of
+the box with just the OpenRouter key. Set `HEARTH_BRAVE_API_KEY` if you'd
+rather the agent call Brave directly with your own key.
+
+In Docker, pass the same variables with `-e`:
+
+```sh
+./deploy.sh --docker --detach        # then, or instead, run with:
+docker run -e HEARTH_OPENROUTER_API_KEY=sk-or-... -p 7777:7777 -v hearth-data:/data hearth
+```
+
 ## Layout
 
 ```
