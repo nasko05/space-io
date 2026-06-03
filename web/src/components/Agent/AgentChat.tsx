@@ -112,7 +112,13 @@ export function AgentChat({ open, onClose, onVaultChanged }: Props) {
       const a = action.args;
       switch (action.tool) {
         case 'write_file': {
-          const r = await api.write(str(a.path), str(a.content), a.message ? str(a.message) : undefined);
+          // Assistant edits are deliberate changes — record them as
+          // checkpoints so each remains a recoverable point in history.
+          const r = await api.checkpoint(
+            str(a.path),
+            str(a.content),
+            a.message ? str(a.message) : undefined,
+          );
           return `Wrote ${r.path}.`;
         }
         case 'move_path': {

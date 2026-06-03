@@ -532,7 +532,7 @@ async fn empty_tags_removes_the_entry() {
 // ---- History + Rollback --------------------------------------------------
 
 #[tokio::test]
-async fn history_lists_creation_and_edits_newest_first() {
+async fn drafts_do_not_create_history_but_checkpoints_do() {
     let h = Harness::fresh();
     let u = h.register("ada@example.lan", "passphrase-9");
     post_authed(
@@ -542,26 +542,74 @@ async fn history_lists_creation_and_edits_newest_first() {
         &serde_json::json!({ "folder": "N", "title": "n" }),
     )
     .await;
+
+    // Two autosave drafts — these persist but must NOT add history entries.
     put_authed(
         &h,
         &u,
         "/api/files/write",
-        &serde_json::json!({ "path": "N/n.md", "content": "v2" }),
+        &serde_json::json!({ "path": "N/n.md", "content": "draft v2" }),
     )
     .await;
     put_authed(
         &h,
         &u,
         "/api/files/write",
-        &serde_json::json!({ "path": "N/n.md", "content": "v3" }),
+        &serde_json::json!({ "path": "N/n.md", "content": "draft v3" }),
     )
     .await;
 
     let body = body_json(get_authed(&h, &u, "/api/files/history?path=N/n.md").await).await;
     let entries = body["entries"].as_array().unwrap();
-    assert!(entries.len() >= 3, "got: {entries:?}");
-    // Newest commit first.
+    assert_eq!(entries.len(), 1, "drafts should not appear in history: {entries:?}");
+
+    // The latest draft is still what reads see.
+    let read = body_json(get_authed(&h, &u, "/api/files/read?path=N/n.md").await).await;
+    assert_eq!(read["content"], "draft v3");
+
+    // An explicit checkpoint mints exactly one history entry, with its label.
+    let res = post_authed(
+        &h,
+        &u,
+        "/api/files/checkpoint",
+        &serde_json::json!({ "path": "N/n.md", "content": "draft v3", "message": "🔖 milestone" }),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let body = body_json(get_authed(&h, &u, "/api/files/history?path=N/n.md").await).await;
+    let entries = body["entries"].as_array().unwrap();
+    assert_eq!(entries.len(), 2, "got: {entries:?}");
+    // Newest commit first, carrying the user's label.
+    assert_eq!(entries[0]["message"], "🔖 milestone");
     assert_eq!(entries[0]["author"], "hearth");
+}
+
+#[tokio::test]
+async fn checkpoint_without_message_uses_a_default_label() {
+    let h = Harness::fresh();
+    let u = h.register("ada@example.lan", "passphrase-9");
+    post_authed(
+        &h,
+        &u,
+        "/api/files/create",
+        &serde_json::json!({ "folder": "N", "title": "n" }),
+    )
+    .await;
+    let res = post_authed(
+        &h,
+        &u,
+        "/api/files/checkpoint",
+        &serde_json::json!({ "path": "N/n.md", "content": "body" }),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let body = body_json(get_authed(&h, &u, "/api/files/history?path=N/n.md").await).await;
+    let entries = body["entries"].as_array().unwrap();
+    assert_eq!(entries.len(), 2);
+    // Blank/absent label falls back to the default "Edit: <path>" summary.
+    assert_eq!(entries[0]["message"], "Edit: N/n.md");
 }
 
 #[tokio::test]
@@ -584,23 +632,23 @@ async fn rollback_restores_an_earlier_version() {
         &serde_json::json!({ "folder": "N", "title": "n" }),
     )
     .await;
-    put_authed(
+    post_authed(
         &h,
         &u,
-        "/api/files/write",
-        &serde_json::json!({ "path": "N/n.md", "content": "first" }),
+        "/api/files/checkpoint",
+        &serde_json::json!({ "path": "N/n.md", "content": "first", "message": "first" }),
     )
     .await;
-    put_authed(
+    post_authed(
         &h,
         &u,
-        "/api/files/write",
-        &serde_json::json!({ "path": "N/n.md", "content": "second" }),
+        "/api/files/checkpoint",
+        &serde_json::json!({ "path": "N/n.md", "content": "second", "message": "second" }),
     )
     .await;
 
-    // Roll back to the "first" commit (history is newest-first, so it's
-    // entries[1] — entries[0] is the most recent write of "second").
+    // Roll back to the "first" checkpoint (history is newest-first, so it's
+    // entries[1] — entries[0] is the most recent "second" checkpoint).
     let history = body_json(get_authed(&h, &u, "/api/files/history?path=N/n.md").await).await;
     let entries = history["entries"].as_array().unwrap();
     let first_commit = entries[1]["commit"].as_str().unwrap().to_string();
@@ -616,6 +664,70 @@ async fn rollback_restores_an_earlier_version() {
 
     let read = body_json(get_authed(&h, &u, "/api/files/read?path=N/n.md").await).await;
     assert_eq!(read["content"], "first");
+}
+
+#[tokio::test]
+async fn rollback_preserves_an_uncheckpointed_draft() {
+    let h = Harness::fresh();
+    let u = h.register("ada@example.lan", "passphrase-9");
+
+    post_authed(
+        &h,
+        &u,
+        "/api/files/create",
+        &serde_json::json!({ "folder": "N", "title": "n" }),
+    )
+    .await;
+    post_authed(
+        &h,
+        &u,
+        "/api/files/checkpoint",
+        &serde_json::json!({ "path": "N/n.md", "content": "v1", "message": "v1" }),
+    )
+    .await;
+    // An autosave draft that the user never checkpointed.
+    put_authed(
+        &h,
+        &u,
+        "/api/files/write",
+        &serde_json::json!({ "path": "N/n.md", "content": "unsaved draft" }),
+    )
+    .await;
+
+    // History knows v1 + the creation, but not the draft.
+    let history = body_json(get_authed(&h, &u, "/api/files/history?path=N/n.md").await).await;
+    let entries = history["entries"].as_array().unwrap();
+    let v1_commit = entries[0]["commit"].as_str().unwrap().to_string();
+
+    // Roll back to v1 — the draft must be snapshotted, not silently dropped.
+    let res = post_authed(
+        &h,
+        &u,
+        "/api/files/rollback",
+        &serde_json::json!({ "path": "N/n.md", "commit": v1_commit }),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let read = body_json(get_authed(&h, &u, "/api/files/read?path=N/n.md").await).await;
+    assert_eq!(read["content"], "v1");
+
+    // The draft is recoverable from the "before restore" checkpoint.
+    let history = body_json(get_authed(&h, &u, "/api/files/history?path=N/n.md").await).await;
+    let entries = history["entries"].as_array().unwrap();
+    let before_restore = entries
+        .iter()
+        .find(|e| e["message"].as_str().unwrap_or("").contains("before restore"))
+        .expect("draft should have been checkpointed before restore");
+    let draft_commit = before_restore["commit"].as_str().unwrap().to_string();
+    post_authed(
+        &h,
+        &u,
+        "/api/files/rollback",
+        &serde_json::json!({ "path": "N/n.md", "commit": draft_commit }),
+    )
+    .await;
+    let read = body_json(get_authed(&h, &u, "/api/files/read?path=N/n.md").await).await;
+    assert_eq!(read["content"], "unsaved draft");
 }
 
 #[tokio::test]
