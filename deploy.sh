@@ -11,6 +11,11 @@
 # The frontend bundle is embedded into the Rust binary at compile time, so the
 # build order (web → cargo) is handled for you in both paths.
 #
+# Server-side variables — cookie mode and the AI-assistant keys
+# (HEARTH_OPENROUTER_API_KEY, …) — can live in a .env file next to this
+# script instead of being exported by hand. A ./.env is picked up
+# automatically (Docker: --env-file, native: sourced). See .env.example.
+#
 # Common flags:
 #   --port N         port to serve on            (default 7777)
 #   --host ADDR      listen address              (default 0.0.0.0)
@@ -19,6 +24,8 @@
 #   --detach         (docker) run in the background
 #   --name NAME      (docker) container name      (default hearth)
 #   --secure-cookies require HTTPS for cookies (set when behind a TLS proxy)
+#   --env-file PATH  load server env vars from a file (default: ./.env if any)
+#   --no-env         ignore a ./.env file even if present
 #   -h, --help       this help
 #
 # Put TLS in front (Caddy, nginx, Cloudflare Tunnel) for anything reachable
@@ -38,11 +45,15 @@ CONTAINER="${HEARTH_CONTAINER:-hearth}"
 BUILD_ONLY=0
 DETACH=0
 INSECURE_COOKIES=1   # plain HTTP by default; flip with --secure-cookies
+ENV_FILE="${HEARTH_ENV_FILE:-}"   # --env-file PATH; else auto-detect ./.env
+NO_ENV=0             # --no-env: ignore ./.env even if present
 
 die() { echo "error: $*" >&2; exit 1; }
 have() { command -v "$1" >/dev/null 2>&1; }
 
-usage() { sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; }
+# Print the leading comment block (everything from line 2 to the first blank
+# line) as help, so the flag list stays in sync with the header above.
+usage() { sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'; }
 
 # ---- arg parse ------------------------------------------------------------
 while [ $# -gt 0 ]; do
@@ -60,10 +71,28 @@ while [ $# -gt 0 ]; do
     --build-only) BUILD_ONLY=1; shift ;;
     --detach|-d) DETACH=1; shift ;;
     --secure-cookies) INSECURE_COOKIES=0; shift ;;
+    --env-file) ENV_FILE="${2:?--env-file needs a value}"; shift 2 ;;
+    --env-file=*) ENV_FILE="${1#--env-file=}"; shift ;;
+    --no-env) NO_ENV=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) die "unknown argument: $1 (try --help)" ;;
   esac
 done
+
+# ---- env file -------------------------------------------------------------
+# Resolve which env file (if any) to feed the server. Auto-pick ./.env unless
+# the caller passed one explicitly or opted out with --no-env. Docker reads it
+# verbatim via --env-file; the native path sources it. Either way: write plain
+# KEY=value lines, no surrounding quotes (Docker keeps them literally).
+if [ -z "$ENV_FILE" ] && [ "$NO_ENV" -eq 0 ] && [ -f .env ]; then
+  ENV_FILE=".env"
+fi
+ENV_FILE_ABS=""
+if [ -n "$ENV_FILE" ]; then
+  [ -f "$ENV_FILE" ] || die "env file not found: $ENV_FILE"
+  ENV_FILE_ABS="$(cd "$(dirname "$ENV_FILE")" && pwd)/$(basename "$ENV_FILE")"
+  echo ">> env file: $ENV_FILE_ABS"
+fi
 
 # ---- mode resolution ------------------------------------------------------
 if [ "$MODE" = "auto" ]; then
@@ -105,6 +134,15 @@ deploy_native() {
   mkdir -p "$DATA_DIR"
   echo ">> serving on http://$HOST:$PORT  (data: $DATA_DIR)"
   echo "   first visit shows the registration page — pick an email + passphrase there."
+  # Load the env file first so an explicit deploy flag (below) still wins.
+  if [ -n "$ENV_FILE_ABS" ]; then
+    set -a
+    # The env file path is user-supplied and dynamic, so shellcheck genuinely
+    # cannot follow the source; SC1090 here is unavoidable, not a shortcut.
+    # shellcheck disable=SC1090
+    . "$ENV_FILE_ABS"
+    set +a
+  fi
   [ "$INSECURE_COOKIES" -eq 1 ] && export HEARTH_INSECURE_COOKIES=1
   exec "$bin" serve --space-dir "$DATA_DIR" --listen "$HOST:$PORT"
 }
@@ -138,6 +176,9 @@ deploy_docker() {
     -p "$PORT:7777"
     -v "$abs_data:/data"
     --restart unless-stopped)
+  # --env-file is read at run time, so secrets never get baked into the image.
+  # A trailing -e wins over the file, keeping the deploy flag authoritative.
+  [ -n "$ENV_FILE_ABS" ] && run+=(--env-file "$ENV_FILE_ABS")
   [ "$INSECURE_COOKIES" -eq 1 ] && run+=(-e HEARTH_INSECURE_COOKIES=1)
 
   if [ "$DETACH" -eq 1 ]; then

@@ -9,6 +9,8 @@
 //! `#[path]` explicitly because rustc otherwise looks at the test binary's
 //! crate-root directory (`tests/`), and we want to keep the layout tidy.
 
+#[path = "integration/agent.rs"]
+mod agent;
 #[path = "integration/auth.rs"]
 mod auth;
 #[path = "integration/common/mod.rs"]

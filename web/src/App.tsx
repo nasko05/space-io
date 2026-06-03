@@ -8,6 +8,8 @@ import { SearchOverlay } from './components/Search/SearchOverlay';
 import { UploadModal } from './components/Upload/UploadModal';
 import { DownloadModal } from './components/Download/DownloadModal';
 import { PasskeyModal } from './components/Passkey/PasskeyModal';
+import { AgentChat } from './components/Agent/AgentChat';
+import { Sparkle } from './components/icons/Icon';
 import {
   api,
   ExcerptMap,
@@ -55,6 +57,7 @@ export function App() {
   const [uploadInitial, setUploadInitial] = useState<File[] | undefined>(undefined);
   const [downloadFile, setDownloadFile] = useState<TreeFile | null>(null);
   const [passkeyOpen, setPasskeyOpen] = useState(false);
+  const [agentOpen, setAgentOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   // Calendar selection. `null` means "show today" (the default); a number
   // pins the rail's entry list to that day-of-month in the displayed
@@ -248,6 +251,7 @@ export function App() {
     setUploadInitial(undefined);
     setDownloadFile(null);
     setPasskeyOpen(false);
+    setAgentOpen(false);
     setSelectedDay(null);
     setToast(null);
     const status = await refreshStatus();
@@ -424,6 +428,14 @@ export function App() {
 
   const openSearch = useCallback(() => setSearchOpen(true), []);
   const openPasskey = useCallback(() => setPasskeyOpen(true), []);
+
+  // After the assistant applies an approved change, pull fresh tree/excerpts/
+  // tags so the rail, calendar, and vault reflect it immediately.
+  const onAgentVaultChanged = useCallback(() => {
+    void refreshTree();
+    void refreshExcerpts();
+    void refreshMeta();
+  }, [refreshExcerpts, refreshMeta, refreshTree]);
 
   const onUploaded = useCallback(async () => {
     await refreshTree();
@@ -770,6 +782,24 @@ export function App() {
           {toast}
         </div>
       )}
+
+      {!agentOpen && (
+        <button
+          type="button"
+          className="hearthAgentFab"
+          onClick={() => setAgentOpen(true)}
+          title="Assistant"
+          aria-label="Open the assistant"
+        >
+          <Sparkle size={22} />
+        </button>
+      )}
+
+      <AgentChat
+        open={agentOpen}
+        onClose={() => setAgentOpen(false)}
+        onVaultChanged={onAgentVaultChanged}
+      />
     </div>
   );
 }
