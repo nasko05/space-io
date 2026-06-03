@@ -20,6 +20,7 @@ import {
   Image as ImageIcon,
   Link,
   Pencil,
+  Pin,
   Search,
   Sparkle,
   Split,
@@ -50,6 +51,7 @@ interface Props {
   onOpenSearch: () => void;
   onLock: () => void;
   onSave: (path: string, content: string) => Promise<void>;
+  onCheckpoint?: (path: string, content: string, message?: string) => Promise<void>;
   onRollback?: (path: string, commit: string) => Promise<void>;
   onWikilinkMiss?: (title: string) => void;
   onOpenPasskey?: () => void;
@@ -94,6 +96,7 @@ export function Reader({
   onOpenSearch,
   onLock,
   onSave,
+  onCheckpoint,
   onRollback,
   onWikilinkMiss,
   onOpenPasskey,
@@ -107,10 +110,27 @@ export function Reader({
   const [ac, setAc] = useState<AutocompleteState>(EMPTY_AC);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
+  // Checkpoint ("save a version") state. Autosave keeps the draft on disk;
+  // a checkpoint is the deliberate, labelled point the user can return to.
+  const [checkpointOpen, setCheckpointOpen] = useState(false);
+  const [checkpointLabel, setCheckpointLabel] = useState('');
+  const [checkpointing, setCheckpointing] = useState(false);
+  const [checkpointError, setCheckpointError] = useState<string | null>(null);
+  // True once the note has been edited since it was opened / last checkpointed
+  // — drives the "unsaved version" dot on the Checkpoint button.
+  const [dirtySinceCheckpoint, setDirtySinceCheckpoint] = useState(false);
+  // Bumped after a checkpoint so an open HistoryPanel reloads its list.
+  const [historyReloadToken, setHistoryReloadToken] = useState(0);
+  const checkpointWrapRef = useRef<HTMLDivElement | null>(null);
+
   useEffect(() => {
     setContent(initialContent);
     setMode(initialMode);
     setAc(EMPTY_AC);
+    setCheckpointOpen(false);
+    setCheckpointLabel('');
+    setCheckpointError(null);
+    setDirtySinceCheckpoint(false);
   }, [path, initialContent, initialMode]);
 
   const saveFn = useMemo(
@@ -120,6 +140,45 @@ export function Reader({
     [onSave, path],
   );
   const { status, markDirty, flush } = useAutosave({ onSave: saveFn });
+
+  // Wrap the autosave's `markDirty` so every edit also flags that there are
+  // changes not yet captured in a checkpoint.
+  const touch = useCallback(
+    (next: string) => {
+      markDirty(next);
+      setDirtySinceCheckpoint(true);
+    },
+    [markDirty],
+  );
+
+  const doCheckpoint = useCallback(async () => {
+    if (!onCheckpoint || checkpointing) return;
+    setCheckpointing(true);
+    setCheckpointError(null);
+    try {
+      await onCheckpoint(path, content, checkpointLabel.trim() || undefined);
+      setDirtySinceCheckpoint(false);
+      setCheckpointOpen(false);
+      setCheckpointLabel('');
+      setHistoryReloadToken((t) => t + 1);
+    } catch (err) {
+      setCheckpointError(err instanceof Error ? err.message : 'checkpoint failed');
+    } finally {
+      setCheckpointing(false);
+    }
+  }, [checkpointLabel, checkpointing, content, onCheckpoint, path]);
+
+  // Dismiss the checkpoint label popover on an outside click.
+  useEffect(() => {
+    if (!checkpointOpen) return;
+    function onPointerDown(e: PointerEvent) {
+      if (!checkpointWrapRef.current?.contains(e.target as Node)) {
+        setCheckpointOpen(false);
+      }
+    }
+    window.addEventListener('pointerdown', onPointerDown);
+    return () => window.removeEventListener('pointerdown', onPointerDown);
+  }, [checkpointOpen]);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -142,13 +201,13 @@ export function Reader({
       const { selectionStart, selectionEnd, value } = ta;
       const { text, selStart, selEnd } = transform(value, selectionStart, selectionEnd);
       setContent(text);
-      markDirty(text);
+      touch(text);
       window.requestAnimationFrame(() => {
         ta.focus();
         ta.setSelectionRange(selStart, selEnd);
       });
     },
-    [markDirty],
+    [touch],
   );
 
   const wrapSelection = useCallback(
@@ -254,7 +313,7 @@ export function Reader({
   function onContentChange(e: ChangeEvent<HTMLTextAreaElement>) {
     const next = e.target.value;
     setContent(next);
-    markDirty(next);
+    touch(next);
     recomputeAutocomplete(next, e.target.selectionStart);
   }
 
@@ -269,7 +328,7 @@ export function Reader({
     const insertText = `${title}]]`;
     const next = `${before}${insertText}${after}`;
     setContent(next);
-    markDirty(next);
+    touch(next);
     setAc(EMPTY_AC);
     // Restore caret to just after the inserted `]]`.
     const caret = before.length + insertText.length;
@@ -493,6 +552,66 @@ export function Reader({
               >
                 <Search size={12} /> <kbd className={styles.kbd}>⌘K</kbd>
               </button>
+              {onCheckpoint && (
+                <div className={styles.checkpointWrap} ref={checkpointWrapRef}>
+                  <button
+                    type="button"
+                    className={`${styles.toolBtn} ${checkpointOpen ? styles.toolBtnActive : ''}`}
+                    onClick={() => {
+                      setCheckpointError(null);
+                      setCheckpointOpen((v) => !v);
+                    }}
+                    title="Save a checkpoint you can return to"
+                  >
+                    <Pin size={12} /> Checkpoint
+                    {dirtySinceCheckpoint && (
+                      <span className={styles.checkpointDot} aria-label="unsaved changes" />
+                    )}
+                  </button>
+                  {checkpointOpen && (
+                    <div className={styles.checkpointPopover} role="dialog" aria-label="Save checkpoint">
+                      <div className={styles.checkpointHint}>Name this checkpoint — text or emoji 🔖</div>
+                      <input
+                        className={styles.checkpointInput}
+                        value={checkpointLabel}
+                        onChange={(e) => setCheckpointLabel(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            void doCheckpoint();
+                          } else if (e.key === 'Escape') {
+                            e.preventDefault();
+                            setCheckpointOpen(false);
+                          }
+                        }}
+                        placeholder="Optional label"
+                        maxLength={120}
+                        autoFocus
+                      />
+                      {checkpointError && (
+                        <div className={styles.checkpointError}>{checkpointError}</div>
+                      )}
+                      <div className={styles.checkpointActions}>
+                        <button
+                          type="button"
+                          className={styles.checkpointCancel}
+                          onClick={() => setCheckpointOpen(false)}
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          className={styles.checkpointSave}
+                          onClick={() => void doCheckpoint()}
+                          disabled={checkpointing}
+                        >
+                          {checkpointing ? 'Saving…' : 'Save checkpoint'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
               <button
                 type="button"
                 className={`${styles.toolBtn} ${historyOpen ? styles.toolBtnActive : ''}`}
@@ -607,6 +726,7 @@ export function Reader({
               <HistoryPanel
                 open={historyOpen}
                 path={path}
+                reloadToken={historyReloadToken}
                 onClose={() => setHistoryOpen(false)}
                 onRollback={onRollback}
               />

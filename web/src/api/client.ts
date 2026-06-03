@@ -189,10 +189,26 @@ export const api = {
       }),
     );
   },
-  async write(path: string, content: string, message?: string): Promise<WriteResult> {
+  /** Autosave: persist the editor's content to disk without minting a
+   *  version-history entry. Drafts flow to disk continuously so nothing is
+   *  lost; only an explicit checkpoint becomes a commit. */
+  async saveDraft(path: string, content: string): Promise<WriteResult> {
     return json(
       await fetch('/api/files/write', {
         method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ path, content }),
+      }),
+    );
+  },
+  /** Checkpoint: persist `content` and record it as a labelled point in the
+   *  version history. `message` is the user's label (text or emoji); blank or
+   *  omitted falls back to a default on the server. */
+  async checkpoint(path: string, content: string, message?: string): Promise<WriteResult> {
+    return json(
+      await fetch('/api/files/checkpoint', {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
         body: JSON.stringify({ path, content, message }),

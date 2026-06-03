@@ -352,27 +352,41 @@ export function App() {
     }
   }, [refreshExcerpts, refreshTree, view]);
 
+  // Recompute the local title/excerpt for `path` so wikilink autocomplete +
+  // the Today list reflect the latest content without a full server walk-and-
+  // decrypt on every keystroke (the prior implementation made the UI very
+  // slow as the corpus grew). Shared by autosave and checkpoint.
+  const patchExcerpt = useCallback((path: string, content: string) => {
+    const titleMatch = /^# (.+)$/m.exec(content);
+    const title = titleMatch ? titleMatch[1].trim() : null;
+    const bodyLines = content
+      .split('\n')
+      .filter((l) => !l.startsWith('#') && l.trim().length > 0)
+      .slice(0, 3)
+      .join(' ');
+    const excerpt = bodyLines
+      .replace(/[*_`]/g, '')
+      .replace(/\[\[|\]\]/g, '')
+      .slice(0, 180);
+    setExcerpts((cur) => ({ ...cur, [path]: { title, excerpt } }));
+  }, []);
+
+  // Autosave: persist the draft to disk. Does NOT create a history entry.
   const saveFile = useCallback(
     async (path: string, content: string) => {
-      await api.write(path, content);
-      // Locally patch the title/excerpt so wikilink autocomplete + the Today
-      // list reflect the latest content without a full server walk-and-
-      // decrypt on every keystroke (the prior implementation made the UI
-      // very slow as the corpus grew).
-      const titleMatch = /^# (.+)$/m.exec(content);
-      const title = titleMatch ? titleMatch[1].trim() : null;
-      const bodyLines = content
-        .split('\n')
-        .filter((l) => !l.startsWith('#') && l.trim().length > 0)
-        .slice(0, 3)
-        .join(' ');
-      const excerpt = bodyLines
-        .replace(/[*_`]/g, '')
-        .replace(/\[\[|\]\]/g, '')
-        .slice(0, 180);
-      setExcerpts((cur) => ({ ...cur, [path]: { title, excerpt } }));
+      await api.saveDraft(path, content);
+      patchExcerpt(path, content);
     },
-    [],
+    [patchExcerpt],
+  );
+
+  // Checkpoint: persist + record a labelled point in the version history.
+  const checkpointFile = useCallback(
+    async (path: string, content: string, message?: string) => {
+      await api.checkpoint(path, content, message);
+      patchExcerpt(path, content);
+    },
+    [patchExcerpt],
   );
 
   const rollbackFile = useCallback(
@@ -674,6 +688,7 @@ export function App() {
           onOpenSearch={openSearch}
           onLock={onLock}
           onSave={saveFile}
+          onCheckpoint={checkpointFile}
           onRollback={rollbackFile}
           onWikilinkMiss={onWikilinkMiss}
           onOpenPasskey={openPasskey}

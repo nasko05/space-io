@@ -6,6 +6,9 @@ import styles from './HistoryPanel.module.css';
 interface Props {
   open: boolean;
   path: string | null;
+  /** Bumped by the parent after a new checkpoint so the list reloads to show
+   *  it without the user reopening the panel. */
+  reloadToken?: number;
   onClose: () => void;
   /** Called after a successful rollback so the parent can reload the file
    *  and refresh the tree. Without this the rail / Today list would still
@@ -13,7 +16,7 @@ interface Props {
   onRollback?: (path: string, commit: string) => Promise<void>;
 }
 
-export function HistoryPanel({ open, path, onClose, onRollback }: Props) {
+export function HistoryPanel({ open, path, reloadToken, onClose, onRollback }: Props) {
   const [entries, setEntries] = useState<HistoryEntry[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -23,7 +26,7 @@ export function HistoryPanel({ open, path, onClose, onRollback }: Props) {
     if (!path || !onRollback || restoring) return;
     if (
       !window.confirm(
-        `Restore this file to ${commit.slice(0, 7)}? A new commit is added on top — nothing is lost.`,
+        `Restore this file to ${commit.slice(0, 7)}? A new checkpoint is added on top — nothing is lost.`,
       )
     ) {
       return;
@@ -65,7 +68,7 @@ export function HistoryPanel({ open, path, onClose, onRollback }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [open, path]);
+  }, [open, path, reloadToken]);
 
   if (!open) return null;
 
@@ -85,7 +88,7 @@ export function HistoryPanel({ open, path, onClose, onRollback }: Props) {
         {error && <div className={styles.error}>{error}</div>}
         {!busy && !error && entries.length === 0 && (
           <div className={styles.empty}>
-            <em>No commits yet.</em>
+            <em>No checkpoints yet.</em>
           </div>
         )}
         <ol className={styles.list}>
