@@ -42,12 +42,39 @@ pub fn router() -> Router<AppState> {
         .route("/auth/passkey", delete(passkey_delete))
 }
 
-fn session_cookie(state: &AppState, value: impl Into<String>) -> Cookie<'static> {
+/// Was this request delivered over HTTPS? We can't see the socket's TLS state
+/// from inside a handler (we run behind a reverse proxy that terminates TLS),
+/// so we trust the proxy's `X-Forwarded-Proto` header. True iff it equals
+/// `https` (case-insensitive).
+fn request_is_https(headers: &HeaderMap) -> bool {
+    headers
+        .get("x-forwarded-proto")
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|proto| proto.eq_ignore_ascii_case("https"))
+}
+
+/// Build the session cookie. It is a *session cookie* (no `Max-Age`/`Expires`),
+/// so it survives reloads and tab navigation but is cleared when the browser
+/// fully closes — the user's requested "stay logged in across a refresh, not
+/// forever" behaviour. The server-side store still enforces the real lifetime
+/// (`SESSION_IDLE_TTL` / `SESSION_ABSOLUTE_TTL`).
+///
+/// `Secure` is decided *per request*: a `Secure` cookie is silently dropped by
+/// the browser over plain HTTP, which is exactly what was logging users out on
+/// refresh. So we only set `Secure` when both the operator opted in
+/// (`cookie_secure`, the default — disabled by `HEARTH_INSECURE_COOKIES=1`) AND
+/// the request actually arrived over HTTPS (per `X-Forwarded-Proto`). Behind a
+/// TLS proxy → `Secure`; plain-HTTP dev → not `Secure`, so the cookie sticks.
+fn session_cookie(
+    state: &AppState,
+    headers: &HeaderMap,
+    value: impl Into<String>,
+) -> Cookie<'static> {
     let mut cookie = Cookie::new(SESSION_COOKIE, value.into());
     cookie.set_http_only(true);
     cookie.set_same_site(SameSite::Strict);
     cookie.set_path("/");
-    cookie.set_secure(state.config.cookie_secure);
+    cookie.set_secure(state.config.cookie_secure && request_is_https(headers));
     cookie
 }
 
@@ -160,6 +187,7 @@ struct InitResponse {
 async fn init(
     State(state): State<AppState>,
     ConnectInfo(remote): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
     jar: CookieJar,
     Json(req): Json<InitRequest>,
 ) -> AppResult<impl IntoResponse> {
@@ -238,13 +266,13 @@ async fn init(
     let id = state
         .sessions
         .create(age::secrecy::SecretString::from(passphrase), entry.uuid);
-    let jar = jar.add(session_cookie(&state, id.to_string()));
-    let headers = headers_from_jar(&jar);
+    let jar = jar.add(session_cookie(&state, &headers, id.to_string()));
+    let resp_headers = headers_from_jar(&jar);
 
     let body = Json(InitResponse {
         user_uuid: entry.uuid.to_string(),
     });
-    Ok((StatusCode::CREATED, headers, body))
+    Ok((StatusCode::CREATED, resp_headers, body))
 }
 
 #[derive(Deserialize)]
@@ -256,6 +284,7 @@ struct UnlockRequest {
 async fn unlock(
     State(state): State<AppState>,
     ConnectInfo(remote): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
     jar: CookieJar,
     Json(req): Json<UnlockRequest>,
 ) -> AppResult<impl IntoResponse> {
@@ -318,21 +347,29 @@ async fn unlock(
     let id = state
         .sessions
         .create(age::secrecy::SecretString::from(req.passphrase), entry.uuid);
-    let jar = jar.add(session_cookie(&state, id.to_string()));
-    let headers = headers_from_jar(&jar);
-    Ok((StatusCode::NO_CONTENT, headers))
+    let jar = jar.add(session_cookie(&state, &headers, id.to_string()));
+    let resp_headers = headers_from_jar(&jar);
+    Ok((StatusCode::NO_CONTENT, resp_headers))
 }
 
-async fn lock(State(state): State<AppState>, jar: CookieJar) -> impl IntoResponse {
+async fn lock(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    jar: CookieJar,
+) -> impl IntoResponse {
     if let Some(c) = jar.get(SESSION_COOKIE) {
         if let Ok(id) = Uuid::parse_str(c.value()) {
             state.sessions.drop(&id);
         }
     }
-    let cookie = session_cookie(&state, "");
+    // `jar.remove` matches on name/path/domain to emit the removal cookie; the
+    // Secure attribute on the template doesn't affect that, but we build it
+    // through the same helper so the cleared cookie stays consistent with the
+    // one we set.
+    let cookie = session_cookie(&state, &headers, "");
     let jar = jar.remove(cookie);
-    let headers = headers_from_jar(&jar);
-    (StatusCode::NO_CONTENT, headers)
+    let resp_headers = headers_from_jar(&jar);
+    (StatusCode::NO_CONTENT, resp_headers)
 }
 
 #[derive(Serialize)]

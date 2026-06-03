@@ -19,7 +19,12 @@
 # Common flags:
 #   --port N         port to serve on            (default 7777)
 #   --host ADDR      listen address              (default 0.0.0.0)
-#   --data DIR       data directory for the vault (default ./data)
+#   --data TARGET    where the vault lives        (default named volume hearth-data)
+#                      A plain name (e.g. hearth-data) is a cwd-independent Docker
+#                      named volume that survives container recreation + rebuilds.
+#                      A path (starts with / ./ ../ ~ or contains /) is a host
+#                      bind mount; an absolute path is recommended. (Native mode
+#                      always treats --data as a host directory.)
 #   --build-only     build, don't run
 #   --detach         (docker) run in the background
 #   --name NAME      (docker) container name      (default hearth)
@@ -27,6 +32,10 @@
 #   --env-file PATH  load server env vars from a file (default: ./.env if any)
 #   --no-env         ignore a ./.env file even if present
 #   -h, --help       this help
+#
+# Your data is never overwritten or deleted by this script. Redeploys stop and
+# remove the old container only; the named volume / host data dir is reused, and
+# the app's init_space only creates what's missing (it never clobbers data).
 #
 # Put TLS in front (Caddy, nginx, Cloudflare Tunnel) for anything reachable
 # off-localhost — Hearth speaks plain HTTP and is single-tenant by design.
@@ -39,7 +48,7 @@ cd "$(dirname "$0")"
 MODE="auto"          # auto | native | docker
 PORT="${HEARTH_PORT:-7777}"
 HOST="${HEARTH_HOST:-0.0.0.0}"
-DATA_DIR="${HEARTH_DATA:-./data}"
+DATA_DIR="${HEARTH_DATA:-hearth-data}"   # docker: named volume by default; native: a dir
 IMAGE="${HEARTH_IMAGE:-hearth}"
 CONTAINER="${HEARTH_CONTAINER:-hearth}"
 BUILD_ONLY=0
@@ -131,8 +140,15 @@ deploy_native() {
     return 0
   fi
 
+  # Native mode always treats --data as a host directory. mkdir -p only creates
+  # what's missing — it never wipes or overwrites an existing data dir. (The
+  # leading `cd "$(dirname "$0")"` makes a relative default repo-relative, not
+  # dependent on the directory the script was invoked from.)
   mkdir -p "$DATA_DIR"
-  echo ">> serving on http://$HOST:$PORT  (data: $DATA_DIR)"
+  local abs_data
+  abs_data="$(cd "$DATA_DIR" && pwd)"
+  echo ">> serving on http://$HOST:$PORT  (data: $abs_data)"
+  echo "   Data persists in host dir $abs_data; restarts reuse it (never overwritten)."
   echo "   first visit shows the registration page — pick an email + passphrase there."
   # Load the env file first so an explicit deploy flag (below) still wins.
   if [ -n "$ENV_FILE_ABS" ]; then
@@ -161,20 +177,43 @@ deploy_docker() {
     return 0
   fi
 
-  # Absolute path for the bind mount; Docker won't accept a relative one.
-  mkdir -p "$DATA_DIR"
-  local abs_data
-  abs_data="$(cd "$DATA_DIR" && pwd)"
+  # Decide whether --data is a host bind mount or a named Docker volume.
+  #   A filesystem path (starts with / ./ ../ ~ or contains a /) → bind mount.
+  #   A plain identifier (e.g. hearth-data)                       → named volume.
+  # A named volume is cwd-independent and survives 'docker rm' and image
+  # rebuilds, so it's the safe default for CI/CD redeploys.
+  local mount_src data_desc
+  if [ "${DATA_DIR#/}" != "$DATA_DIR" ] \
+     || [ "${DATA_DIR#./}" != "$DATA_DIR" ] \
+     || [ "${DATA_DIR#../}" != "$DATA_DIR" ] \
+     || [ "${DATA_DIR#\~}" != "$DATA_DIR" ] \
+     || [ "${DATA_DIR#*/}" != "$DATA_DIR" ]; then
+    # Host bind mount. Expand a leading ~ then make the path absolute, since
+    # Docker won't accept a relative bind source.
+    case "$DATA_DIR" in
+      "~")   DATA_DIR="$HOME" ;;
+      "~/"*) DATA_DIR="$HOME/${DATA_DIR#"~/"}" ;;
+    esac
+    mkdir -p "$DATA_DIR"                    # only creates if missing; never wipes
+    mount_src="$(cd "$DATA_DIR" && pwd)"
+    data_desc="host dir $mount_src"
+  else
+    # Named Docker volume. 'docker run' auto-creates it on first use; it is
+    # never removed by this script.
+    mount_src="$DATA_DIR"
+    data_desc="named volume '$DATA_DIR'"
+  fi
 
   # Replace any prior container with the same name so re-runs are idempotent.
+  # This removes the container only — the volume / host data dir is left intact.
   if docker ps -aq -f "name=^${CONTAINER}$" | grep -q .; then
-    echo ">> removing existing container: $CONTAINER"
+    echo ">> removing existing container: $CONTAINER (data is kept)"
     docker rm -f "$CONTAINER" >/dev/null
   fi
 
   local run=(docker run --name "$CONTAINER"
     -p "$PORT:7777"
-    -v "$abs_data:/data"
+    -v "$mount_src:/data"
     --restart unless-stopped)
   # --env-file is read at run time, so secrets never get baked into the image.
   # A trailing -e wins over the file, keeping the deploy flag authoritative.
@@ -185,11 +224,13 @@ deploy_docker() {
     run+=(-d)
     "${run[@]}" "$IMAGE"
     echo ">> running in background as '$CONTAINER' → http://$HOST:$PORT"
+    echo "   Data persists in $data_desc; redeploys reuse it."
     echo "   logs:  docker logs -f $CONTAINER"
-    echo "   stop:  docker rm -f $CONTAINER"
+    echo "   stop:  docker rm -f $CONTAINER   (keeps your data)"
   else
     run+=(-it --rm)
-    echo ">> serving on http://$HOST:$PORT  (data: $abs_data)  — Ctrl-C to stop"
+    echo ">> serving on http://$HOST:$PORT  (data: $data_desc)  — Ctrl-C to stop"
+    echo "   Data persists in $data_desc; redeploys reuse it."
     exec "${run[@]}" "$IMAGE"
   fi
 }

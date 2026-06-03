@@ -1,5 +1,5 @@
 use axum::body::{Body, Bytes};
-use axum::extract::{Multipart, Query, State};
+use axum::extract::{DefaultBodyLimit, Multipart, Query, State};
 use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post, put};
@@ -25,7 +25,15 @@ pub fn router() -> Router<AppState> {
         .route("/files/checkpoint", post(post_checkpoint))
         .route("/files/create", post(post_create))
         .route("/files/excerpts", get(get_excerpts))
-        .route("/files/upload", post(post_upload))
+        .route(
+            "/files/upload",
+            // axum applies a 2 MB default body limit to every route; without
+            // lifting it here the multipart parser rejects any upload whose
+            // *whole request body* tops 2 MB with "Error parsing
+            // multipart/form-data request" before our own per-file (50 MB) and
+            // per-request (250 MB) caps ever run. Raise it for this one route.
+            post(post_upload).layer(DefaultBodyLimit::max(MAX_UPLOAD_REQUEST_BYTES)),
+        )
         .route("/files/download", get(get_download))
         .route("/files/history", get(get_history))
         .route("/files/rollback", post(post_rollback))
@@ -230,6 +238,13 @@ const MAX_TOTAL_UPLOAD_BYTES: usize = 250 * 1024 * 1024;
 /// crypto + git work attached, and we don't want a single request to
 /// monopolise the blocking pool.
 const MAX_UPLOADS_PER_REQUEST: usize = 64;
+/// Body-limit ceiling for the `/files/upload` route. Sits above the
+/// per-request byte cap (`MAX_TOTAL_UPLOAD_BYTES`, 250 MB) so the handler's
+/// own check — which yields a clean `400` with a descriptive message — is what
+/// rejects oversized batches, rather than the body-limit layer truncating the
+/// stream into an opaque multipart parse error. The headroom also covers
+/// multipart framing overhead (boundaries, headers) on a maxed-out request.
+const MAX_UPLOAD_REQUEST_BYTES: usize = 256 * 1024 * 1024;
 
 async fn post_upload(
     State(state): State<AppState>,

@@ -12,8 +12,22 @@ six screens, search, upload/download, version history, and WebAuthn.
 
 ## Deploy (anywhere)
 
-One script builds everything and serves it — on your laptop, a $5 VPS, a
-Raspberry Pi, or inside Docker. No cloud account required.
+### Recommended: Docker Compose (CI/CD)
+
+The simplest durable deploy is [`docker-compose.yml`](./docker-compose.yml):
+
+```sh
+docker compose up -d --build
+```
+
+This rebuilds the image from the current source and recreates the container,
+while the named volume `hearth-data` keeps every user's notes, documents, and
+uploads. Re-run the same command to ship new code — your data is reused.
+
+### One script: `deploy.sh`
+
+There's also one script that builds everything and serves it — on your laptop,
+a $5 VPS, a Raspberry Pi, or inside Docker. No cloud account required.
 
 ```sh
 ./deploy.sh
@@ -24,15 +38,34 @@ and runs a container; otherwise it builds natively (needs Rust + Node). Force
 a path with `--docker` or `--native`. Useful flags:
 
 ```sh
-./deploy.sh --port 8080 --data /srv/hearth     # custom port + data dir
-./deploy.sh --docker --detach                  # background container
-./deploy.sh --build-only                       # build, don't run
-./deploy.sh --help                             # all options
+./deploy.sh --data /srv/hearth     # persist to a host directory (bind mount)
+./deploy.sh --port 8080            # custom port
+./deploy.sh --docker --detach      # background container
+./deploy.sh --build-only           # build, don't run
+./deploy.sh --help                 # all options
 ```
 
 For anything reachable off-localhost, front it with TLS (Caddy, nginx, or a
 Cloudflare Tunnel) and pass `--secure-cookies` — Hearth itself speaks plain
 HTTP and is single-tenant by design.
+
+### Data persistence
+
+User data is **never lost on redeploy**:
+
+- **It lives in a persistent volume.** By default that's the Docker named volume
+  `hearth-data` (used by both `docker compose` and `./deploy.sh`). Pass
+  `./deploy.sh --data /abs/path` to use a host directory (bind mount) instead.
+  Either way it's mounted at `/data` inside the container.
+- **It survives image rebuilds and container recreation.** Redeploying
+  (`docker compose up -d --build`, or re-running `./deploy.sh`) stops and removes
+  the old container only — it never removes the volume or the host data dir.
+- **The app never overwrites existing data on startup.** Space initialization is
+  idempotent: it only creates what's missing, so restarts and upgrades keep all
+  existing notes, documents, and uploads.
+- A named volume is **cwd-independent**, so running the deploy from any directory
+  reuses the same data — unlike a relative `./data` bind mount, which would
+  silently create a fresh empty dir if you deployed from elsewhere.
 
 ## Build manually
 

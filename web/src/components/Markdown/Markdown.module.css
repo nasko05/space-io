@@ -105,3 +105,83 @@
   letter-spacing: 1em;
   font-size: 10px;
 }
+
+/* ----- GFM additions (marked) ----- */
+
+.body a {
+  color: var(--accent);
+  text-decoration: none;
+  border-bottom: 1px solid var(--accent-soft);
+  transition: border-color 0.12s;
+}
+
+.body a:hover {
+  border-bottom-color: var(--accent);
+}
+
+.body del {
+  color: var(--mute);
+  text-decoration-color: var(--accent);
+}
+
+/* Fenced / indented code blocks. Inline `code` already styled above; reset its
+   chip background when it sits inside a <pre> so we don't double-box it. */
+.body pre {
+  margin: 0 0 18px;
+  padding: 14px 16px;
+  background: var(--warm);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  overflow-x: auto;
+  line-height: 1.5;
+}
+
+.body pre code {
+  background: none;
+  padding: 0;
+  font-size: 13.5px;
+  color: var(--ink-2);
+}
+
+/* GFM tables */
+.body table {
+  width: 100%;
+  margin: 0 0 20px;
+  border-collapse: collapse;
+  font-family: var(--font-sans);
+  font-size: 14.5px;
+}
+
+.body th,
+.body td {
+  padding: 8px 12px;
+  border: 1px solid var(--rule);
+  text-align: left;
+  vertical-align: top;
+}
+
+.body thead th {
+  background: var(--warm);
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.body tbody tr:nth-child(even) {
+  background: var(--margin);
+}
+
+/* GFM task lists: marked emits <ul> > <li> > <input type=checkbox disabled>.
+   Drop the bullet and align the box with the text baseline. */
+.body li:has(> input[type='checkbox']) {
+  list-style: none;
+  margin-left: -22px;
+}
+
+.body input[type='checkbox'] {
+  margin-right: 8px;
+  accent-color: var(--accent);
+  width: 14px;
+  height: 14px;
+  vertical-align: -1px;
+  cursor: default;
+}

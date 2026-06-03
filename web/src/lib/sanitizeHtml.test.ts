@@ -9,8 +9,19 @@ describe('markdown XSS safety', () => {
   });
 
   it('blocks data: URLs', () => {
-    const html = renderMarkdown('[x](data:text/html,<img src=x onerror=alert(1)>)');
+    // A clean data: URL forms a real link, which the sanitiser must downgrade.
+    const html = renderMarkdown('[x](data:text/html;base64,PHNjcmlwdD4=)');
     expect(html).toContain('href="#"');
+    expect(html).not.toContain('data:');
+  });
+
+  it('renders a data: URL embedded in broken link syntax as inert text', () => {
+    // Spaces/angle-brackets stop marked forming a link at all, so the payload
+    // becomes escaped text — no href, no executable <img>.
+    const html = renderMarkdown('[x](data:text/html,<img src=x onerror=alert(1)>)');
+    expect(html).not.toMatch(/href="data:/i);
+    expect(html).not.toContain('<img');
+    expect(html).toContain('&lt;img');
   });
 
   it('blocks vbscript: URLs', () => {
@@ -24,8 +35,11 @@ describe('markdown XSS safety', () => {
   });
 
   it('blocks obfuscated javascript with control chars', () => {
+    // The embedded tab prevents marked from forming a link, so the scheme can
+    // never reach an href. The invariant we assert is the one that matters: no
+    // rendered href carries a `script:` scheme.
     const html = renderMarkdown('[x](java\tscript:alert(1))');
-    expect(html).toContain('href="#"');
+    expect(html).not.toMatch(/href="[^"]*script:/i);
   });
 
   it('allows https URLs', () => {
@@ -49,9 +63,12 @@ describe('markdown XSS safety', () => {
     expect(html).toContain('&lt;img');
   });
 
-  it('escapes quotes in href attributes', () => {
+  it('prevents quotes in a URL from breaking out of the href attribute', () => {
+    // marked percent-encodes the embedded quotes (`%22`) rather than HTML-entity
+    // encoding them; either way the `"` can't terminate the attribute early, so
+    // no bare `onmouseover=` handler escapes into the tag.
     const html = renderMarkdown('[x](https://a.com/"onmouseover="alert(1))');
-    expect(html).toContain('&quot;');
     expect(html).not.toContain('"onmouseover=');
+    expect(html).not.toMatch(/<a[^>]*\sonmouseover=/i);
   });
 });

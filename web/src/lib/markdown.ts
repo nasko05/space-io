@@ -1,132 +1,69 @@
-// Tiny markdown renderer — ported from diary-data.js:119-171.
-// Only what we need for the Hearth prototype; replace with a real parser later.
+// Markdown rendering for the Reader/preview. Backed by `marked` for full
+// GitHub-Flavoured Markdown (tables, task lists, strikethrough, fenced code,
+// autolinks) with two Hearth-specific adaptations layered on top:
+//
+//   1. `[[wikilink]]` support — a custom inline extension emits the exact
+//      `<a class="wikilink" href="#">Title</a>` markup that Markdown.tsx's
+//      click handler keys off of (it matches `.wikilink` and reads
+//      `textContent`), so navigation keeps working unchanged.
+//   2. Defence in depth — raw HTML in the source is escaped to entities (so a
+//      pasted `<script>` renders as text, never executes), and the final
+//      string is run through `sanitizeHtml`, which strips dangerous elements
+//      and downgrades unsafe URL schemes (`javascript:`, `data:`, …) to `#`.
+//
+// `extractTitle` / `stripFirstH1` stay regex-based over the *raw* source — the
+// Reader uses them to pull the headline before rendering the body, and they
+// must not depend on the HTML pipeline.
+
+import { Marked, type Tokens, type TokenizerAndRendererExtension } from 'marked';
+import { sanitizeHtml } from './sanitizeHtml';
 
 function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-// Block any URL scheme that can execute script (`javascript:`, `data:`,
-// `vbscript:`, `file:`). For anything else: http(s), mailto, anchors,
-// relative/absolute paths, we let it through after attribute-escaping the
-// embedded quotes so the closing `"` of href= can't be smuggled.
-function escapeAttr(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+interface WikilinkToken extends Tokens.Generic {
+  type: 'wikilink';
+  text: string;
 }
 
-function safeHref(raw: string): string {
-  const trimmed = raw.trim();
-  if (trimmed === '') return '#';
-  // Reject any control character — a tab/newline inside `java\tscript:` is
-  // tolerated by some browsers as the literal scheme.
-  if (/[\x00-\x1f\x7f]/.test(trimmed)) return '#';
-  // Schemes we always block.
-  if (/^\s*(javascript|data|vbscript|file)\s*:/i.test(trimmed)) return '#';
-  // Allow-list: explicit safe schemes, anchors, or relative URLs (which
-  // never have a colon before the first slash/?/# — those are the only
-  // separators that can terminate a relative path component).
-  if (/^(https?:|mailto:|#|\/)/i.test(trimmed)) return escapeAttr(trimmed);
-  if (/^[^:]*([/?#]|$)/.test(trimmed)) return escapeAttr(trimmed);
-  return '#';
-}
+// `[[Some Note]]` → an inert anchor the Markdown component upgrades into a
+// navigation action. Inline level, tried before the stock link tokenizer so a
+// bare `[[…]]` never decays into a reflink.
+const wikilink: TokenizerAndRendererExtension = {
+  name: 'wikilink',
+  level: 'inline',
+  start(src: string) {
+    const i = src.indexOf('[[');
+    return i < 0 ? undefined : i;
+  },
+  tokenizer(src: string) {
+    const m = /^\[\[([^\]\n]+)\]\]/.exec(src);
+    if (!m) return undefined;
+    return { type: 'wikilink', raw: m[0], text: m[1].trim() } satisfies WikilinkToken;
+  },
+  renderer(token) {
+    return `<a class="wikilink" href="#">${escapeHtml((token as WikilinkToken).text)}</a>`;
+  },
+};
 
-function inline(s: string): string {
-  return escapeHtml(s)
-    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-    .replace(/\*([^*]+)\*/g, '<em>$1</em>')
-    .replace(/`([^`]+)`/g, '<code>$1</code>')
-    .replace(/\[\[([^\]]+)\]\]/g, '<a class="wikilink" href="#">$1</a>')
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, label: string, url: string) => {
-      return `<a href="${safeHref(url)}">${label}</a>`;
-    });
-}
+const md = new Marked({ gfm: true, breaks: true });
+md.use({
+  extensions: [wikilink],
+  renderer: {
+    // Escape raw inline/block HTML instead of passing it through. The only
+    // trusted HTML in the document is what `marked` itself emits from markdown;
+    // anything the author literally typed as a tag is shown verbatim as text.
+    html(token: Tokens.HTML | Tokens.Tag) {
+      return escapeHtml(token.text);
+    },
+  },
+});
 
 export function renderMarkdown(src: string): string {
   if (!src) return '';
-  const lines = src.split('\n');
-  const out: string[] = [];
-  let listKind: 'ul' | 'ol' | null = null;
-  let inQuote = false;
-
-  const close = () => {
-    if (listKind) {
-      out.push(`</${listKind}>`);
-      listKind = null;
-    }
-    if (inQuote) {
-      out.push('</blockquote>');
-      inQuote = false;
-    }
-  };
-
-  for (const raw of lines) {
-    const line = raw.replace(/\s+$/, '');
-    if (/^---\s*$/.test(line)) {
-      close();
-      out.push('<hr/>');
-      continue;
-    }
-    if (/^# /.test(line)) {
-      close();
-      out.push(`<h1>${inline(line.slice(2))}</h1>`);
-      continue;
-    }
-    if (/^## /.test(line)) {
-      close();
-      out.push(`<h2>${inline(line.slice(3))}</h2>`);
-      continue;
-    }
-    if (/^### /.test(line)) {
-      close();
-      out.push(`<h3>${inline(line.slice(4))}</h3>`);
-      continue;
-    }
-    if (/^> /.test(line)) {
-      if (listKind) {
-        out.push(`</${listKind}>`);
-        listKind = null;
-      }
-      if (!inQuote) {
-        out.push('<blockquote>');
-        inQuote = true;
-      }
-      out.push(`<p>${inline(line.slice(2))}</p>`);
-      continue;
-    }
-    if (/^- /.test(line)) {
-      if (inQuote) {
-        out.push('</blockquote>');
-        inQuote = false;
-      }
-      if (listKind !== 'ul') {
-        if (listKind) out.push(`</${listKind}>`);
-        out.push('<ul>');
-        listKind = 'ul';
-      }
-      out.push(`<li>${inline(line.slice(2))}</li>`);
-      continue;
-    }
-    if (/^\d+\. /.test(line)) {
-      if (inQuote) {
-        out.push('</blockquote>');
-        inQuote = false;
-      }
-      if (listKind !== 'ol') {
-        if (listKind) out.push(`</${listKind}>`);
-        out.push('<ol>');
-        listKind = 'ol';
-      }
-      out.push(`<li>${inline(line.replace(/^\d+\. /, ''))}</li>`);
-      continue;
-    }
-    if (line === '') {
-      close();
-      continue;
-    }
-    close();
-    out.push(`<p>${inline(line)}</p>`);
-  }
-  close();
-  return out.join('');
+  const html = md.parse(src, { async: false });
+  return sanitizeHtml(html).trim();
 }
 
 /** Pull the first `# Heading` from a markdown source. */

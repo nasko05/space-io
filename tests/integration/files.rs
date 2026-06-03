@@ -807,6 +807,57 @@ async fn upload_stores_an_encrypted_blob_and_download_round_trips() {
 }
 
 #[tokio::test]
+async fn upload_accepts_a_file_larger_than_the_default_body_limit() {
+    // Regression: axum's 2 MB default body limit applied to every route, so a
+    // photo over ~2 MB made the multipart parser fail with "Error parsing
+    // multipart/form-data request" before the handler's own size checks ran.
+    // The /files/upload route now raises the limit; a ~3 MB file must succeed.
+    let h = Harness::fresh();
+    let u = h.register("ada@example.lan", "passphrase-9");
+
+    let payload = vec![0xABu8; 3 * 1024 * 1024]; // 3 MiB, well over the old 2 MB cap
+    let (boundary, body) = build_multipart(&[
+        MultipartPart::Text {
+            name: "folder",
+            value: "Photos",
+        },
+        MultipartPart::File {
+            name: "file",
+            filename: "big.bin",
+            content_type: "application/octet-stream",
+            bytes: &payload,
+        },
+    ]);
+    let req = with_cookie(
+        Request::builder()
+            .method(Method::POST)
+            .uri("/api/files/upload")
+            .header(
+                header::CONTENT_TYPE,
+                format!("multipart/form-data; boundary={boundary}"),
+            )
+            .body(Body::from(body))
+            .unwrap(),
+        &u,
+    );
+    let res = h.send(req).await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let json = body_json(res).await;
+    assert_eq!(json["files"][0]["size"], payload.len());
+
+    // And it round-trips back through download byte-for-byte.
+    let download = get_authed(
+        &h,
+        &u,
+        &format!("/api/files/download?path={}", urlencode("Photos/big.bin")),
+    )
+    .await;
+    assert_eq!(download.status(), StatusCode::OK);
+    let bytes = body_bytes(download).await;
+    assert_eq!(bytes, payload);
+}
+
+#[tokio::test]
 async fn upload_rejects_empty_multipart_body() {
     let h = Harness::fresh();
     let u = h.register("ada@example.lan", "passphrase-9");
