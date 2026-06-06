@@ -19,6 +19,13 @@
   --overlay: rgba(246, 241, 231, 0.85);
   --overlay-inner: rgba(255, 255, 255, 0.4);
 
+  /* Top-edge sheen for raised panels (the left rail, the history panel): a soft
+     white highlight that fades down the panel. The dark theme drops it to a
+     whisper — at full strength a 40%-white wash lifts the near-black page to a
+     flat grey and crushes the muted text sitting on it (e.g. the calendar day
+     numbers, tuned for ~6:1 against --paper, not against grey). */
+  --panel-sheen: rgba(255, 255, 255, 0.4);
+
   /* Higher-contrast surface used by inputs / cards / modals. In dark mode
      this becomes a near-paper-warm shade so a "white box" doesn't punch
      a hole through the page. */
@@ -54,6 +61,7 @@
 
   --overlay: rgba(20, 16, 12, 0.82);
   --overlay-inner: rgba(255, 255, 255, 0.05);
+  --panel-sheen: rgba(255, 255, 255, 0.05);
 
   --surface: #26201a;
   --shadow-strong: rgba(0, 0, 0, 0.6);
