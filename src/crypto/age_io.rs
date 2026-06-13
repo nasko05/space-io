@@ -31,12 +31,9 @@ pub fn decrypt_bytes(ciphertext: &[u8], passphrase: &SecretString) -> AppResult<
         Err(e) => return Err(AppError::Internal(format!("age decryptor: {e}"))),
     };
 
-    // `None` caps the accepted work factor at ~16 seconds of CPU. age's
-    // encryption side auto-tunes to ~1 second on the writer's hardware, so
-    // a note written on a fast box may legitimately need 30s+ to decrypt on
-    // a slow one. Allow up to log_n=22 (~2 minutes on a modern CPU) — this
-    // still rejects pathologically high work factors that would constitute
-    // a DoS, but it accepts every file we produce ourselves.
+    // Cap the accepted work factor at log_n=22: high enough to decrypt anything
+    // we wrote (age auto-tunes the writer's factor to its own hardware), low
+    // enough to reject a pathologically expensive file as a DoS.
     let mut reader = decryptor
         .decrypt(passphrase, Some(22))
         .map_err(|e| AppError::Internal(format!("age decrypt: {e}")))?;
@@ -60,7 +57,6 @@ mod tests {
         let pass = secret("correct horse battery staple");
         let plaintext = b"# Hello\n\nThe *quick* brown fox jumps over the lazy dog.";
         let ct = encrypt_bytes(plaintext, &pass).unwrap();
-        // Sanity: ciphertext differs from plaintext and carries the age header.
         assert_ne!(ct.as_slice(), &plaintext[..]);
         assert!(ct.starts_with(b"age-encryption.org/v1\n"));
         let pt = decrypt_bytes(&ct, &pass).unwrap();
@@ -73,8 +69,6 @@ mod tests {
         let wrong = secret("wrong one");
         let ct = encrypt_bytes(b"secret note", &right).unwrap();
         let err = decrypt_bytes(&ct, &wrong).unwrap_err();
-        // We don't pin the variant message, just that it errors rather than
-        // silently returning garbage.
         assert!(matches!(err, AppError::Internal(_)));
     }
 
@@ -90,7 +84,7 @@ mod tests {
     fn truncated_ciphertext_is_rejected() {
         let pass = secret("p");
         let ct = encrypt_bytes(b"hello", &pass).unwrap();
-        // Lop off the last few bytes; the AEAD tag should fail.
+        // Drop the trailing bytes so the AEAD tag fails.
         let truncated = &ct[..ct.len().saturating_sub(8)];
         assert!(decrypt_bytes(truncated, &pass).is_err());
     }

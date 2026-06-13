@@ -1,13 +1,10 @@
-//! Multi-tenant user registry. Plain-TOML mapping of `email -> uuid` at the
-//! space-root (`<root>/.users.toml`). Each user owns a sibling directory
-//! named after their UUID — `<root>/<uuid>/` — holding their `.space.toml`,
-//! `space/` git repo, etc.
+//! Multi-tenant user registry: a plain-TOML `email -> uuid` mapping at
+//! `<root>/.users.toml`. Each user owns a sibling `<root>/<uuid>/` directory
+//! holding their `.space.toml` and `space/` git repo.
 //!
-//! No database. The file is read on every relevant request and rewritten on
-//! mutation. Mutations are serialised by the caller (we hold an `RwLock` in
-//! `AppState`) and persisted via `fs_atomic::write_atomic` (write a temp file,
-//! fsync, then atomically rename it over the target), so a crash mid-write
-//! can't tear the registry. Good enough for a self-hosted personal app.
+//! No database — the file is read per request and rewritten on mutation.
+//! Mutations are serialised by the caller's `RwLock` and persisted atomically
+//! via `fs_atomic::write_atomic`, so a crash mid-write can't tear the registry.
 
 use std::path::{Path, PathBuf};
 
@@ -73,9 +70,8 @@ impl UsersRegistry {
         };
         let text = toml::to_string_pretty(&on_disk)
             .map_err(|e| AppError::Internal(format!("serialise {REGISTRY_FILENAME}: {e}")))?;
-        // Atomic write (temp + fsync + rename): a torn `.users.toml` drops the
-        // email→UUID map and makes every space unreachable. `write_atomic`
-        // also creates the parent directory if it doesn't exist yet.
+        // Atomic: a torn `.users.toml` would lose the email→UUID map and make
+        // every space unreachable.
         crate::fs_atomic::write_atomic(&path, text.as_bytes())?;
         Ok(())
     }
@@ -86,21 +82,17 @@ impl UsersRegistry {
 
     pub fn find_by_email(&self, email: &str) -> Option<&UserEntry> {
         let needle = email.trim().to_ascii_lowercase();
-        self.users.iter().find(|u| u.email == needle)
+        self.users.iter().find(|user| user.email == needle)
     }
 
-    /// Drop the entry whose `uuid` matches. Used by registration rollback
-    /// when `init_space` errors out and leaves the registry pointing at a
-    /// directory that never materialised.
+    /// Drop the entry whose `uuid` matches; used by registration rollback when
+    /// `init_space` fails after the entry was added.
     pub fn remove_by_uuid(&mut self, uuid: &Uuid) {
-        self.users.retain(|u| u.uuid != *uuid);
+        self.users.retain(|user| user.uuid != *uuid);
     }
 
-    /// Register a new user. Mints a UUID, appends, returns the new entry.
-    ///
-    /// `root` is the space-root directory (`./data`); the registry is rewritten
-    /// in-place. Caller is responsible for creating the per-user subdirectory
-    /// and running `init_space` inside it.
+    /// Register a new user: mint a UUID, append, and return the entry. The
+    /// caller creates the per-user subdirectory and runs `init_space` in it.
     pub fn add(&mut self, root: &Path, email: &str) -> AppResult<UserEntry> {
         let normalised = normalise_email(email)?;
         if self.find_by_email(&normalised).is_some() {
@@ -108,11 +100,11 @@ impl UsersRegistry {
                 "an account for {normalised} already exists"
             )));
         }
-        // UUID collisions in v4 are astronomically unlikely, but a misconfigured
-        // RNG or a corrupted file could surface one. Defend-in-depth: regenerate.
+        // v4 collisions are astronomically unlikely, but a broken RNG or
+        // corrupted file could surface one; regenerate defensively.
         let mut uuid = Uuid::new_v4();
         for _ in 0..16 {
-            if !self.users.iter().any(|u| u.uuid == uuid)
+            if !self.users.iter().any(|user| user.uuid == uuid)
                 && !UsersRegistry::space_dir_for(root, &uuid).exists()
             {
                 break;
@@ -132,10 +124,9 @@ impl UsersRegistry {
     }
 }
 
-/// Light validation: must contain `@` with non-empty halves, no whitespace.
-/// We deliberately don't run a full RFC 5322 check — for a self-hosted personal
-/// app, the email is an opaque identifier the user chose; we only need it to
-/// look obviously email-shaped.
+/// Light validation: must contain `@` with non-empty halves and no whitespace.
+/// Not a full RFC 5322 check — the email is just an opaque identifier here, so
+/// it only needs to look email-shaped.
 pub fn normalise_email(email: &str) -> AppResult<String> {
     let trimmed = email.trim();
     if trimmed.is_empty() {
@@ -166,37 +157,37 @@ mod tests {
 
     #[test]
     fn empty_registry_when_file_missing() {
-        let d = TempDir::new().unwrap();
-        let r = UsersRegistry::load(d.path()).unwrap();
-        assert!(r.is_empty());
+        let dir = TempDir::new().unwrap();
+        let registry = UsersRegistry::load(dir.path()).unwrap();
+        assert!(registry.is_empty());
     }
 
     #[test]
     fn add_persists_and_round_trips() {
-        let d = TempDir::new().unwrap();
-        let mut r = UsersRegistry::load(d.path()).unwrap();
-        let added = r.add(d.path(), "Alice@example.com").unwrap();
+        let dir = TempDir::new().unwrap();
+        let mut registry = UsersRegistry::load(dir.path()).unwrap();
+        let added = registry.add(dir.path(), "Alice@example.com").unwrap();
         assert_eq!(added.email, "alice@example.com");
-        let reloaded = UsersRegistry::load(d.path()).unwrap();
+        let reloaded = UsersRegistry::load(dir.path()).unwrap();
         assert_eq!(reloaded.users.len(), 1);
         assert_eq!(reloaded.users[0].uuid, added.uuid);
     }
 
     #[test]
     fn duplicate_email_rejected_case_insensitive() {
-        let d = TempDir::new().unwrap();
-        let mut r = UsersRegistry::load(d.path()).unwrap();
-        r.add(d.path(), "alice@example.com").unwrap();
-        let err = r.add(d.path(), "ALICE@example.com").unwrap_err();
+        let dir = TempDir::new().unwrap();
+        let mut registry = UsersRegistry::load(dir.path()).unwrap();
+        registry.add(dir.path(), "alice@example.com").unwrap();
+        let err = registry.add(dir.path(), "ALICE@example.com").unwrap_err();
         assert!(matches!(err, AppError::BadRequest(_)));
     }
 
     #[test]
     fn find_is_case_insensitive() {
-        let d = TempDir::new().unwrap();
-        let mut r = UsersRegistry::load(d.path()).unwrap();
-        let added = r.add(d.path(), "alice@example.com").unwrap();
-        let found = r.find_by_email("ALICE@example.com").unwrap();
+        let dir = TempDir::new().unwrap();
+        let mut registry = UsersRegistry::load(dir.path()).unwrap();
+        let added = registry.add(dir.path(), "alice@example.com").unwrap();
+        let found = registry.find_by_email("ALICE@example.com").unwrap();
         assert_eq!(found.uuid, added.uuid);
     }
 
@@ -219,9 +210,13 @@ mod tests {
 
     #[test]
     fn malformed_file_yields_internal_error() {
-        let d = TempDir::new().unwrap();
-        std::fs::write(UsersRegistry::registry_path(d.path()), "not toml at all {").unwrap();
-        let err = UsersRegistry::load(d.path()).unwrap_err();
+        let dir = TempDir::new().unwrap();
+        std::fs::write(
+            UsersRegistry::registry_path(dir.path()),
+            "not toml at all {",
+        )
+        .unwrap();
+        let err = UsersRegistry::load(dir.path()).unwrap_err();
         assert!(matches!(err, AppError::Internal(_)));
     }
 }

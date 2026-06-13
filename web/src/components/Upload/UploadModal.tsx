@@ -24,7 +24,6 @@ type Item = {
 const DEFAULT_FOLDER = 'Uploads';
 const MAX_BYTES = 50 * 1024 * 1024;
 
-// Ported from dir-1-hearth.jsx:385-512 (HearthUpload).
 export function UploadModal({ open, initialFiles, tree, onClose, onUploaded }: Props) {
   const [items, setItems] = useState<Item[]>([]);
   const [folder, setFolder] = useState<string>(DEFAULT_FOLDER);
@@ -36,9 +35,9 @@ export function UploadModal({ open, initialFiles, tree, onClose, onUploaded }: P
   useEffect(() => {
     if (open) {
       setItems(
-        (initialFiles ?? []).map<Item>((f) => ({
+        (initialFiles ?? []).map<Item>((file) => ({
           id: shortId('up'),
-          file: f,
+          file,
           state: 'queued',
           progress: 0,
         })),
@@ -48,58 +47,58 @@ export function UploadModal({ open, initialFiles, tree, onClose, onUploaded }: P
     }
   }, [open, initialFiles]);
 
-  const folders = ['Uploads', ...topLevelFolders(tree).map((f) => f.name)];
+  const folders = ['Uploads', ...topLevelFolders(tree).map((folder) => folder.name)];
   const dedupedFolders = Array.from(new Set(folders));
 
   function appendFiles(list: FileList | File[] | null) {
     if (!list) return;
     const accepted: Item[] = [];
-    for (const f of Array.from(list)) {
+    for (const file of Array.from(list)) {
       const id = shortId('up');
-      if (f.size > MAX_BYTES) {
+      if (file.size > MAX_BYTES) {
         accepted.push({
           id,
-          file: f,
+          file,
           state: 'error',
           progress: 0,
-          error: `${formatSize(f.size)} exceeds 50 MB`,
+          error: `${formatSize(file.size)} exceeds 50 MB`,
         });
       } else {
-        accepted.push({ id, file: f, state: 'queued', progress: 0 });
+        accepted.push({ id, file, state: 'queued', progress: 0 });
       }
     }
     setItems((cur) => [...cur, ...accepted]);
   }
 
   function removeById(id: string) {
-    setItems((cur) => cur.filter((it) => it.id !== id));
+    setItems((cur) => cur.filter((item) => item.id !== id));
   }
 
   async function submit() {
-    // Capture an id-keyed snapshot so removeById/appendFiles during the
-    // upload loop can't shuffle indices under us.
-    const ready = items.filter((it) => it.state === 'queued');
+    // Snapshot the queued items by id so edits during the loop can't shuffle
+    // indices under us.
+    const ready = items.filter((item) => item.state === 'queued');
     if (ready.length === 0 || submitting) return;
     setSubmitting(true);
     for (const { id, file } of ready) {
       setItems((cur) =>
-        cur.map((it) => (it.id === id ? { ...it, state: 'doing', progress: 0 } : it)),
+        cur.map((item) => (item.id === id ? { ...item, state: 'doing', progress: 0 } : item)),
       );
       try {
         await api.upload(folder, [file], (loaded, total) => {
           setItems((cur) =>
-            cur.map((it) =>
-              it.id === id ? { ...it, progress: total ? loaded / total : 0 } : it,
+            cur.map((item) =>
+              item.id === id ? { ...item, progress: total ? loaded / total : 0 } : item,
             ),
           );
         });
         setItems((cur) =>
-          cur.map((it) => (it.id === id ? { ...it, state: 'done', progress: 1 } : it)),
+          cur.map((item) => (item.id === id ? { ...item, state: 'done', progress: 1 } : item)),
         );
       } catch (err) {
         const message = err instanceof Error ? err.message : 'upload failed';
         setItems((cur) =>
-          cur.map((it) => (it.id === id ? { ...it, state: 'error', error: message } : it)),
+          cur.map((item) => (item.id === id ? { ...item, state: 'error', error: message } : item)),
         );
       }
     }
@@ -107,25 +106,25 @@ export function UploadModal({ open, initialFiles, tree, onClose, onUploaded }: P
     onUploaded();
   }
 
-  function onDrop(e: DragEvent<HTMLDivElement>) {
-    e.preventDefault();
+  function onDrop(event: DragEvent<HTMLDivElement>) {
+    event.preventDefault();
     setDragOver(false);
-    if (e.dataTransfer?.files) appendFiles(e.dataTransfer.files);
+    if (event.dataTransfer?.files) appendFiles(event.dataTransfer.files);
   }
 
-  function onFileChange(e: ChangeEvent<HTMLInputElement>) {
-    appendFiles(e.target.files);
-    e.target.value = '';
+  function onFileChange(event: ChangeEvent<HTMLInputElement>) {
+    appendFiles(event.target.files);
+    event.target.value = '';
   }
 
   if (!open) return null;
 
-  const queuedCount = items.filter((it) => it.state === 'queued').length;
+  const queuedCount = items.filter((item) => item.state === 'queued').length;
   const submitLabel = queuedCount > 0 ? `Save ${queuedCount} file${queuedCount === 1 ? '' : 's'}` : 'Done';
 
   return (
     <div className={styles.scrim} onMouseDown={onClose}>
-      <div className={styles.panel} onMouseDown={(e) => e.stopPropagation()}>
+      <div className={styles.panel} onMouseDown={(event) => event.stopPropagation()}>
         <div className={styles.header}>
           <h2 className={styles.title}>Bring something in</h2>
           <button type="button" className={styles.close} onClick={onClose} aria-label="Close">
@@ -135,12 +134,12 @@ export function UploadModal({ open, initialFiles, tree, onClose, onUploaded }: P
 
         <div
           className={`${styles.dropzone} ${dragOver ? styles.dropzoneOver : ''}`}
-          onDragEnter={(e) => {
-            e.preventDefault();
+          onDragEnter={(event) => {
+            event.preventDefault();
             setDragOver(true);
           }}
-          onDragOver={(e) => {
-            e.preventDefault();
+          onDragOver={(event) => {
+            event.preventDefault();
             setDragOver(true);
           }}
           onDragLeave={() => setDragOver(false)}
@@ -177,11 +176,11 @@ export function UploadModal({ open, initialFiles, tree, onClose, onUploaded }: P
             <select
               className={styles.destSelectInner}
               value={folder}
-              onChange={(e) => setFolder(e.target.value)}
+              onChange={(event) => setFolder(event.target.value)}
             >
-              {dedupedFolders.map((f) => (
-                <option key={f} value={f}>
-                  {f}
+              {dedupedFolders.map((folderName) => (
+                <option key={folderName} value={folderName}>
+                  {folderName}
                 </option>
               ))}
             </select>
@@ -190,44 +189,44 @@ export function UploadModal({ open, initialFiles, tree, onClose, onUploaded }: P
 
         {items.length > 0 && (
           <div className={styles.list}>
-            {items.map((it) => (
-              <div key={it.id} className={styles.row}>
+            {items.map((item) => (
+              <div key={item.id} className={styles.row}>
                 <div className={styles.rowIcon}>
-                  {kindIcon(it.file.name)}
+                  {kindIcon(item.file.name)}
                 </div>
                 <div className={styles.rowMain}>
-                  <div className={styles.rowName}>{it.file.name}</div>
+                  <div className={styles.rowName}>{item.file.name}</div>
                   <div className={styles.rowMeta}>
-                    {it.state === 'done' && `${formatSize(it.file.size)} · saved`}
-                    {it.state === 'doing' && `${formatSize(it.file.size)} · ${Math.round(it.progress * 100)}%`}
-                    {it.state === 'queued' && `${formatSize(it.file.size)} · waiting`}
-                    {it.state === 'error' && (
-                      <span className={styles.rowError}>{it.error ?? 'failed'}</span>
+                    {item.state === 'done' && `${formatSize(item.file.size)} · saved`}
+                    {item.state === 'doing' && `${formatSize(item.file.size)} · ${Math.round(item.progress * 100)}%`}
+                    {item.state === 'queued' && `${formatSize(item.file.size)} · waiting`}
+                    {item.state === 'error' && (
+                      <span className={styles.rowError}>{item.error ?? 'failed'}</span>
                     )}
                   </div>
-                  {it.state === 'doing' && (
+                  {item.state === 'doing' && (
                     <div className={styles.progressTrack}>
                       <div
                         className={styles.progressFill}
-                        style={{ width: `${Math.round(it.progress * 100)}%` }}
+                        style={{ width: `${Math.round(item.progress * 100)}%` }}
                       />
                     </div>
                   )}
                 </div>
                 <div className={styles.rowState}>
-                  {it.state === 'done' && '✓ Kept'}
-                  {it.state === 'doing' && 'Saving'}
-                  {it.state === 'queued' && (
+                  {item.state === 'done' && '✓ Kept'}
+                  {item.state === 'doing' && 'Saving'}
+                  {item.state === 'queued' && (
                     <button
                       type="button"
                       className={styles.rowRemove}
-                      onClick={() => removeById(it.id)}
+                      onClick={() => removeById(item.id)}
                       aria-label="Remove"
                     >
                       <Close size={12} />
                     </button>
                   )}
-                  {it.state === 'error' && 'Failed'}
+                  {item.state === 'error' && 'Failed'}
                 </div>
               </div>
             ))}

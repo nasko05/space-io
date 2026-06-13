@@ -3,9 +3,8 @@ use subtle::ConstantTimeEq;
 
 use crate::error::{AppError, AppResult};
 
-/// Default scrypt parameters for the verifier hash.
-/// Tuned for ~150 ms on a recent laptop — comfortable for a manual unlock,
-/// painful for offline brute-force.
+/// Default scrypt parameters for the verifier hash, tuned for ~150 ms on a
+/// recent laptop: fine for a manual unlock, painful for offline brute-force.
 pub const DEFAULT_LOG_N: u8 = 15;
 pub const DEFAULT_R: u32 = 8;
 pub const DEFAULT_P: u32 = 1;
@@ -59,7 +58,6 @@ mod tests {
 
     #[test]
     fn invalid_params_error() {
-        // log_n = 64 exceeds scrypt's allowed range.
         let err = derive_verifier("p", SALT, 64, 8, 1).unwrap_err();
         assert!(matches!(err, crate::error::AppError::Internal(_)));
     }

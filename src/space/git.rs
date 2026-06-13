@@ -4,17 +4,10 @@ use git2::Repository;
 
 use crate::error::{AppError, AppResult};
 
-/// Stage everything under `repo` and create a commit. Used by operations
-/// that touch many files at once (init, bulk move/delete) or where we
-/// can't easily enumerate which paths changed.
-///
-/// Prefer [`commit_paths`] for write/upload/meta paths where the caller
-/// knows exactly which files were touched — `add_all(["*"])` walks the
-/// entire working tree and dominates wall-clock time for single-file
-/// edits on large vaults.
-///
-/// The repository handle is held by `Space` so we don't pay the
-/// `Repository::open` cost (scan packs, parse refs) on every write.
+/// Stage every change under `repo` and commit. For operations that touch many
+/// files (init, bulk move/delete) or can't enumerate what changed. Prefer
+/// [`commit_paths`] when the caller knows the touched paths: `add_all(["*"])`
+/// walks the whole working tree and dominates wall-clock time on large vaults.
 pub fn commit_all(repo: &Repository, message: &str) -> AppResult<()> {
     commit_with(repo, message, |index| {
         index
@@ -37,17 +30,20 @@ where
         .map(|p| p.as_ref().to_path_buf())
         .collect();
     commit_with(repo, message, |index| {
-        // `update_all` picks up modifications + deletions for already-tracked
-        // paths; `add_path` then catches anything brand new. Together they
-        // mirror `add --all <path>` on the CLI.
+        // `update_all` catches modifications + deletions of tracked paths;
+        // `add_path` then catches brand-new ones — together mirroring
+        // `add --all <path>`.
         let path_specs: Vec<&Path> = paths.iter().map(|p| p.as_path()).collect();
         index
             .update_all(&path_specs, None)
             .map_err(|e| AppError::Internal(format!("git update_all: {e}")))?;
-        for p in &paths {
-            if repo.workdir().is_some_and(|wd| wd.join(p).exists()) {
+        for path in &paths {
+            if repo
+                .workdir()
+                .is_some_and(|workdir| workdir.join(path).exists())
+            {
                 index
-                    .add_path(p)
+                    .add_path(path)
                     .map_err(|e| AppError::Internal(format!("git add_path: {e}")))?;
             }
         }
@@ -74,10 +70,9 @@ where
         .map_err(|e| AppError::Internal(format!("git find_tree: {e}")))?;
     let sig = git2::Signature::now("hearth", "hearth@local")
         .map_err(|e| AppError::Internal(format!("git signature: {e}")))?;
-    // If HEAD resolves to a commit, that's our parent. If HEAD is missing
-    // (root commit) we proceed with no parents. Anything else — a HEAD that
-    // points at something that won't peel — is a real failure and must
-    // bubble up: silently treating it as "no parents" would orphan history.
+    // HEAD → commit is our parent; a missing HEAD means the root commit (no
+    // parents). A HEAD that won't peel is a real failure and must bubble up —
+    // treating it as "no parents" would orphan history.
     let parents: Vec<git2::Commit> = match repo.head() {
         Ok(head) => match head.peel_to_commit() {
             Ok(c) => vec![c],
@@ -100,6 +95,16 @@ where
 /// Open a repository, used at startup to populate the cache in `Space`.
 pub fn open(repo_path: &Path) -> AppResult<Repository> {
     Repository::open(repo_path).map_err(|e| AppError::Internal(format!("git open: {e}")))
+}
+
+/// Commit message for a batch operation: `"<verb>: <line>"` for one item, or a
+/// `"<verb> (N items):"` header followed by each line.
+pub fn batch_commit_message(verb: &str, lines: &[String]) -> String {
+    if lines.len() == 1 {
+        format!("{verb}: {}", lines[0])
+    } else {
+        format!("{verb} ({} items):\n\n{}", lines.len(), lines.join("\n"))
+    }
 }
 
 #[cfg(test)]

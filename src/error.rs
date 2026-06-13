@@ -44,9 +44,8 @@ impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let (status, code) = self.parts();
         if status.is_server_error() {
-            // Log the full chain server-side; the client only sees the
-            // generic message below so we don't leak filesystem paths,
-            // libgit2 internals, or age decryptor specifics over the wire.
+            // Full chain stays server-side; the client gets a generic message so
+            // we never leak filesystem paths, libgit2, or age internals.
             tracing::error!(error = %self, "request failed");
         }
         let retry_after = if let AppError::TooManyRequests { retry_after_secs } = &self {
@@ -54,9 +53,6 @@ impl IntoResponse for AppError {
         } else {
             None
         };
-        // Internal/IO errors collapse to a single opaque message. Everything
-        // else (BadRequest, TooManyRequests, etc.) carries its own
-        // structured detail that is safe to echo back.
         let message = match &self {
             AppError::Io(_) | AppError::Internal(_) => "internal server error".to_string(),
             _ => self.to_string(),
@@ -166,7 +162,6 @@ mod tests {
     #[test]
     fn internal_collapses_to_generic_message_over_the_wire() {
         let err = AppError::Internal("kaboom".into());
-        // Display impl still carries the detail (for tracing).
         assert_eq!(err.to_string(), "internal: kaboom");
         let (s, c, m) = err_parts(err);
         assert_eq!(s, StatusCode::INTERNAL_SERVER_ERROR);
@@ -179,8 +174,6 @@ mod tests {
 
     #[test]
     fn bad_request_message_is_passed_through() {
-        // Validation errors are safe to echo back — they're the contract for
-        // form-level feedback.
         let (_, _, m) = err_parts(AppError::BadRequest("name must not be empty".into()));
         assert_eq!(m, "bad request: name must not be empty");
     }

@@ -1,22 +1,9 @@
-//! Shared helpers for the HTTP integration tests under
-//! `tests/integration/`.
+//! Shared helpers for the HTTP integration tests under `tests/integration/`.
 //!
-//! Each test creates a fresh `TempDir`-rooted `AppState`, builds the same
-//! axum router the binary uses, and drives it via `tower::ServiceExt::oneshot`
-//! so we exercise the full request-deserialise → handler → response cycle
-//! (cookies, status codes, content types, the lot).
-//!
-//! The KDF cost dominates startup if we use production scrypt params, so
-//! the helper rebuilds the per-user space directly with the same cheap
-//! parameters the in-module unit tests use rather than going through
-//! `init_space`. The handler under test still validates passphrases via
-//! scrypt — just with a much smaller `log_n`.
-//!
-//! Every helper exported below is genuinely used by at least one
-//! integration submodule. We bundle all submodules under a single test
-//! binary (`tests/integration.rs`) so cargo's per-binary unused-warning
-//! gives an honest signal: a real `unused` warning means we leaked dead
-//! code, not that some sibling file happens not to call this helper.
+//! Each test builds a fresh `TempDir`-rooted `AppState` and the same axum router
+//! the binary uses, then drives it via `tower::ServiceExt::oneshot` to exercise
+//! the full deserialise → handler → response cycle. Users are registered with
+//! cheap KDF params so startup doesn't pay the production scrypt cost.
 
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
@@ -78,12 +65,9 @@ impl Harness {
         self.tempdir.path()
     }
 
-    /// Drive a single request through the router. Wraps `oneshot` so each
-    /// test reads as `harness.send(req).await`.
-    ///
-    /// Inject a fake `ConnectInfo<SocketAddr>` so handlers that extract one
-    /// (rate-limited auth endpoints) succeed — the binary attaches it via
-    /// `into_make_service_with_connect_info`, which `oneshot` bypasses.
+    /// Drive a single request through the router, injecting a fake
+    /// `ConnectInfo<SocketAddr>` that `oneshot` would otherwise omit (auth
+    /// handlers extract it for rate limiting).
     pub async fn send(&self, mut req: Request<Body>) -> Response<Body> {
         let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
         req.extensions_mut().insert(ConnectInfo(addr));
@@ -107,12 +91,10 @@ impl Harness {
             .expect("router::oneshot")
     }
 
-    /// Register a user without paying production scrypt cost. Sidesteps the
-    /// auth router (which goes through `init_space` at full `log_n=15`) and
-    /// writes the same files by hand using cheap KDF params. Returns the
-    /// session cookie value so callers can attach it to subsequent requests.
+    /// Register a user by hand with cheap KDF params, sidestepping the auth
+    /// router's full-cost `init_space`. Returns the session cookie so callers can
+    /// attach it to later requests.
     pub fn register(&self, email: &str, passphrase: &str) -> RegisteredUser {
-        // 1. Append to the user registry under the test root.
         let entry = self
             .state
             .register_user(email)
@@ -121,7 +103,6 @@ impl Harness {
         let space_root = SpaceConfig::space_root(&user_dir);
         std::fs::create_dir_all(&space_root).expect("mkdir space root");
 
-        // 2. Mint a `.space.toml` with cheap KDF params so unlock is fast.
         let mut salt = [0u8; 16];
         rand::thread_rng().fill_bytes(&mut salt);
         let verifier = kdf::derive_verifier(passphrase, &salt, TEST_LOG_N, TEST_R, TEST_P)
@@ -137,10 +118,8 @@ impl Harness {
         };
         cfg.save(&user_dir).expect("save space config");
 
-        // 3. Init the git repo so commits don't fail on the first write.
         git2::Repository::init(&space_root).expect("git init");
 
-        // 4. Cache the Space + mint a session cookie identical to /auth/init.
         let space = Space::open(user_dir.clone()).expect("space open");
         self.state.cache_space(entry.uuid, space);
         let cookie = self.state.sessions.create(
@@ -170,8 +149,6 @@ impl RegisteredUser {
         format!("{SESSION_COOKIE}={}", self.cookie)
     }
 }
-
-// ---- Request / response convenience helpers ----
 
 pub fn get(uri: &str) -> Request<Body> {
     Request::builder()
@@ -276,9 +253,8 @@ pub async fn get_authed(harness: &Harness, user: &RegisteredUser, uri: &str) -> 
     harness.send(with_cookie(get(uri), user)).await
 }
 
-// Helper: build a multipart/form-data body for upload tests. Minimal
-// hand-rolled multipart serializer — just enough to satisfy axum's
-// `Multipart` extractor without pulling in `reqwest::multipart`.
+/// Build a `multipart/form-data` body for upload tests: a minimal hand-rolled
+/// serializer, just enough for axum's `Multipart` extractor.
 pub fn build_multipart(parts: &[MultipartPart]) -> (String, Vec<u8>) {
     let boundary = format!("----hearth-test-boundary-{}", rand::random::<u32>());
     let mut body = Vec::new();
@@ -324,4 +300,21 @@ pub enum MultipartPart<'a> {
         content_type: &'a str,
         bytes: &'a [u8],
     },
+}
+
+/// Minimal percent-encoder for query paths in test URLs, so we don't pull in an
+/// extra dependency just to build a request.
+pub fn urlencode(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    for ch in input.chars() {
+        match ch {
+            'A'..='Z' | 'a'..='z' | '0'..='9' | '-' | '_' | '.' | '~' => out.push(ch),
+            _ => {
+                for byte in ch.to_string().as_bytes() {
+                    out.push_str(&format!("%{byte:02X}"));
+                }
+            }
+        }
+    }
+    out
 }

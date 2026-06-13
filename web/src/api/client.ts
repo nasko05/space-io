@@ -79,8 +79,6 @@ export interface HistoryEntry {
   when: string;
 }
 
-// ---- AI agent chat ----
-
 export type AgentRole = 'system' | 'user' | 'assistant' | 'tool';
 
 export interface AgentToolCall {
@@ -129,7 +127,9 @@ export class ApiError extends Error {
   }
 }
 
-async function json<T>(res: Response): Promise<T> {
+const JSON_HEADERS = { 'Content-Type': 'application/json' };
+
+async function readJson<T>(res: Response): Promise<T> {
   if (res.status === 204) return undefined as T;
   const text = await res.text();
   if (!res.ok) {
@@ -140,100 +140,60 @@ async function json<T>(res: Response): Promise<T> {
       code = body?.error?.code ?? code;
       message = body?.error?.message ?? message;
     } catch {
-      // leave defaults
+      // Body wasn't JSON; keep the text/statusText defaults.
     }
     throw new ApiError(res.status, code, message);
   }
   return text ? (JSON.parse(text) as T) : (undefined as T);
 }
 
+/** Fetch `url` (no body by default) and parse the JSON response. */
+async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
+  return readJson<T>(await fetch(url, { credentials: 'same-origin', ...init }));
+}
+
+/** Send a JSON body via `method` and parse the JSON response. */
+async function sendJson<T>(method: string, url: string, body: unknown): Promise<T> {
+  return requestJson<T>(url, { method, headers: JSON_HEADERS, body: JSON.stringify(body) });
+}
+
 export const api = {
   async status(): Promise<AuthStatus> {
-    return json(await fetch('/api/auth/status', { credentials: 'same-origin' }));
+    return requestJson('/api/auth/status');
   },
   async unlock(email: string, passphrase: string): Promise<void> {
-    await json(
-      await fetch('/api/auth/unlock', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'same-origin',
-        body: JSON.stringify({ email, passphrase }),
-      }),
-    );
+    await sendJson('POST', '/api/auth/unlock', { email, passphrase });
   },
   async init(email: string, passphrase: string, owner?: string): Promise<InitResult> {
-    return json(
-      await fetch('/api/auth/init', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'same-origin',
-        body: JSON.stringify({ email, passphrase, owner: owner ?? null }),
-      }),
-    );
+    return sendJson('POST', '/api/auth/init', { email, passphrase, owner: owner ?? null });
   },
   async lock(): Promise<void> {
-    await json(
-      await fetch('/api/auth/lock', {
-        method: 'POST',
-        credentials: 'same-origin',
-      }),
-    );
+    await requestJson('/api/auth/lock', { method: 'POST' });
   },
   async tree(): Promise<{ tree: TreeNode[] }> {
-    return json(await fetch('/api/files/tree', { credentials: 'same-origin' }));
+    return requestJson('/api/files/tree');
   },
   async read(path: string): Promise<ReadFile> {
-    return json(
-      await fetch(`/api/files/read?path=${encodeURIComponent(path)}`, {
-        credentials: 'same-origin',
-      }),
-    );
+    return requestJson(`/api/files/read?path=${encodeURIComponent(path)}`);
   },
-  /** Autosave: persist the editor's content to disk without minting a
-   *  version-history entry. Drafts flow to disk continuously so nothing is
-   *  lost; only an explicit checkpoint becomes a commit. */
+  /** Autosave: persist editor content without a history entry; only an explicit
+   *  checkpoint becomes a commit. */
   async saveDraft(path: string, content: string): Promise<WriteResult> {
-    return json(
-      await fetch('/api/files/write', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'same-origin',
-        body: JSON.stringify({ path, content }),
-      }),
-    );
+    return sendJson('PUT', '/api/files/write', { path, content });
   },
-  /** Checkpoint: persist `content` and record it as a labelled point in the
-   *  version history. `message` is the user's label (text or emoji); blank or
-   *  omitted falls back to a default on the server. */
+  /** Checkpoint: persist `content` and record a labelled point in history; a
+   *  blank or omitted `message` falls back to a server default. */
   async checkpoint(path: string, content: string, message?: string): Promise<WriteResult> {
-    return json(
-      await fetch('/api/files/checkpoint', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'same-origin',
-        body: JSON.stringify({ path, content, message }),
-      }),
-    );
+    return sendJson('POST', '/api/files/checkpoint', { path, content, message });
   },
   async create(folder: string, title?: string): Promise<CreateResult> {
-    return json(
-      await fetch('/api/files/create', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'same-origin',
-        body: JSON.stringify({ folder, title: title ?? null }),
-      }),
-    );
+    return sendJson('POST', '/api/files/create', { folder, title: title ?? null });
   },
   async excerpts(): Promise<{ excerpts: ExcerptMap }> {
-    return json(await fetch('/api/files/excerpts', { credentials: 'same-origin' }));
+    return requestJson('/api/files/excerpts');
   },
   async search(q: string): Promise<{ hits: SearchHit[] }> {
-    return json(
-      await fetch(`/api/search?q=${encodeURIComponent(q)}`, {
-        credentials: 'same-origin',
-      }),
-    );
+    return requestJson(`/api/search?q=${encodeURIComponent(q)}`);
   },
   async upload(
     folder: string,
@@ -242,184 +202,108 @@ export const api = {
   ): Promise<{ files: UploadResultItem[] }> {
     const body = new FormData();
     body.append('folder', folder);
-    for (const f of files) {
-      body.append('file', f, f.name);
+    for (const file of files) {
+      body.append('file', file, file.name);
     }
     if (onProgress) {
-      return new Promise((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        xhr.open('POST', '/api/files/upload', true);
-        xhr.withCredentials = true;
-        xhr.upload.onprogress = (e) => {
-          if (e.lengthComputable) onProgress(e.loaded, e.total);
-        };
-        xhr.onload = () => {
-          if (xhr.status >= 200 && xhr.status < 300) {
-            try {
-              resolve(JSON.parse(xhr.responseText));
-            } catch (e) {
-              reject(e);
-            }
-          } else {
-            try {
-              const body = JSON.parse(xhr.responseText);
-              reject(
-                new ApiError(
-                  xhr.status,
-                  body?.error?.code ?? 'unknown',
-                  body?.error?.message ?? xhr.statusText,
-                ),
-              );
-            } catch {
-              reject(new ApiError(xhr.status, 'unknown', xhr.statusText));
-            }
-          }
-        };
-        xhr.onerror = () => reject(new ApiError(0, 'network', 'upload failed'));
-        xhr.send(body);
-      });
+      return uploadWithProgress(body, onProgress);
     }
-    const res = await fetch('/api/files/upload', {
-      method: 'POST',
-      credentials: 'same-origin',
-      body,
-    });
-    return json(res);
+    return requestJson('/api/files/upload', { method: 'POST', body });
   },
   downloadUrl(path: string): string {
     return `/api/files/download?path=${encodeURIComponent(path)}`;
   },
   async history(path: string): Promise<{ entries: HistoryEntry[] }> {
-    return json(
-      await fetch(`/api/files/history?path=${encodeURIComponent(path)}`, {
-        credentials: 'same-origin',
-      }),
-    );
+    return requestJson(`/api/files/history?path=${encodeURIComponent(path)}`);
   },
   async rollback(path: string, commit: string): Promise<WriteResult> {
-    return json(
-      await fetch('/api/files/rollback', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'same-origin',
-        body: JSON.stringify({ path, commit }),
-      }),
-    );
+    return sendJson('POST', '/api/files/rollback', { path, commit });
   },
   async passkeyInfo(email: string): Promise<PasskeyInfo | null> {
     const res = await fetch(`/api/auth/passkey/info?email=${encodeURIComponent(email)}`, {
       credentials: 'same-origin',
     });
     if (res.status === 404) return null;
-    return json(res);
+    return readJson(res);
   },
   async registerPasskey(payload: PasskeyInfo): Promise<void> {
-    await json(
-      await fetch('/api/auth/passkey/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'same-origin',
-        body: JSON.stringify(payload),
-      }),
-    );
+    await sendJson('POST', '/api/auth/passkey/register', payload);
   },
   async deletePasskey(): Promise<void> {
-    await json(
-      await fetch('/api/auth/passkey', {
-        method: 'DELETE',
-        credentials: 'same-origin',
-      }),
-    );
+    await requestJson('/api/auth/passkey', { method: 'DELETE' });
   },
   async move(from: string, to: string): Promise<{ path: string; is_directory: boolean }> {
-    return json(
-      await fetch('/api/files/move', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'same-origin',
-        body: JSON.stringify({ from, to }),
-      }),
-    );
+    return sendJson('POST', '/api/files/move', { from, to });
   },
   async moveBulk(
     moves: { from: string; to: string }[],
   ): Promise<{ results: { path: string; is_directory: boolean }[] }> {
-    return json(
-      await fetch('/api/files/move/bulk', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'same-origin',
-        body: JSON.stringify({ moves }),
-      }),
-    );
+    return sendJson('POST', '/api/files/move/bulk', { moves });
   },
   async deleteFile(path: string): Promise<{ trash_path: string }> {
-    return json(
-      await fetch('/api/files/delete', {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'same-origin',
-        body: JSON.stringify({ path }),
-      }),
-    );
+    return sendJson('DELETE', '/api/files/delete', { path });
   },
   async deleteFilesBulk(paths: string[]): Promise<{ results: { trash_path: string }[] }> {
-    return json(
-      await fetch('/api/files/delete/bulk', {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'same-origin',
-        body: JSON.stringify({ paths }),
-      }),
-    );
+    return sendJson('DELETE', '/api/files/delete/bulk', { paths });
   },
   async mkdir(path: string): Promise<void> {
-    await json(
-      await fetch('/api/files/mkdir', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'same-origin',
-        body: JSON.stringify({ path }),
-      }),
-    );
+    await sendJson('POST', '/api/files/mkdir', { path });
   },
   async meta(): Promise<{ meta: MetaMap }> {
-    return json(await fetch('/api/files/meta', { credentials: 'same-origin' }));
+    return requestJson('/api/files/meta');
   },
   async setTags(path: string, tags: string[]): Promise<void> {
-    await json(
-      await fetch('/api/files/meta', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'same-origin',
-        body: JSON.stringify({ path, tags }),
-      }),
-    );
+    await sendJson('PUT', '/api/files/meta', { path, tags });
   },
   async setTagsBulk(updates: { path: string; tags: string[] }[]): Promise<void> {
-    await json(
-      await fetch('/api/files/meta/bulk', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'same-origin',
-        body: JSON.stringify({ updates }),
-      }),
-    );
+    await sendJson('PUT', '/api/files/meta/bulk', { updates });
   },
   async agentStatus(): Promise<AgentStatus> {
-    return json(await fetch('/api/agent/status', { credentials: 'same-origin' }));
+    return requestJson('/api/agent/status');
   },
   async agentChat(messages: AgentMessage[]): Promise<AgentChatResponse> {
-    return json(
-      await fetch('/api/agent/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'same-origin',
-        body: JSON.stringify({ messages }),
-      }),
-    );
+    return sendJson('POST', '/api/agent/chat', { messages });
   },
 };
+
+/** Upload via `XMLHttpRequest` so we can report progress, which `fetch` can't. */
+function uploadWithProgress(
+  body: FormData,
+  onProgress: (loaded: number, total: number) => void,
+): Promise<{ files: UploadResultItem[] }> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/files/upload', true);
+    xhr.withCredentials = true;
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable) onProgress(event.loaded, event.total);
+    };
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          resolve(JSON.parse(xhr.responseText));
+        } catch (err) {
+          reject(err);
+        }
+        return;
+      }
+      try {
+        const parsed = JSON.parse(xhr.responseText);
+        reject(
+          new ApiError(
+            xhr.status,
+            parsed?.error?.code ?? 'unknown',
+            parsed?.error?.message ?? xhr.statusText,
+          ),
+        );
+      } catch {
+        reject(new ApiError(xhr.status, 'unknown', xhr.statusText));
+      }
+    };
+    xhr.onerror = () => reject(new ApiError(0, 'network', 'upload failed'));
+    xhr.send(body);
+  });
+}
 
 export interface MetaItem {
   tags: string[];
@@ -441,9 +325,9 @@ export function firstMarkdownLeaf(tree: TreeNode[]): TreeFile | null {
 export function flattenFiles(tree: TreeNode[]): TreeFile[] {
   const out: TreeFile[] = [];
   const walk = (nodes: TreeNode[]) => {
-    for (const n of nodes) {
-      if (n.type === 'file') out.push(n);
-      else walk(n.children);
+    for (const node of nodes) {
+      if (node.type === 'file') out.push(node);
+      else walk(node.children);
     }
   };
   walk(tree);
@@ -451,5 +335,5 @@ export function flattenFiles(tree: TreeNode[]): TreeFile[] {
 }
 
 export function topLevelFolders(tree: TreeNode[]): TreeFolder[] {
-  return tree.filter((n): n is TreeFolder => n.type === 'folder');
+  return tree.filter((node): node is TreeFolder => node.type === 'folder');
 }

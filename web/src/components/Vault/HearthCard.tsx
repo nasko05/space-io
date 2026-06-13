@@ -31,18 +31,18 @@ function HearthCardImpl({
   onContextMenu,
   onToggleSelect,
 }: Props) {
-  function onCtx(e: ReactMouseEvent<HTMLElement>) {
+  function handleContextMenu(event: ReactMouseEvent<HTMLElement>) {
     if (!onContextMenu) return;
-    e.preventDefault();
-    onContextMenu(file, e.clientX, e.clientY);
+    event.preventDefault();
+    onContextMenu(file, event.clientX, event.clientY);
   }
 
-  function onCheckboxClick(e: ReactMouseEvent<HTMLButtonElement>) {
-    e.stopPropagation();
+  function onCheckboxClick(event: ReactMouseEvent<HTMLButtonElement>) {
+    event.stopPropagation();
     if (!onToggleSelect) return;
     onToggleSelect(file, {
-      shift: e.shiftKey,
-      cmd: e.metaKey || e.ctrlKey,
+      shift: event.shiftKey,
+      cmd: event.metaKey || event.ctrlKey,
     });
   }
 
@@ -50,10 +50,10 @@ function HearthCardImpl({
     onOpen(file);
   }
 
-  function onDragStart(e: DragEvent<HTMLElement>) {
-    e.dataTransfer.effectAllowed = 'move';
-    e.dataTransfer.setData(DRAG_MIME, file.path);
-    e.dataTransfer.setData('text/plain', file.path);
+  function onDragStart(event: DragEvent<HTMLElement>) {
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData(DRAG_MIME, file.path);
+    event.dataTransfer.setData('text/plain', file.path);
   }
 
   const when = useMemo(() => formatWhen(file.updated), [file.updated]);
@@ -73,9 +73,9 @@ function HearthCardImpl({
   const chips =
     tags && tags.length > 0 ? (
       <div className={styles.tags}>
-        {tags.slice(0, 3).map((t) => (
-          <span key={t} className={styles.tag}>
-            #{t}
+        {tags.slice(0, 3).map((tag) => (
+          <span key={tag} className={styles.tag}>
+            #{tag}
           </span>
         ))}
       </div>
@@ -92,7 +92,7 @@ function HearthCardImpl({
         <CardSurface
           className={styles.mdCard}
           onClick={onCardClick}
-          onCtx={onCtx}
+          handleContextMenu={handleContextMenu}
           onDragStart={onDragStart}
         >
           <div className={styles.mdMeta}>
@@ -114,12 +114,12 @@ function HearthCardImpl({
         <CardSurface
           className={styles.docCard}
           onClick={onCardClick}
-          onCtx={onCtx}
+          handleContextMenu={handleContextMenu}
           onDragStart={onDragStart}
         >
           <div className={styles.docPreview}>
-            {DOC_LINE_WIDTHS.map((w, i) => (
-              <span key={i} className={styles.docLine} style={{ width: `${w}%` }} />
+            {DOC_LINE_WIDTHS.map((width, i) => (
+              <span key={i} className={styles.docLine} style={{ width: `${width}%` }} />
             ))}
             <div className={`${styles.docBadge} ${isPdf ? styles.docBadgePdf : styles.docBadgeDocx}`}>
               {file.kind.toUpperCase()}
@@ -139,7 +139,6 @@ function HearthCardImpl({
     );
   }
 
-  // image / video / other
   const isVideo = file.kind === 'video';
   return (
     <div className={rootClass}>
@@ -147,7 +146,7 @@ function HearthCardImpl({
       <CardSurface
         className={styles.mediaCard}
         onClick={onCardClick}
-        onCtx={onCtx}
+        handleContextMenu={handleContextMenu}
         onDragStart={onDragStart}
       >
         <div className={styles.mediaTint}>
@@ -173,33 +172,32 @@ function HearthCardImpl({
   );
 }
 
-// Memoize so card re-renders are limited to the ones whose props actually
-// changed — selection toggles or drag-over highlight transitions no longer
-// re-render every visible card in the vault.
+// Memoized so a selection toggle or drag highlight re-renders only the affected
+// card, not every visible card in the vault.
 export const HearthCard = memo(HearthCardImpl);
 
 interface SurfaceProps {
   className: string;
   children: ReactNode;
   onClick: () => void;
-  onCtx: (e: ReactMouseEvent<HTMLElement>) => void;
-  onDragStart: (e: DragEvent<HTMLElement>) => void;
+  handleContextMenu: (event: ReactMouseEvent<HTMLElement>) => void;
+  onDragStart: (event: DragEvent<HTMLElement>) => void;
 }
 
-function CardSurface({ className, children, onClick, onCtx, onDragStart }: SurfaceProps) {
+function CardSurface({ className, children, onClick, handleContextMenu, onDragStart }: SurfaceProps) {
   return (
     <div
       role="button"
       tabIndex={0}
       className={className}
       onClick={onClick}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
           onClick();
         }
       }}
-      onContextMenu={onCtx}
+      onContextMenu={handleContextMenu}
       draggable
       onDragStart={onDragStart}
     >
@@ -221,13 +219,13 @@ const DAY = 24 * HOUR;
 
 function formatWhen(iso: string): string {
   if (!iso) return '';
-  const ts = Date.parse(iso);
-  if (!Number.isFinite(ts)) return '';
-  const diff = Date.now() - ts;
+  const timestamp = Date.parse(iso);
+  if (!Number.isFinite(timestamp)) return '';
+  const diff = Date.now() - timestamp;
   if (diff < MIN) return 'just now';
   if (diff < HOUR) return `${Math.round(diff / MIN)} min ago`;
   if (diff < DAY) return `${Math.round(diff / HOUR)}h ago`;
   if (diff < 2 * DAY) return 'yesterday';
   if (diff < 7 * DAY) return `${Math.round(diff / DAY)}d ago`;
-  return new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  return new Date(timestamp).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }

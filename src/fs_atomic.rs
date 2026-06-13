@@ -1,26 +1,18 @@
 //! Crash-safe file writes.
 //!
-//! `std::fs::write` truncates the destination and then streams the new bytes,
-//! so a crash (or power loss) mid-write leaves a half-written file. For the
-//! tiny-but-critical metadata files we keep at rest — `.users.toml` (the
-//! email→UUID map that makes every space reachable) and each space's
-//! `.space.toml` — a torn write is catastrophic: it can lock a user out of
-//! their encrypted data permanently.
-//!
-//! `write_atomic` instead writes the full contents to a sibling temp file,
-//! fsyncs it, and `rename`s it over the destination. POSIX `rename` is atomic,
-//! so a concurrent reader (or a restart after a crash) sees either the old
-//! file or the complete new one — never a truncation.
+//! `std::fs::write` truncates then streams, so a crash mid-write leaves a torn
+//! file — catastrophic for the metadata that gates access to a space
+//! (`.users.toml`, `.space.toml`). `write_atomic` writes to a sibling temp
+//! file, fsyncs, and atomically `rename`s it over the destination, so readers
+//! and post-crash restarts see either the old file or the complete new one.
 
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-/// Atomically replace `path`'s contents with `contents`.
-///
-/// Creates the parent directory if needed. The temp file lives in the same
-/// directory as the destination so the final `rename` never crosses a
-/// filesystem boundary (which would fail with `EXDEV`).
+/// Atomically replace `path`'s contents, creating the parent directory if
+/// needed. The temp file shares the destination's directory so the final
+/// `rename` never crosses a filesystem boundary (`EXDEV`).
 pub fn write_atomic(path: &Path, contents: &[u8]) -> std::io::Result<()> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     fs::create_dir_all(parent)?;
@@ -31,7 +23,6 @@ pub fn write_atomic(path: &Path, contents: &[u8]) -> std::io::Result<()> {
         file.write_all(contents)?;
         file.sync_all()?;
     }
-    // Replace the destination. On failure, don't leave the temp behind.
     if let Err(e) = fs::rename(&tmp, path) {
         let _ = fs::remove_file(&tmp);
         return Err(e);
@@ -39,10 +30,8 @@ pub fn write_atomic(path: &Path, contents: &[u8]) -> std::io::Result<()> {
     Ok(())
 }
 
-/// `foo/bar.toml` → `foo/bar.toml.tmp`. Same directory, distinctive suffix.
-/// In-process writers to a given file are already serialised by a lock, and
-/// `File::create` truncates any stale temp left by a previous crash, so a
-/// fixed suffix is safe here.
+/// `foo/bar.toml` → `foo/bar.toml.tmp`. A fixed suffix is safe: writers are
+/// serialised by a lock and `File::create` truncates any stale temp.
 fn tmp_path(path: &Path) -> PathBuf {
     let mut name = path
         .file_name()

@@ -29,9 +29,9 @@ export default function PdfRenderer({ data }: Props) {
         }
         setPageCount(doc.numPages);
         const scale = Math.min(2, window.devicePixelRatio || 1) * 1.2;
-        for (let n = 1; n <= doc.numPages; n += 1) {
+        for (let pageNumber = 1; pageNumber <= doc.numPages; pageNumber += 1) {
           if (cancelled) break;
-          const page = await doc.getPage(n);
+          const page = await doc.getPage(pageNumber);
           const viewport = page.getViewport({ scale });
           const canvas = document.createElement('canvas');
           canvas.className = styles.page;
@@ -40,9 +40,9 @@ export default function PdfRenderer({ data }: Props) {
           canvas.style.maxWidth = '100%';
           canvas.style.height = 'auto';
           container.appendChild(canvas);
-          const ctx = canvas.getContext('2d');
-          if (!ctx) continue;
-          await page.render({ canvasContext: ctx, viewport, canvas }).promise;
+          const context = canvas.getContext('2d');
+          if (!context) continue;
+          await page.render({ canvasContext: context, viewport, canvas }).promise;
         }
       } catch (err) {
         if (!cancelled) {

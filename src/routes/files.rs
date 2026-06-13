@@ -11,6 +11,7 @@ use axum::routing::delete;
 
 use crate::error::{AppError, AppResult};
 use crate::routes::auth::require_session;
+use crate::routes::run_blocking;
 use crate::space::{
     create, delete as delete_mod, download, excerpt, history, meta, mkdir, read, rename, rollback,
     tree, upload, write,
@@ -27,11 +28,8 @@ pub fn router() -> Router<AppState> {
         .route("/files/excerpts", get(get_excerpts))
         .route(
             "/files/upload",
-            // axum applies a 2 MB default body limit to every route; without
-            // lifting it here the multipart parser rejects any upload whose
-            // *whole request body* tops 2 MB with "Error parsing
-            // multipart/form-data request" before our own per-file (50 MB) and
-            // per-request (250 MB) caps ever run. Raise it for this one route.
+            // Lift axum's 2 MB default body limit so our own per-file and
+            // per-request caps decide what's too big, not the multipart parser.
             post(post_upload).layer(DefaultBodyLimit::max(MAX_UPLOAD_REQUEST_BYTES)),
         )
         .route("/files/download", get(get_download))
@@ -46,19 +44,6 @@ pub fn router() -> Router<AppState> {
         .route("/files/meta/bulk", put(put_meta_bulk))
 }
 
-/// Run blocking work (file I/O, age decrypt, git) on the dedicated
-/// blocking pool so we don't pin async workers. Joining the task is what
-/// surfaces panics or cancellation as `AppError::Internal`.
-async fn blocking<F, T>(f: F) -> AppResult<T>
-where
-    F: FnOnce() -> AppResult<T> + Send + 'static,
-    T: Send + 'static,
-{
-    tokio::task::spawn_blocking(f)
-        .await
-        .map_err(|e| AppError::Internal(format!("blocking join: {e}")))?
-}
-
 #[derive(Serialize)]
 struct TreeResponse {
     tree: Vec<tree::TreeNode>,
@@ -66,7 +51,7 @@ struct TreeResponse {
 
 async fn get_tree(State(state): State<AppState>, jar: CookieJar) -> AppResult<Json<TreeResponse>> {
     let (_, space) = require_session(&state, &jar)?;
-    let tree = blocking(move || tree::build_tree(&space)).await?;
+    let tree = run_blocking(move || tree::build_tree(&space)).await?;
     Ok(Json(TreeResponse { tree }))
 }
 
@@ -88,7 +73,7 @@ async fn get_read(
     Query(q): Query<ReadQuery>,
 ) -> AppResult<Json<ReadResponse>> {
     let (pass, space) = require_session(&state, &jar)?;
-    let result = blocking(move || read::read_file(&space, &pass, &q.path)).await?;
+    let result = run_blocking(move || read::read_file(&space, &pass, &q.path)).await?;
     Ok(Json(ReadResponse {
         path: result.path,
         content: result.content,
@@ -108,9 +93,8 @@ struct WriteResponse {
     updated: String,
 }
 
-/// Autosave. Persists the editor's content to the working tree without
-/// minting a history entry — drafts flow to disk continuously so nothing is
-/// lost, but only an explicit checkpoint (`post_checkpoint`) becomes a commit.
+/// Autosave: persist editor content to the working tree without a commit. Only
+/// an explicit `post_checkpoint` mints a history entry.
 async fn put_write(
     State(state): State<AppState>,
     jar: CookieJar,
@@ -118,7 +102,7 @@ async fn put_write(
 ) -> AppResult<Json<WriteResponse>> {
     let (pass, space) = require_session(&state, &jar)?;
     let result =
-        blocking(move || write::save_draft(&space, &pass, &req.path, &req.content)).await?;
+        run_blocking(move || write::save_draft(&space, &pass, &req.path, &req.content)).await?;
     Ok(Json(WriteResponse {
         path: result.path,
         updated: result.updated,
@@ -132,10 +116,8 @@ struct CheckpointRequest {
     message: Option<String>,
 }
 
-/// Create a checkpoint: persist `content` and record it as a commit in the
-/// version history with an optional user-supplied label (text or emoji). This
-/// is the deliberate "save a version I can return to" action, as opposed to
-/// the continuous draft autosave above.
+/// Persist `content` and record it as a commit, with an optional user label —
+/// the deliberate "save a version I can return to" counterpart to autosave.
 async fn post_checkpoint(
     State(state): State<AppState>,
     jar: CookieJar,
@@ -148,7 +130,7 @@ async fn post_checkpoint(
         .map(str::trim)
         .filter(|m| !m.is_empty())
         .map(|m| m.to_string());
-    let result = blocking(move || {
+    let result = run_blocking(move || {
         write::write_file(&space, &pass, &req.path, &req.content, message.as_deref())
     })
     .await?;
@@ -176,7 +158,7 @@ async fn post_create(
 ) -> AppResult<Json<CreateResponse>> {
     let (pass, space) = require_session(&state, &jar)?;
     let result =
-        blocking(move || create::create_file(&space, &pass, &req.folder, req.title.as_deref()))
+        run_blocking(move || create::create_file(&space, &pass, &req.folder, req.title.as_deref()))
             .await?;
     Ok(Json(CreateResponse { path: result.path }))
 }
@@ -197,7 +179,7 @@ async fn get_excerpts(
     jar: CookieJar,
 ) -> AppResult<Json<ExcerptsResponse>> {
     let (pass, space) = require_session(&state, &jar)?;
-    let raw = blocking(move || excerpt::build_excerpts(&space, &pass)).await?;
+    let raw = run_blocking(move || excerpt::build_excerpts(&space, &pass)).await?;
     let excerpts = raw
         .into_iter()
         .map(|(k, v)| {
@@ -226,24 +208,15 @@ struct UploadResponse {
 
 const DEFAULT_UPLOAD_FOLDER: &str = "Uploads";
 const MAX_UPLOAD_BYTES: usize = 50 * 1024 * 1024;
-/// Hard cap on the total bytes accepted across all files in a single
-/// multipart request. Without this an authenticated client can paste
-/// arbitrarily many 50 MB files into one POST and pin server memory: the
-/// handler buffers every part in full before encrypting (so the workload
-/// can be committed inside one blocking task), so memory grows with the
-/// total request body, not the per-file cap.
+/// Per-request total. The handler buffers every part before encrypting, so
+/// memory grows with the whole body, not the per-file cap.
 const MAX_TOTAL_UPLOAD_BYTES: usize = 250 * 1024 * 1024;
-/// Hard cap on the number of files we accept in one multipart batch. Same
-/// motivation as the byte cap — even small files have non-trivial per-file
-/// crypto + git work attached, and we don't want a single request to
-/// monopolise the blocking pool.
+/// Per-batch file count, so one request can't monopolise the blocking pool with
+/// per-file crypto + git work.
 const MAX_UPLOADS_PER_REQUEST: usize = 64;
-/// Body-limit ceiling for the `/files/upload` route. Sits above the
-/// per-request byte cap (`MAX_TOTAL_UPLOAD_BYTES`, 250 MB) so the handler's
-/// own check — which yields a clean `400` with a descriptive message — is what
-/// rejects oversized batches, rather than the body-limit layer truncating the
-/// stream into an opaque multipart parse error. The headroom also covers
-/// multipart framing overhead (boundaries, headers) on a maxed-out request.
+/// Body-limit ceiling, kept above `MAX_TOTAL_UPLOAD_BYTES` (plus framing
+/// overhead) so the handler's descriptive `400` rejects oversized batches rather
+/// than the layer truncating into an opaque multipart parse error.
 const MAX_UPLOAD_REQUEST_BYTES: usize = 256 * 1024 * 1024;
 
 async fn post_upload(
@@ -254,8 +227,7 @@ async fn post_upload(
     let (pass, space) = require_session(&state, &jar)?;
 
     let mut folder: Option<String> = None;
-    // Keep the original `Bytes` (ref-counted) instead of copying into a `Vec`;
-    // `store_upload` only needs a `&[u8]`, which `Bytes` derefs to.
+    // Keep the ref-counted `Bytes` rather than copying into a `Vec`.
     let mut files: Vec<(String, Bytes)> = Vec::new();
     let mut total_bytes: usize = 0;
 
@@ -306,7 +278,7 @@ async fn post_upload(
     }
     let folder = folder.unwrap_or_else(|| DEFAULT_UPLOAD_FOLDER.to_string());
 
-    let results = blocking(move || {
+    let results = run_blocking(move || {
         let mut results = Vec::with_capacity(files.len());
         for (name, bytes) in files {
             let r = upload::store_upload(&space, &pass, &folder, &name, &bytes)?;
@@ -332,7 +304,7 @@ async fn get_download(
     Query(q): Query<DownloadQuery>,
 ) -> AppResult<Response> {
     let (pass, space) = require_session(&state, &jar)?;
-    let file = blocking(move || download::fetch_decrypted(&space, &pass, &q.path)).await?;
+    let file = run_blocking(move || download::fetch_decrypted(&space, &pass, &q.path)).await?;
     let mime = mime_guess::from_path(&file.path).first_or_octet_stream();
     let base_name = std::path::Path::new(&file.path)
         .file_name()
@@ -374,7 +346,7 @@ async fn get_history(
     Query(q): Query<HistoryQuery>,
 ) -> AppResult<Json<HistoryResponse>> {
     let (_, space) = require_session(&state, &jar)?;
-    let entries = blocking(move || history::file_history(&space, &q.path))
+    let entries = run_blocking(move || history::file_history(&space, &q.path))
         .await?
         .into_iter()
         .map(|e| HistoryEntryDto {
@@ -405,7 +377,8 @@ async fn post_rollback(
     Json(req): Json<RollbackRequest>,
 ) -> AppResult<Json<RollbackResponse>> {
     let (pass, space) = require_session(&state, &jar)?;
-    let r = blocking(move || rollback::rollback_to(&space, &pass, &req.path, &req.commit)).await?;
+    let r =
+        run_blocking(move || rollback::rollback_to(&space, &pass, &req.path, &req.commit)).await?;
     Ok(Json(RollbackResponse {
         path: r.path,
         updated: r.updated,
@@ -424,17 +397,24 @@ struct MoveResponse {
     is_directory: bool,
 }
 
+impl From<rename::MoveResult> for MoveResponse {
+    fn from(result: rename::MoveResult) -> Self {
+        Self {
+            path: result.path,
+            is_directory: result.is_directory,
+        }
+    }
+}
+
 async fn post_move(
     State(state): State<AppState>,
     jar: CookieJar,
     Json(req): Json<MoveRequest>,
 ) -> AppResult<Json<MoveResponse>> {
     let (pass, space) = require_session(&state, &jar)?;
-    let r = blocking(move || rename::rename_path(&space, &pass, &req.from, &req.to)).await?;
-    Ok(Json(MoveResponse {
-        path: r.path,
-        is_directory: r.is_directory,
-    }))
+    let result =
+        run_blocking(move || rename::rename_path(&space, &pass, &req.from, &req.to)).await?;
+    Ok(Json(result.into()))
 }
 
 #[derive(Deserialize)]
@@ -460,15 +440,9 @@ async fn post_move_bulk(
 ) -> AppResult<Json<MoveBulkResponse>> {
     let (pass, space) = require_session(&state, &jar)?;
     let pairs: Vec<(String, String)> = req.moves.into_iter().map(|m| (m.from, m.to)).collect();
-    let results = blocking(move || rename::rename_paths_bulk(&space, &pass, pairs)).await?;
+    let results = run_blocking(move || rename::rename_paths_bulk(&space, &pass, pairs)).await?;
     Ok(Json(MoveBulkResponse {
-        results: results
-            .into_iter()
-            .map(|r| MoveResponse {
-                path: r.path,
-                is_directory: r.is_directory,
-            })
-            .collect(),
+        results: results.into_iter().map(MoveResponse::from).collect(),
     }))
 }
 
@@ -482,16 +456,23 @@ struct DeleteResponse {
     trash_path: String,
 }
 
+impl From<delete_mod::DeleteResult> for DeleteResponse {
+    fn from(result: delete_mod::DeleteResult) -> Self {
+        Self {
+            trash_path: result.trash_path,
+        }
+    }
+}
+
 async fn delete_file(
     State(state): State<AppState>,
     jar: CookieJar,
     Json(req): Json<DeleteRequest>,
 ) -> AppResult<Json<DeleteResponse>> {
     let (pass, space) = require_session(&state, &jar)?;
-    let r = blocking(move || delete_mod::delete_to_trash(&space, &pass, &req.path)).await?;
-    Ok(Json(DeleteResponse {
-        trash_path: r.trash_path,
-    }))
+    let result =
+        run_blocking(move || delete_mod::delete_to_trash(&space, &pass, &req.path)).await?;
+    Ok(Json(result.into()))
 }
 
 #[derive(Deserialize)]
@@ -511,14 +492,9 @@ async fn delete_files_bulk(
 ) -> AppResult<Json<DeleteBulkResponse>> {
     let (pass, space) = require_session(&state, &jar)?;
     let results =
-        blocking(move || delete_mod::delete_to_trash_bulk(&space, &pass, req.paths)).await?;
+        run_blocking(move || delete_mod::delete_to_trash_bulk(&space, &pass, req.paths)).await?;
     Ok(Json(DeleteBulkResponse {
-        results: results
-            .into_iter()
-            .map(|r| DeleteResponse {
-                trash_path: r.trash_path,
-            })
-            .collect(),
+        results: results.into_iter().map(DeleteResponse::from).collect(),
     }))
 }
 
@@ -533,7 +509,7 @@ async fn post_mkdir(
     Json(req): Json<MkdirRequest>,
 ) -> AppResult<StatusCode> {
     let (_, space) = require_session(&state, &jar)?;
-    blocking(move || mkdir::create_folder(&space, &req.path)).await?;
+    run_blocking(move || mkdir::create_folder(&space, &req.path)).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -549,7 +525,7 @@ struct MetaResponse {
 
 async fn get_meta(State(state): State<AppState>, jar: CookieJar) -> AppResult<Json<MetaResponse>> {
     let (pass, space) = require_session(&state, &jar)?;
-    let idx = blocking(move || meta::load(&space, &pass)).await?;
+    let idx = run_blocking(move || meta::load(&space, &pass)).await?;
     let meta = idx
         .paths
         .iter()
@@ -577,7 +553,7 @@ async fn put_meta(
     Json(req): Json<PutMetaRequest>,
 ) -> AppResult<StatusCode> {
     let (pass, space) = require_session(&state, &jar)?;
-    blocking(move || meta::set_tags(&space, &pass, &req.path, req.tags)).await?;
+    run_blocking(move || meta::set_tags(&space, &pass, &req.path, req.tags)).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -592,9 +568,8 @@ struct PutMetaBulkRequest {
     updates: Vec<MetaUpdate>,
 }
 
-/// Apply a batch of tag updates atomically. One decrypt + one encrypt + one
-/// git commit, regardless of how many files are touched — replacing the
-/// "loop with N round-trips" pattern the UI used before.
+/// Apply a batch of tag updates atomically: one decrypt + encrypt + commit
+/// regardless of how many files are touched.
 async fn put_meta_bulk(
     State(state): State<AppState>,
     jar: CookieJar,
@@ -603,6 +578,6 @@ async fn put_meta_bulk(
     let (pass, space) = require_session(&state, &jar)?;
     let updates: Vec<(String, Vec<String>)> =
         req.updates.into_iter().map(|u| (u.path, u.tags)).collect();
-    blocking(move || meta::set_tags_bulk(&space, &pass, updates)).await?;
+    run_blocking(move || meta::set_tags_bulk(&space, &pass, updates)).await?;
     Ok(StatusCode::NO_CONTENT)
 }

@@ -4,8 +4,9 @@ use axum::{Json, Router};
 use axum_extra::extract::cookie::CookieJar;
 use serde::{Deserialize, Serialize};
 
-use crate::error::{AppError, AppResult};
+use crate::error::AppResult;
 use crate::routes::auth::require_session;
+use crate::routes::run_blocking;
 use crate::space::search;
 use crate::state::AppState;
 
@@ -36,14 +37,13 @@ async fn get_search(
     Query(q): Query<SearchQuery>,
 ) -> AppResult<Json<SearchResponse>> {
     let (pass, space) = require_session(&state, &jar)?;
-    let hits = tokio::task::spawn_blocking(move || search::search(&space, &pass, &q.q))
-        .await
-        .map_err(|e| AppError::Internal(format!("search join: {e}")))??
+    let hits = run_blocking(move || search::search(&space, &pass, &q.q))
+        .await?
         .into_iter()
-        .map(|h| SearchHitDto {
-            path: h.path,
-            title: h.title,
-            snippet: h.snippet,
+        .map(|hit| SearchHitDto {
+            path: hit.path,
+            title: hit.title,
+            snippet: hit.snippet,
         })
         .collect();
     Ok(Json(SearchResponse { hits }))

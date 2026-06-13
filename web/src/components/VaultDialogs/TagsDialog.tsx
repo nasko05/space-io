@@ -33,32 +33,32 @@ export function TagsDialog({
     if (open) {
       setTags(initialTags);
       setDraft('');
-      const t = window.setTimeout(() => inputRef.current?.focus(), 0);
-      return () => window.clearTimeout(t);
+      const timer = window.setTimeout(() => inputRef.current?.focus(), 0);
+      return () => window.clearTimeout(timer);
     }
     return undefined;
   }, [open, initialTags]);
 
   function commitDraft() {
-    const t = draft.trim();
-    if (!t) return;
-    if (tags.some((existing) => existing.toLowerCase() === t.toLowerCase())) {
+    const trimmed = draft.trim();
+    if (!trimmed) return;
+    if (tags.some((existing) => existing.toLowerCase() === trimmed.toLowerCase())) {
       setDraft('');
       return;
     }
-    setTags((cur) => [...cur, t]);
+    setTags((cur) => [...cur, trimmed]);
     setDraft('');
   }
 
-  function removeTag(idx: number) {
-    setTags((cur) => cur.filter((_, i) => i !== idx));
+  function removeTag(index: number) {
+    setTags((cur) => cur.filter((_, i) => i !== index));
   }
 
-  function onKey(e: KeyboardEvent<HTMLInputElement>) {
-    if (e.key === 'Enter' || e.key === ',') {
-      e.preventDefault();
+  function onKey(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key === 'Enter' || event.key === ',') {
+      event.preventDefault();
       commitDraft();
-    } else if (e.key === 'Backspace' && !draft && tags.length > 0) {
+    } else if (event.key === 'Backspace' && !draft && tags.length > 0) {
       removeTag(tags.length - 1);
     }
   }
@@ -66,10 +66,10 @@ export function TagsDialog({
   async function save() {
     // Commit any in-progress draft into the tag set before saving.
     const finalTags = (() => {
-      const t = draft.trim();
-      if (!t) return tags;
-      if (tags.some((x) => x.toLowerCase() === t.toLowerCase())) return tags;
-      return [...tags, t];
+      const trimmed = draft.trim();
+      if (!trimmed) return tags;
+      if (tags.some((existing) => existing.toLowerCase() === trimmed.toLowerCase())) return tags;
+      return [...tags, trimmed];
     })();
     await run(() => onSave(finalTags), { onSuccess: onClose });
   }
@@ -77,12 +77,12 @@ export function TagsDialog({
   if (!open) return null;
 
   const suggestions = knownTags.filter(
-    (k) => !tags.some((t) => t.toLowerCase() === k.toLowerCase()),
+    (candidate) => !tags.some((tag) => tag.toLowerCase() === candidate.toLowerCase()),
   );
 
   return (
     <div className={styles.scrim} onMouseDown={onClose}>
-      <div className={styles.panel} onMouseDown={(e) => e.stopPropagation()}>
+      <div className={styles.panel} onMouseDown={(event) => event.stopPropagation()}>
         <div className={styles.header}>
           <div>
             <h2 className={styles.title}>Tags</h2>
@@ -98,14 +98,14 @@ export function TagsDialog({
         </div>
 
         <div className={styles.chipRow}>
-          {tags.map((t, i) => (
-            <span key={`${t}-${i}`} className={styles.chip}>
-              {t}
+          {tags.map((tag, i) => (
+            <span key={`${tag}-${i}`} className={styles.chip}>
+              {tag}
               <button
                 type="button"
                 className={styles.chipRemove}
                 onClick={() => removeTag(i)}
-                aria-label={`Remove ${t}`}
+                aria-label={`Remove ${tag}`}
               >
                 ×
               </button>
@@ -115,7 +115,7 @@ export function TagsDialog({
             ref={inputRef}
             className={styles.chipInput}
             value={draft}
-            onChange={(e) => setDraft(e.target.value)}
+            onChange={(event) => setDraft(event.target.value)}
             onKeyDown={onKey}
             onBlur={commitDraft}
             placeholder={tags.length === 0 ? 'Add a tag…' : ''}
@@ -126,15 +126,15 @@ export function TagsDialog({
           <div>
             <div className={styles.label}>Existing tags</div>
             <div className={styles.chipRow} style={{ minHeight: 0 }}>
-              {suggestions.slice(0, 24).map((t) => (
+              {suggestions.slice(0, 24).map((tag) => (
                 <button
-                  key={t}
+                  key={tag}
                   type="button"
                   className={styles.chip}
                   style={{ cursor: 'pointer' }}
-                  onClick={() => setTags((cur) => [...cur, t])}
+                  onClick={() => setTags((cur) => [...cur, tag])}
                 >
-                  + {t}
+                  + {tag}
                 </button>
               ))}
             </div>

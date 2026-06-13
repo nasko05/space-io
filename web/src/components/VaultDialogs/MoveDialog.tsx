@@ -40,9 +40,7 @@ export function MoveDialog({
   const folders = useMemo(() => collectFolders(tree), [tree]);
 
   function isLoopTarget(folder: string): boolean {
-    return movingPaths.some(
-      (p) => folder === p || folder.startsWith(`${p}/`),
-    );
+    return movingPaths.some((path) => folder === path || folder.startsWith(`${path}/`));
   }
 
   async function submit() {
@@ -65,7 +63,7 @@ export function MoveDialog({
 
   return (
     <div className={styles.scrim} onMouseDown={onClose}>
-      <div className={styles.panel} onMouseDown={(e) => e.stopPropagation()}>
+      <div className={styles.panel} onMouseDown={(event) => event.stopPropagation()}>
         <div className={styles.header}>
           <div>
             <h2 className={styles.title}>
@@ -79,21 +77,21 @@ export function MoveDialog({
         </div>
 
         <div className={styles.folderList}>
-          {folders.map((f) => {
-            const disabled = isLoopTarget(f.path);
+          {folders.map((folder) => {
+            const disabled = isLoopTarget(folder.path);
             return (
               <button
-                key={f.path || 'root'}
+                key={folder.path || 'root'}
                 type="button"
                 className={`${styles.folderItem} ${
-                  picked === f.path ? styles.folderItemActive : ''
+                  picked === folder.path ? styles.folderItemActive : ''
                 }`}
-                style={{ paddingLeft: 10 + f.depth * 16 }}
-                onClick={() => setPicked(f.path)}
+                style={{ paddingLeft: 10 + folder.depth * 16 }}
+                onClick={() => setPicked(folder.path)}
                 disabled={disabled || busy}
                 title={disabled ? "Can't move into itself" : undefined}
               >
-                <FolderOpen size={12} /> {f.label}
+                <FolderOpen size={12} /> {folder.label}
               </button>
             );
           })}
@@ -104,14 +102,14 @@ export function MoveDialog({
               <input
                 className={styles.chipInput}
                 value={newFolderName}
-                onChange={(e) => setNewFolderName(e.target.value)}
+                onChange={(event) => setNewFolderName(event.target.value)}
                 placeholder="New folder name…"
                 autoFocus
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
                     void createFolderInside();
-                  } else if (e.key === 'Escape') {
+                  } else if (event.key === 'Escape') {
                     setCreating(false);
                     setNewFolderName('');
                   }

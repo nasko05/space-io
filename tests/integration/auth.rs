@@ -1,17 +1,13 @@
-//! HTTP integration tests for `/api/auth/*`.
-//!
-//! These tests drive the live axum router (built via `routes::build_router`)
-//! end-to-end: the registration handler runs `init_space` with production
-//! KDF parameters, the unlock handler runs scrypt, and the cookie jar is
-//! threaded through the same way a browser would carry it.
-//!
-//! Tests that don't need the production KDF cost use `Harness::register`
-//! which sidesteps `/auth/init` and writes a cheap-KDF space directly.
+//! HTTP integration tests for `/api/auth/*`, driving the live axum router
+//! end-to-end (registration runs `init_space` at production KDF cost, unlock
+//! runs scrypt, cookies thread through as a browser's would). Tests that don't
+//! need that cost use `Harness::register`, which writes a cheap-KDF space.
 
+use axum::http::Request;
 use axum::http::StatusCode;
 
 use super::common::{
-    body_json, expect_status, get, post_json, with_cookie, Harness, SESSION_COOKIE,
+    body_json, expect_status, get, post_json, urlencode, with_cookie, Harness, SESSION_COOKIE,
 };
 
 #[tokio::test]
@@ -54,7 +50,7 @@ async fn status_with_garbage_cookie_is_not_unlocked() {
         .unwrap();
     let body = body_json(h.send(req).await).await;
     assert_eq!(body["unlocked"], false);
-    // The cookie was unparseable, so we can't tell whose space it pointed at.
+    // Unparseable cookie → we can't tell whose space it pointed at.
     assert_eq!(body["owner"], "");
     assert_eq!(body["email"], "");
 }
@@ -75,8 +71,7 @@ async fn lock_drops_the_session_cookie() {
         ))
         .await;
     assert_eq!(res.status(), StatusCode::NO_CONTENT);
-    // The server replies with a Set-Cookie that clears the value; we just
-    // check the session is no longer resolvable on the server side.
+    // Check the session is no longer resolvable server-side.
     let res = h.send(with_cookie(get("/api/auth/status"), &user)).await;
     assert_eq!(body_json(res).await["unlocked"], false);
 }
@@ -143,8 +138,8 @@ async fn unlock_with_wrong_email_returns_401_wrong_passphrase() {
     let h = Harness::fresh();
     let _user = h.register("ada@example.lan", "passphrase-9");
 
-    // Same status code + error code as a real-but-wrong passphrase, so an
-    // attacker can't tell which addresses are registered.
+    // Same status + error code as a wrong passphrase, so registered addresses
+    // can't be enumerated.
     let res = h
         .send(post_json(
             "/api/auth/unlock",
@@ -281,11 +276,9 @@ async fn passkey_register_then_info_round_trips() {
     assert_eq!(info["prf_salt_b64"], "saltBASE64==");
     assert_eq!(info["wrapped_passphrase_b64"], "wrappedBASE64==");
 
-    // And it shows in /auth/status now.
     let status = body_json(h.send(with_cookie(get("/api/auth/status"), &user)).await).await;
     assert_eq!(status["has_passkey"], true);
 
-    // Delete clears it.
     let res = h
         .send(with_cookie(
             Request::builder()
@@ -318,22 +311,4 @@ async fn unregistered_endpoints_unauthorized_without_cookie() {
             "expected 401 for {uri}",
         );
     }
-}
-
-// --- shared imports for tests using `Request::builder()` directly ---
-use axum::http::Request;
-
-fn urlencode(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for ch in s.chars() {
-        match ch {
-            'A'..='Z' | 'a'..='z' | '0'..='9' | '-' | '_' | '.' | '~' => out.push(ch),
-            _ => {
-                for b in ch.to_string().as_bytes() {
-                    out.push_str(&format!("%{:02X}", b));
-                }
-            }
-        }
-    }
-    out
 }

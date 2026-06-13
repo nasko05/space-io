@@ -35,43 +35,41 @@ export function PasskeyModal({ open, email, owner, hasPasskey, onClose, onChange
 
   if (!open) return null;
 
-  async function register(e: FormEvent) {
-    e.preventDefault();
+  async function register(event: FormEvent) {
+    event.preventDefault();
     if (!passphrase) return;
     setPhase({ kind: 'verifying' });
 
-    // First confirm the passphrase is correct by trying unlock (the server
-    // will mint a new session cookie either way; we accept that because the
-    // user is already in an unlocked session anyway).
+    // Confirm the passphrase is correct before enrolling.
     try {
       await api.unlock(email, passphrase);
     } catch (err) {
-      const msg =
+      const message =
         err instanceof ApiError && err.code === 'wrong_passphrase'
           ? 'Wrong passphrase'
           : err instanceof Error
           ? err.message
           : 'Could not verify';
-      setPhase({ kind: 'error', message: msg });
+      setPhase({ kind: 'error', message });
       return;
     }
 
     setPhase({ kind: 'registering' });
     try {
-      const reg = await registerPasskey(owner, passphrase);
-      // Sanity-check that we can actually decrypt what we just wrote.
+      const registered = await registerPasskey(owner, passphrase);
+      // Verify we can decrypt what we just wrote before persisting it.
       const recovered = await unlockWithPasskey({
-        credentialIdB64: reg.credentialIdB64,
-        prfSaltB64: reg.prfSaltB64,
-        wrappedPassphraseB64: reg.wrappedPassphraseB64,
+        credentialIdB64: registered.credentialIdB64,
+        prfSaltB64: registered.prfSaltB64,
+        wrappedPassphraseB64: registered.wrappedPassphraseB64,
       });
       if (recovered !== passphrase) {
         throw new Error('Self-check failed: recovered passphrase did not match.');
       }
       await api.registerPasskey({
-        credential_id_b64: reg.credentialIdB64,
-        prf_salt_b64: reg.prfSaltB64,
-        wrapped_passphrase_b64: reg.wrappedPassphraseB64,
+        credential_id_b64: registered.credentialIdB64,
+        prf_salt_b64: registered.prfSaltB64,
+        wrapped_passphrase_b64: registered.wrappedPassphraseB64,
       });
       setPhase({ kind: 'done', message: 'Passkey registered. You can unlock with it next time.' });
       setPassphrase('');
@@ -106,7 +104,7 @@ export function PasskeyModal({ open, email, owner, hasPasskey, onClose, onChange
 
   return (
     <div className={styles.scrim} onMouseDown={onClose}>
-      <div className={styles.panel} onMouseDown={(e) => e.stopPropagation()}>
+      <div className={styles.panel} onMouseDown={(event) => event.stopPropagation()}>
         <div className={styles.header}>
           <div>
             <h2 className={styles.title}>Passkey</h2>
@@ -157,7 +155,7 @@ export function PasskeyModal({ open, email, owner, hasPasskey, onClose, onChange
                 className={styles.passInput}
                 type={visible ? 'text' : 'password'}
                 value={passphrase}
-                onChange={(e) => setPassphrase(e.target.value)}
+                onChange={(event) => setPassphrase(event.target.value)}
                 autoComplete="current-password"
                 spellCheck={false}
                 disabled={phase.kind === 'verifying' || phase.kind === 'registering'}
@@ -167,7 +165,7 @@ export function PasskeyModal({ open, email, owner, hasPasskey, onClose, onChange
               <button
                 type="button"
                 className={styles.eyeBtn}
-                onClick={() => setVisible((v) => !v)}
+                onClick={() => setVisible((current) => !current)}
                 tabIndex={-1}
                 aria-label={visible ? 'Hide' : 'Show'}
               >
@@ -197,9 +195,8 @@ export function PasskeyModal({ open, email, owner, hasPasskey, onClose, onChange
         {phase.kind === 'error' && <div className={styles.error}>{phase.message}</div>}
         {phase.kind === 'done' && <div className={styles.success}>{phase.message}</div>}
 
-        {/* Diagnostic footer — quietly shows the page context the WebAuthn
-            call will use, so when a SecurityError comes back the user can
-            see exactly what we tried. */}
+        {/* Diagnostic footer: the page context the WebAuthn call uses, so a
+            SecurityError can be matched to what we tried. */}
         {typeof window !== 'undefined' && (
           <div className={styles.diagnostic}>
             <span>

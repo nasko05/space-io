@@ -75,7 +75,6 @@ mod tests {
         let (_dir, space, pass) = make_space_with_note("p", "Journal/2026/note.md", "x");
         let r = read_file(&space, &pass, "Journal/2026/note.md").unwrap();
         let updated = r.updated.unwrap();
-        // RFC3339 has at least the form YYYY-MM-DDTHH:MM:SS+TZ
         assert!(updated.contains('T'), "iso8601: {updated}");
     }
 }

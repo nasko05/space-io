@@ -15,8 +15,8 @@ pub async fn handler(uri: Uri) -> Response {
     if let Some(asset) = Assets::get(path) {
         return serve(path, asset);
     }
-    // SPA fallback: any unknown route returns index.html so React Router (or our
-    // state machine) handles deep links.
+    // SPA fallback: unknown routes return index.html so the client handles deep
+    // links.
     if let Some(index) = Assets::get("index.html") {
         return serve("index.html", index);
     }

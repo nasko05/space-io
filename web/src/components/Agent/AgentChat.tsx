@@ -33,9 +33,8 @@ export function AgentChat({ open, onClose, onVaultChanged }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
-  // Decisions accumulate synchronously here so rapid approvals across several
-  // proposal cards can't race on the (async) `decisions` state. `inFlight`
-  // guards against double-applying the same card before its result lands.
+  // Accumulate decisions synchronously so rapid approvals can't race on the
+  // async `decisions` state; `inFlight` guards against double-applying a card.
   const decisionsRef = useRef<Record<string, string>>({});
   const inFlightRef = useRef<Set<string>>(new Set());
 
@@ -45,8 +44,8 @@ export function AgentChat({ open, onClose, onVaultChanged }: Props) {
     let cancelled = false;
     void (async () => {
       try {
-        const s = await api.agentStatus();
-        if (!cancelled) setStatus(s);
+        const fetched = await api.agentStatus();
+        if (!cancelled) setStatus(fetched);
       } catch (err) {
         if (!cancelled) {
           setStatus({ configured: false, model: '', web_search: 'off' });
@@ -61,15 +60,15 @@ export function AgentChat({ open, onClose, onVaultChanged }: Props) {
 
   // Keep the transcript pinned to the latest message.
   useEffect(() => {
-    const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    const container = scrollRef.current;
+    if (container) container.scrollTop = container.scrollHeight;
   }, [messages, pending, busy]);
 
   // Esc closes the drawer.
   useEffect(() => {
     if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -109,34 +108,33 @@ export function AgentChat({ open, onClose, onVaultChanged }: Props) {
   // Apply one approved action through the existing, audited file endpoints.
   const applyAction = useCallback(
     async (action: AgentPendingAction): Promise<string> => {
-      const a = action.args;
+      const args = action.args;
       switch (action.tool) {
         case 'write_file': {
-          // Assistant edits are deliberate changes — record them as
-          // checkpoints so each remains a recoverable point in history.
-          const r = await api.checkpoint(
-            str(a.path),
-            str(a.content),
-            a.message ? str(a.message) : undefined,
+          // Record assistant edits as checkpoints so each stays recoverable.
+          const result = await api.checkpoint(
+            str(args.path),
+            str(args.content),
+            args.message ? str(args.message) : undefined,
           );
-          return `Wrote ${r.path}.`;
+          return `Wrote ${result.path}.`;
         }
         case 'move_path': {
-          const r = await api.move(str(a.from), str(a.to));
-          return `Moved to ${r.path}.`;
+          const result = await api.move(str(args.from), str(args.to));
+          return `Moved to ${result.path}.`;
         }
         case 'delete_path': {
-          const r = await api.deleteFile(str(a.path));
-          return `Deleted; recoverable in trash at ${r.trash_path}.`;
+          const result = await api.deleteFile(str(args.path));
+          return `Deleted; recoverable in trash at ${result.trash_path}.`;
         }
         case 'create_folder': {
-          await api.mkdir(str(a.path));
-          return `Created folder ${str(a.path)}.`;
+          await api.mkdir(str(args.path));
+          return `Created folder ${str(args.path)}.`;
         }
         case 'set_tags': {
-          const tags = Array.isArray(a.tags) ? a.tags.map(str) : [];
-          await api.setTags(str(a.path), tags);
-          return `Updated tags on ${str(a.path)}.`;
+          const tags = Array.isArray(args.tags) ? args.tags.map(str) : [];
+          await api.setTags(str(args.path), tags);
+          return `Updated tags on ${str(args.path)}.`;
         }
         default:
           return `Unknown action "${action.tool}".`;
@@ -149,11 +147,11 @@ export function AgentChat({ open, onClose, onVaultChanged }: Props) {
   // (in the model's original order) and ask it to continue.
   const continueWith = useCallback(async () => {
     const resolved = decisionsRef.current;
-    const toolMsgs: AgentMessage[] = pending.map((p) => ({
+    const toolMsgs: AgentMessage[] = pending.map((action) => ({
       role: 'tool',
-      tool_call_id: p.tool_call_id,
-      name: p.tool,
-      content: resolved[p.tool_call_id] ?? 'User declined this change.',
+      tool_call_id: action.tool_call_id,
+      name: action.tool,
+      content: resolved[action.tool_call_id] ?? 'User declined this change.',
     }));
     const convo = [...messages, ...toolMsgs];
     setPending([]);
@@ -181,7 +179,7 @@ export function AgentChat({ open, onClose, onVaultChanged }: Props) {
       inFlightRef.current.delete(id);
       decisionsRef.current = { ...decisionsRef.current, [id]: result };
       setDecisions(decisionsRef.current);
-      if (pending.every((p) => decisionsRef.current[p.tool_call_id] !== undefined)) {
+      if (pending.every((action) => decisionsRef.current[action.tool_call_id] !== undefined)) {
         await continueWith();
       }
     },
@@ -190,9 +188,9 @@ export function AgentChat({ open, onClose, onVaultChanged }: Props) {
 
   const rejectAll = useCallback(async () => {
     if (busy) return;
-    for (const p of pending) {
-      if (decisionsRef.current[p.tool_call_id] === undefined) {
-        decisionsRef.current[p.tool_call_id] = 'User declined this change.';
+    for (const action of pending) {
+      if (decisionsRef.current[action.tool_call_id] === undefined) {
+        decisionsRef.current[action.tool_call_id] = 'User declined this change.';
       }
     }
     setDecisions({ ...decisionsRef.current });
@@ -211,9 +209,9 @@ export function AgentChat({ open, onClose, onVaultChanged }: Props) {
   }, [busy]);
 
   const onInputKey = useCallback(
-    (e: ReactKeyboardEvent<HTMLTextAreaElement>) => {
-      if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault();
+    (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
+      if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault();
         void send(input);
       }
     },
@@ -223,7 +221,7 @@ export function AgentChat({ open, onClose, onVaultChanged }: Props) {
   if (!open) return null;
 
   const awaiting = pending.length > 0;
-  const pendingIds = new Set(pending.map((p) => p.tool_call_id));
+  const pendingIds = new Set(pending.map((action) => action.tool_call_id));
   const empty = messages.length === 0 && !busy;
 
   return (
@@ -269,17 +267,22 @@ export function AgentChat({ open, onClose, onVaultChanged }: Props) {
               shown to you for approval first.
             </p>
             <div className={styles.suggestions}>
-              {SUGGESTIONS.map((s) => (
-                <button key={s} type="button" className={styles.suggestion} onClick={() => void send(s)}>
-                  {s}
+              {SUGGESTIONS.map((suggestion) => (
+                <button
+                  key={suggestion}
+                  type="button"
+                  className={styles.suggestion}
+                  onClick={() => void send(suggestion)}
+                >
+                  {suggestion}
                 </button>
               ))}
             </div>
           </div>
         )}
 
-        {messages.map((m, i) => (
-          <MessageView key={i} message={m} suppressIds={pendingIds} />
+        {messages.map((message, i) => (
+          <MessageView key={i} message={message} suppressIds={pendingIds} />
         ))}
 
         {busy && <div className={styles.thinking}>Thinking…</div>}
@@ -289,14 +292,14 @@ export function AgentChat({ open, onClose, onVaultChanged }: Props) {
             <div className={styles.proposalsLabel}>
               {pending.length === 1 ? 'Proposed change' : `${pending.length} proposed changes`}
             </div>
-            {pending.map((p) => (
+            {pending.map((action) => (
               <ProposalCard
-                key={p.tool_call_id}
-                action={p}
-                decision={decisions[p.tool_call_id]}
+                key={action.tool_call_id}
+                action={action}
+                decision={decisions[action.tool_call_id]}
                 disabled={busy}
-                onApprove={() => void decide(p, true)}
-                onReject={() => void decide(p, false)}
+                onApprove={() => void decide(action, true)}
+                onReject={() => void decide(action, false)}
               />
             ))}
             {pending.length > 1 && (
@@ -314,7 +317,7 @@ export function AgentChat({ open, onClose, onVaultChanged }: Props) {
         <textarea
           className={styles.input}
           value={input}
-          onChange={(e) => setInput(e.target.value)}
+          onChange={(event) => setInput(event.target.value)}
           onKeyDown={onInputKey}
           placeholder={awaiting ? 'Resolve the proposed change above…' : 'Ask the assistant…'}
           rows={2}
@@ -353,13 +356,13 @@ function MessageView({
 
   if (message.role !== 'assistant') return null;
 
-  const calls = (message.tool_calls ?? []).filter((c) => !suppressIds.has(c.id));
+  const calls = (message.tool_calls ?? []).filter((call) => !suppressIds.has(call.id));
   return (
     <>
       {message.content && <div className={styles.assistantBubble}>{message.content}</div>}
-      {calls.map((c) => (
-        <div key={c.id} className={styles.activity}>
-          {toolLabel(c.function.name, c.function.arguments)}
+      {calls.map((call) => (
+        <div key={call.id} className={styles.activity}>
+          {toolLabel(call.function.name, call.function.arguments)}
         </div>
       ))}
     </>
@@ -381,7 +384,7 @@ function ProposalCard({
   onApprove: () => void;
   onReject: () => void;
 }) {
-  const a = action.args;
+  const args = action.args;
   const decided = decision !== undefined;
   return (
     <div className={`${styles.card} ${decided ? styles.cardDecided : ''}`}>
@@ -390,11 +393,11 @@ function ProposalCard({
       {action.tool === 'write_file' && (
         <details className={styles.cardDetails}>
           <summary>Show content</summary>
-          <pre className={styles.codeBlock}>{str(a.content)}</pre>
+          <pre className={styles.codeBlock}>{str(args.content)}</pre>
         </details>
       )}
       {action.tool === 'set_tags' && (
-        <div className={styles.cardMeta}>{(Array.isArray(a.tags) ? a.tags : []).map(str).join(', ') || '(no tags)'}</div>
+        <div className={styles.cardMeta}>{(Array.isArray(args.tags) ? args.tags : []).map(str).join(', ') || '(no tags)'}</div>
       )}
 
       {decided ? (

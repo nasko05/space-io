@@ -22,9 +22,9 @@ export function SearchOverlay({ open, onClose, onSelect }: Props) {
       setQuery('');
       setHits([]);
       setActiveIndex(0);
-      // Defer to next tick so the input exists.
-      const t = window.setTimeout(() => inputRef.current?.focus(), 0);
-      return () => window.clearTimeout(t);
+      // Defer a tick so the input exists.
+      const timer = window.setTimeout(() => inputRef.current?.focus(), 0);
+      return () => window.clearTimeout(timer);
     }
     return undefined;
   }, [open]);
@@ -38,7 +38,7 @@ export function SearchOverlay({ open, onClose, onSelect }: Props) {
       return;
     }
     let cancelled = false;
-    const t = window.setTimeout(async () => {
+    const timer = window.setTimeout(async () => {
       setBusy(true);
       try {
         const { hits } = await api.search(trimmed);
@@ -57,25 +57,25 @@ export function SearchOverlay({ open, onClose, onSelect }: Props) {
     }, 180);
     return () => {
       cancelled = true;
-      window.clearTimeout(t);
+      window.clearTimeout(timer);
     };
   }, [query, open]);
 
-  function onKey(e: React.KeyboardEvent) {
-    if (e.key === 'Escape') {
-      e.preventDefault();
+  function onKey(event: React.KeyboardEvent) {
+    if (event.key === 'Escape') {
+      event.preventDefault();
       onClose();
       return;
     }
     if (hits.length === 0) return;
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      setActiveIndex((i) => Math.min(hits.length - 1, i + 1));
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      setActiveIndex((i) => Math.max(0, i - 1));
-    } else if (e.key === 'Enter') {
-      e.preventDefault();
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      setActiveIndex((index) => Math.min(hits.length - 1, index + 1));
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      setActiveIndex((index) => Math.max(0, index - 1));
+    } else if (event.key === 'Enter') {
+      event.preventDefault();
       const hit = hits[activeIndex];
       if (hit) {
         onSelect(hit.path);
@@ -83,14 +83,12 @@ export function SearchOverlay({ open, onClose, onSelect }: Props) {
     }
   }
 
-  // Build the highlight regex once per query rather than once per (hit ×
-  // field). With 24 hits × 2 fields per hit, the old highlight() was
-  // re-compiling the regex 48 times per render of the results pane.
+  // Build the highlight regex once per query, not once per hit × field.
   const highlightPattern = useMemo(() => {
     const tokens = query
       .trim()
       .split(/\s+/)
-      .filter((t) => t.length > 0);
+      .filter((token) => token.length > 0);
     if (tokens.length === 0) return null;
     return new RegExp(`(${tokens.map(escapeRegex).join('|')})`, 'gi');
   }, [query]);
@@ -99,14 +97,14 @@ export function SearchOverlay({ open, onClose, onSelect }: Props) {
 
   return (
     <div className={styles.scrim} onMouseDown={onClose}>
-      <div className={styles.panel} onMouseDown={(e) => e.stopPropagation()}>
+      <div className={styles.panel} onMouseDown={(event) => event.stopPropagation()}>
         <div className={styles.inputRow}>
           <Search size={16} />
           <input
             ref={inputRef}
             className={styles.input}
             value={query}
-            onChange={(e: ChangeEvent<HTMLInputElement>) => setQuery(e.target.value)}
+            onChange={(event: ChangeEvent<HTMLInputElement>) => setQuery(event.target.value)}
             onKeyDown={onKey}
             placeholder="Search the whole space…"
             spellCheck={false}
@@ -157,25 +155,23 @@ export function SearchOverlay({ open, onClose, onSelect }: Props) {
   );
 }
 
-/** Split `text` around the capture group in `pattern`. When the pattern has
- * a capturing group, `String.split` interleaves matches and non-matches —
- * odd-indexed entries are always the matches, which lets us highlight
- * without re-running `test()` (which had a subtle lastIndex bug on the
- * global flag). */
+/** Split `text` around the capture group in `pattern`. A capturing group makes
+ * `String.split` interleave matches and non-matches, so odd-indexed pieces are
+ * the matches to wrap in `<mark>`. */
 function highlight(text: string, pattern: RegExp | null): React.ReactNode {
   if (!pattern) return text;
   const pieces = text.split(pattern);
-  return pieces.map((p, i) =>
+  return pieces.map((piece, i) =>
     i % 2 === 1 ? (
       <mark key={i} className={styles.mark}>
-        {p}
+        {piece}
       </mark>
     ) : (
-      <span key={i}>{p}</span>
+      <span key={i}>{piece}</span>
     ),
   );
 }
 
-function escapeRegex(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }

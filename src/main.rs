@@ -23,7 +23,7 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Command {
-    /// Serve over HTTP. Tolerates an empty data dir — the registration page
+    /// Serve over HTTP. Tolerates an empty data dir; the registration page
     /// brings the first user to life.
     Serve {
         #[arg(long, default_value = "./data")]
@@ -49,9 +49,8 @@ fn main() -> anyhow::Result<()> {
 
 #[tokio::main(flavor = "multi_thread")]
 async fn cmd_serve(space_dir: PathBuf, listen: SocketAddr) -> anyhow::Result<()> {
-    // `serve` is allowed to start against an empty data root; the registration
-    // page (POST /api/auth/init) brings it to life. Just make sure the
-    // directory itself exists so the init handler can write into it.
+    // Ensure the data root exists so the init handler can write into it; an
+    // empty root is fine, registration brings it to life.
     std::fs::create_dir_all(&space_dir).context("create space-dir")?;
 
     let sessions = SessionStore::new();
@@ -70,8 +69,8 @@ async fn cmd_serve(space_dir: PathBuf, listen: SocketAddr) -> anyhow::Result<()>
         tracing::info!("No users registered yet; serving the registration page only.");
     }
 
-    // Periodically sweep expired sessions and rate-limit windows so the
-    // in-memory tables don't grow unbounded if a host stays up for weeks.
+    // Sweep expired sessions and rate-limit windows so the in-memory tables
+    // don't grow unbounded on a long-lived host.
     let sweep_sessions = sessions.clone();
     let sweep_limiter = unlock_limiter.clone();
     tokio::spawn(async move {

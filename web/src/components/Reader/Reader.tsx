@@ -112,14 +112,13 @@ export function Reader({
   const [ac, setAc] = useState<AutocompleteState>(EMPTY_AC);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
-  // Checkpoint ("save a version") state. Autosave keeps the draft on disk;
-  // a checkpoint is the deliberate, labelled point the user can return to.
+  // Checkpoint state — the deliberate, labelled point the user can return to,
+  // separate from autosave's draft on disk.
   const [checkpointOpen, setCheckpointOpen] = useState(false);
   const [checkpointLabel, setCheckpointLabel] = useState('');
   const [checkpointing, setCheckpointing] = useState(false);
   const [checkpointError, setCheckpointError] = useState<string | null>(null);
-  // True once the note has been edited since it was opened / last checkpointed
-  // — drives the "unsaved version" dot on the Checkpoint button.
+  // Edited since opened/last checkpointed — drives the unsaved-version dot.
   const [dirtySinceCheckpoint, setDirtySinceCheckpoint] = useState(false);
   // Bumped after a checkpoint so an open HistoryPanel reloads its list.
   const [historyReloadToken, setHistoryReloadToken] = useState(0);
@@ -143,8 +142,7 @@ export function Reader({
   );
   const { status, markDirty, flush } = useAutosave({ onSave: saveFn });
 
-  // Wrap the autosave's `markDirty` so every edit also flags that there are
-  // changes not yet captured in a checkpoint.
+  // Wrap `markDirty` so every edit also flags changes not yet checkpointed.
   const touch = useCallback(
     (next: string) => {
       markDirty(next);
@@ -162,7 +160,7 @@ export function Reader({
       setDirtySinceCheckpoint(false);
       setCheckpointOpen(false);
       setCheckpointLabel('');
-      setHistoryReloadToken((t) => t + 1);
+      setHistoryReloadToken((token) => token + 1);
     } catch (err) {
       setCheckpointError(err instanceof Error ? err.message : 'checkpoint failed');
     } finally {
@@ -173,8 +171,8 @@ export function Reader({
   // Dismiss the checkpoint label popover on an outside click.
   useEffect(() => {
     if (!checkpointOpen) return;
-    function onPointerDown(e: PointerEvent) {
-      if (!checkpointWrapRef.current?.contains(e.target as Node)) {
+    function onPointerDown(event: PointerEvent) {
+      if (!checkpointWrapRef.current?.contains(event.target as Node)) {
         setCheckpointOpen(false);
       }
     }
@@ -183,9 +181,9 @@ export function Reader({
   }, [checkpointOpen]);
 
   useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
-        e.preventDefault();
+    function onKey(event: KeyboardEvent) {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
+        event.preventDefault();
         void flush();
       }
     }
@@ -193,20 +191,19 @@ export function Reader({
     return () => window.removeEventListener('keydown', onKey);
   }, [flush]);
 
-  // Editor-side formatting helpers. They mutate the textarea content
-  // through state + caret restoration on the next frame so React's
-  // controlled input doesn't fight us.
+  // Editor formatting helpers: update content via state, then restore the caret
+  // on the next frame so the controlled textarea doesn't fight us.
   const applyToSelection = useCallback(
     (transform: (value: string, start: number, end: number) => { text: string; selStart: number; selEnd: number }) => {
-      const ta = textareaRef.current;
-      if (!ta) return;
-      const { selectionStart, selectionEnd, value } = ta;
+      const textarea = textareaRef.current;
+      if (!textarea) return;
+      const { selectionStart, selectionEnd, value } = textarea;
       const { text, selStart, selEnd } = transform(value, selectionStart, selectionEnd);
       setContent(text);
       touch(text);
       window.requestAnimationFrame(() => {
-        ta.focus();
-        ta.setSelectionRange(selStart, selEnd);
+        textarea.focus();
+        textarea.setSelectionRange(selStart, selEnd);
       });
     },
     [touch],
@@ -262,14 +259,12 @@ export function Reader({
     if (mode === 'edit' || mode === 'split') textareaRef.current?.focus();
   }, [mode]);
 
-  // Build paired (original, lowered) titles once per `titleToPath` change so
-  // the autocomplete filter doesn't lowercase every title on every keystroke
-  // — the old code did N string allocations per character typed inside a
-  // wikilink, which was the noticeable hitch with 1000+ notes.
+  // Pre-lower each title once per `titleToPath` change so the autocomplete
+  // filter doesn't lowercase the whole corpus on every keystroke.
   const titleIndex = useMemo(() => {
     const list: { title: string; lower: string }[] = [];
-    for (const t of titleToPath.keys()) {
-      list.push({ title: t, lower: t.toLowerCase() });
+    for (const title of titleToPath.keys()) {
+      list.push({ title, lower: title.toLowerCase() });
     }
     return list;
   }, [titleToPath]);
@@ -292,10 +287,10 @@ export function Reader({
           setAc(EMPTY_AC);
           return;
         }
-        const q = between.toLowerCase();
+        const query = between.toLowerCase();
         const hits: string[] = [];
         for (const entry of titleIndex) {
-          if (entry.lower.includes(q)) {
+          if (entry.lower.includes(query)) {
             hits.push(entry.title);
             if (hits.length >= WIKILINK_MAX_SUGGESTIONS) break;
           }
@@ -312,16 +307,16 @@ export function Reader({
     setAc(EMPTY_AC);
   }
 
-  function onContentChange(e: ChangeEvent<HTMLTextAreaElement>) {
-    const next = e.target.value;
+  function onContentChange(event: ChangeEvent<HTMLTextAreaElement>) {
+    const next = event.target.value;
     setContent(next);
     touch(next);
-    recomputeAutocomplete(next, e.target.selectionStart);
+    recomputeAutocomplete(next, event.target.selectionStart);
   }
 
   function insertSuggestion(title: string) {
-    const ta = textareaRef.current;
-    if (!ta) return;
+    const textarea = textareaRef.current;
+    if (!textarea) return;
     const start = ac.start;
     if (start < 0) return;
     const before = content.slice(0, start);
@@ -335,39 +330,39 @@ export function Reader({
     // Restore caret to just after the inserted `]]`.
     const caret = before.length + insertText.length;
     window.requestAnimationFrame(() => {
-      ta.focus();
-      ta.setSelectionRange(caret, caret);
+      textarea.focus();
+      textarea.setSelectionRange(caret, caret);
     });
   }
 
-  function onTextareaKeyDown(e: ReactKeyboardEvent<HTMLTextAreaElement>) {
+  function onTextareaKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
     // Formatting shortcuts work whether or not autocomplete is open.
-    if (e.metaKey || e.ctrlKey) {
-      const key = e.key.toLowerCase();
+    if (event.metaKey || event.ctrlKey) {
+      const key = event.key.toLowerCase();
       if (key === 'b') {
-        e.preventDefault();
+        event.preventDefault();
         wrapSelection('**');
         return;
       }
       if (key === 'i') {
-        e.preventDefault();
+        event.preventDefault();
         wrapSelection('*');
         return;
       }
     }
     if (!ac.open) return;
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      setAc((s) => ({ ...s, activeIdx: Math.min(s.hits.length - 1, s.activeIdx + 1) }));
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      setAc((s) => ({ ...s, activeIdx: Math.max(0, s.activeIdx - 1) }));
-    } else if (e.key === 'Enter' || e.key === 'Tab') {
-      e.preventDefault();
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      setAc((state) => ({ ...state, activeIdx: Math.min(state.hits.length - 1, state.activeIdx + 1) }));
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      setAc((state) => ({ ...state, activeIdx: Math.max(0, state.activeIdx - 1) }));
+    } else if (event.key === 'Enter' || event.key === 'Tab') {
+      event.preventDefault();
       const title = ac.hits[ac.activeIdx];
       if (title) insertSuggestion(title);
-    } else if (e.key === 'Escape') {
-      e.preventDefault();
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
       setAc(EMPTY_AC);
     }
   }
@@ -385,12 +380,12 @@ export function Reader({
     [flush, onSelectFile, onWikilinkMiss, titleToPath],
   );
 
-  // The rail is memoized — keep these callbacks referentially stable so it
-  // doesn't re-render on every keystroke.
+  // Keep these callbacks referentially stable so the memoized rail doesn't
+  // re-render on every keystroke.
   const railSelectFile = useCallback(
-    (p: string) => {
+    (selectedPath: string) => {
       void flush();
-      onSelectFile(p);
+      onSelectFile(selectedPath);
     },
     [flush, onSelectFile],
   );
@@ -407,9 +402,8 @@ export function Reader({
     };
   }, [path]);
 
-  // Derived values from `content` re-run on every keystroke. The regex and
-  // tokenization passes are cheap individually but compound as the note
-  // grows; memoizing trims a few ms off the typing-latency budget.
+  // Memoize the content-derived values; they re-run on every keystroke and
+  // compound as the note grows.
   const titleFromContent = useMemo(() => extractTitle(content), [content]);
   const wordCount = useMemo(() => countWords(content), [content]);
   const bodySource = useMemo(
@@ -428,9 +422,8 @@ export function Reader({
   const isEmpty = content.length === 0 || content.trim().length === 0;
   const saveLabel = saveStatusLabel(status);
 
-  // Same editor JSX is reused in single-pane edit and the left side of
-  // split. Extracted so the textarea + autocomplete share a single source
-  // of truth (caret handling, key bindings) regardless of layout.
+  // Reused by single-pane edit and the left side of split, so the textarea +
+  // autocomplete share one source of truth regardless of layout.
   const editorPane = (
     <div className={styles.editorWrap}>
       <textarea
@@ -439,8 +432,8 @@ export function Reader({
         value={content}
         onChange={onContentChange}
         onKeyDown={onTextareaKeyDown}
-        onClick={(e) => recomputeAutocomplete(content, e.currentTarget.selectionStart)}
-        onSelect={(e) => recomputeAutocomplete(content, e.currentTarget.selectionStart)}
+        onClick={(event) => recomputeAutocomplete(content, event.currentTarget.selectionStart)}
+        onSelect={(event) => recomputeAutocomplete(content, event.currentTarget.selectionStart)}
         onBlur={() => window.setTimeout(() => setAc(EMPTY_AC), 120)}
         spellCheck
         placeholder="Begin where you are."
@@ -457,9 +450,9 @@ export function Reader({
               role="option"
               aria-selected={i === ac.activeIdx}
               className={`${styles.autoItem} ${i === ac.activeIdx ? styles.autoItemActive : ''}`}
-              onMouseEnter={() => setAc((s) => ({ ...s, activeIdx: i }))}
-              onMouseDown={(e) => {
-                e.preventDefault();
+              onMouseEnter={() => setAc((state) => ({ ...state, activeIdx: i }))}
+              onMouseDown={(event) => {
+                event.preventDefault();
                 insertSuggestion(title);
               }}
             >
@@ -520,9 +513,9 @@ export function Reader({
           <div className={styles.toolbar}>
             <div className={styles.crumb}>
               <Folder size={13} />
-              {folderSegments.map((seg, i) => (
+              {folderSegments.map((segment, i) => (
                 <span key={i} className={styles.crumbSeg}>
-                  {seg}
+                  {segment}
                   <Chevron size={10} />
                 </span>
               ))}
@@ -562,7 +555,7 @@ export function Reader({
                     className={`${styles.toolBtn} ${checkpointOpen ? styles.toolBtnActive : ''}`}
                     onClick={() => {
                       setCheckpointError(null);
-                      setCheckpointOpen((v) => !v);
+                      setCheckpointOpen((open) => !open);
                     }}
                     title="Save a checkpoint you can return to"
                   >
@@ -577,13 +570,13 @@ export function Reader({
                       <input
                         className={styles.checkpointInput}
                         value={checkpointLabel}
-                        onChange={(e) => setCheckpointLabel(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            e.preventDefault();
+                        onChange={(event) => setCheckpointLabel(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter') {
+                            event.preventDefault();
                             void doCheckpoint();
-                          } else if (e.key === 'Escape') {
-                            e.preventDefault();
+                          } else if (event.key === 'Escape') {
+                            event.preventDefault();
                             setCheckpointOpen(false);
                           }
                         }}
@@ -618,7 +611,7 @@ export function Reader({
               <button
                 type="button"
                 className={`${styles.toolBtn} ${historyOpen ? styles.toolBtnActive : ''}`}
-                onClick={() => setHistoryOpen((v) => !v)}
+                onClick={() => setHistoryOpen((open) => !open)}
                 title="Version history"
               >
                 <Branch size={12} /> History
@@ -690,10 +683,10 @@ export function Reader({
                         'What’s on the windowsill of your mind today?',
                         'Something small you noticed and want to keep.',
                         'A sentence you read this week that stayed.',
-                      ].map((p, i) => (
+                      ].map((prompt, i) => (
                         <div key={i} className={styles.prompt}>
                           <span className={styles.promptIndex}>{i + 1}.</span>
-                          {p}
+                          {prompt}
                         </div>
                       ))}
                     </div>
@@ -709,14 +702,14 @@ export function Reader({
                     <div className={styles.linkedFrom}>
                       <Link size={12} />
                       <span className={styles.linkedLabel}>Linked notes</span>
-                      {linkedTitles.map((t) => (
+                      {linkedTitles.map((title) => (
                         <button
-                          key={t}
+                          key={title}
                           type="button"
                           className={styles.linkedLink}
-                          onClick={() => handleWikilinkClick(t)}
+                          onClick={() => handleWikilinkClick(title)}
                         >
-                          {t}
+                          {title}
                         </button>
                       ))}
                     </div>
@@ -741,8 +734,8 @@ export function Reader({
               <button
                 type="button"
                 className={styles.inkBtn}
-                onMouseDown={(e) => {
-                  e.preventDefault();
+                onMouseDown={(event) => {
+                  event.preventDefault();
                   prefixLine('# ');
                 }}
                 title="Heading 1"
@@ -752,8 +745,8 @@ export function Reader({
               <button
                 type="button"
                 className={styles.inkBtn}
-                onMouseDown={(e) => {
-                  e.preventDefault();
+                onMouseDown={(event) => {
+                  event.preventDefault();
                   prefixLine('## ');
                 }}
                 title="Heading 2"
@@ -764,8 +757,8 @@ export function Reader({
               <button
                 type="button"
                 className={styles.inkBtn}
-                onMouseDown={(e) => {
-                  e.preventDefault();
+                onMouseDown={(event) => {
+                  event.preventDefault();
                   wrapSelection('**');
                 }}
                 title="Bold (⌘B)"
@@ -775,8 +768,8 @@ export function Reader({
               <button
                 type="button"
                 className={styles.inkBtn}
-                onMouseDown={(e) => {
-                  e.preventDefault();
+                onMouseDown={(event) => {
+                  event.preventDefault();
                   wrapSelection('*');
                 }}
                 title="Italic (⌘I)"
@@ -787,8 +780,8 @@ export function Reader({
               <button
                 type="button"
                 className={styles.inkBtn}
-                onMouseDown={(e) => {
-                  e.preventDefault();
+                onMouseDown={(event) => {
+                  event.preventDefault();
                   prefixLine('> ');
                 }}
                 title="Quote"
@@ -798,8 +791,8 @@ export function Reader({
               <button
                 type="button"
                 className={styles.inkBtn}
-                onMouseDown={(e) => {
-                  e.preventDefault();
+                onMouseDown={(event) => {
+                  event.preventDefault();
                   wrapSelection('`');
                 }}
                 title="Inline code"
@@ -809,8 +802,8 @@ export function Reader({
               <button
                 type="button"
                 className={styles.inkBtn}
-                onMouseDown={(e) => {
-                  e.preventDefault();
+                onMouseDown={(event) => {
+                  event.preventDefault();
                   insertAtCursor('![](url)', 2);
                 }}
                 title="Image"
@@ -820,8 +813,8 @@ export function Reader({
               <button
                 type="button"
                 className={styles.inkBtn}
-                onMouseDown={(e) => {
-                  e.preventDefault();
+                onMouseDown={(event) => {
+                  event.preventDefault();
                   insertAtCursor('[](url)', 1);
                 }}
                 title="Link"
@@ -844,7 +837,7 @@ export function Reader({
 }
 
 function splitTitle(title: string): string[] {
-  const parts = title.split(',').map((p) => p.trim());
+  const parts = title.split(',').map((part) => part.trim());
   return parts.length > 1 ? parts : [title];
 }
 
@@ -855,32 +848,32 @@ function fileNameToTitle(name: string): string {
 function countWords(src: string): number {
   return src
     .split(/\s+/)
-    .filter((w) => /\w/.test(w))
+    .filter((word) => /\w/.test(word))
     .length;
 }
 
 function formatDateline(updated: string | null): string {
-  const d = updated ? new Date(updated) : new Date();
-  const weekday = d.toLocaleDateString(undefined, { weekday: 'long' });
-  const day = d.toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' });
-  const time = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false });
+  const date = updated ? new Date(updated) : new Date();
+  const weekday = date.toLocaleDateString(undefined, { weekday: 'long' });
+  const day = date.toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' });
+  const time = date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false });
   return `${weekday} · ${day} · ${time}`;
 }
 
-/** Extract the wikilinked titles in the current content that resolve to
- * actual notes, excluding self-references. */
+/** Wikilinked titles in the content that resolve to real notes, excluding
+ * self-references. */
 function backlinkableTitles(
   currentTitle: string | null,
   content: string,
   titleToPath: Map<string, string>,
 ): string[] {
   const found = new Set<string>();
-  const re = /\[\[([^\]]+)\]\]/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(content)) !== null) {
-    const t = m[1].trim();
-    if (currentTitle && t === currentTitle) continue;
-    if (titleToPath.has(t)) found.add(t);
+  const pattern = /\[\[([^\]]+)\]\]/g;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(content)) !== null) {
+    const title = match[1].trim();
+    if (currentTitle && title === currentTitle) continue;
+    if (titleToPath.has(title)) found.add(title);
   }
   return Array.from(found);
 }

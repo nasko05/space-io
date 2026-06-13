@@ -5,7 +5,7 @@ use age::secrecy::SecretString;
 use crate::crypto::age_io;
 use crate::error::AppResult;
 use crate::space::git::commit_paths;
-use crate::space::paths::{resolve_under, with_age_suffix};
+use crate::space::paths::{relative_to, resolve_under, with_age_suffix};
 use crate::space::{systemtime_iso8601, Space};
 
 #[derive(Debug)]
@@ -14,14 +14,9 @@ pub struct WriteResult {
     pub updated: String,
 }
 
-/// Persist `content` to the working tree **without** creating a git commit.
-///
-/// This is the autosave path: edits flow to disk continuously (so nothing is
-/// lost on reload or crash — `read_file` reads straight from the working tree)
-/// but they do *not* each become an entry in the version history. A discrete
-/// point in history is only minted when the user explicitly checkpoints via
-/// [`write_file`]. The latest draft always lives on disk; checkpoints are the
-/// snapshots the user chose to keep.
+/// Persist `content` to the working tree without a git commit (the autosave
+/// path). Edits flow to disk continuously so nothing is lost on reload or crash,
+/// but only an explicit [`write_file`] checkpoint mints a history entry.
 pub fn save_draft(
     space: &Space,
     passphrase: &SecretString,
@@ -35,9 +30,8 @@ pub fn save_draft(
     })
 }
 
-/// Persist `content` to the working tree **and** record a commit ("checkpoint")
-/// in the version history. Used by explicit checkpoints, rollback, and the AI
-/// assistant — every one of those is a deliberate, history-worthy change.
+/// Persist `content` to the working tree and record a commit (checkpoint). Used
+/// by explicit checkpoints, rollback, and the AI assistant.
 pub fn write_file(
     space: &Space,
     passphrase: &SecretString,
@@ -51,10 +45,7 @@ pub fn write_file(
     let summary = message
         .map(|m| m.to_string())
         .unwrap_or_else(|| format!("Edit: {rel_path}"));
-    let staged = on_disk
-        .strip_prefix(&root)
-        .map(|p| p.to_path_buf())
-        .unwrap_or_else(|_| on_disk.clone());
+    let staged = relative_to(&root, &on_disk);
     space.with_repo(|repo| commit_paths(repo, &summary, [staged]))?;
 
     Ok(WriteResult {
@@ -63,10 +54,10 @@ pub fn write_file(
     })
 }
 
-/// Encrypt `content` and write it to `<rel_path>.age` in the working tree,
-/// creating parent directories and invalidating the decrypted cache. Returns
-/// the absolute on-disk path. Shared by [`save_draft`] and [`write_file`] so
-/// the draft and checkpoint paths can't drift in how bytes hit disk.
+/// Encrypt `content` to `<rel_path>.age` in the working tree, creating parent
+/// directories and invalidating the decrypted cache. Returns the absolute
+/// on-disk path. Shared by [`save_draft`] and [`write_file`] so they can't drift
+/// in how bytes hit disk.
 fn persist_encrypted(
     space: &Space,
     passphrase: &SecretString,
@@ -160,7 +151,6 @@ mod tests {
         assert_eq!(count_commits(&dir.path().join("space")), 0);
         save_draft(&space, &pass, "n.md", "draft one").unwrap();
         save_draft(&space, &pass, "n.md", "draft two").unwrap();
-        // Autosaves persist to disk but never mint history entries.
         assert_eq!(count_commits(&dir.path().join("space")), 0);
     }
 

@@ -7,7 +7,6 @@ interface Props {
   tone?: 'light' | 'dark';
 }
 
-// Ported from shared-ui.jsx:168-186.
 export function WindowChrome({ title, right, tone = 'light' }: Props) {
   return (
     <div className={tone === 'dark' ? styles.chromeDark : styles.chrome}>

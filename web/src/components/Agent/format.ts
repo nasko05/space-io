@@ -1,18 +1,18 @@
-//! Pure helpers for rendering the assistant transcript. Kept out of the
-//! component so they can be unit-tested without React.
+// Pure helpers for rendering the assistant transcript, kept out of the
+// component so they can be unit-tested without React.
 
 /** Coerce an unknown tool-argument value to a display string. */
-export function str(v: unknown): string {
-  if (typeof v === 'string') return v;
-  if (v == null) return '';
-  return String(v);
+export function str(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (value == null) return '';
+  return String(value);
 }
 
 /** Parse a tool call's JSON `arguments` string, tolerating malformed input. */
 export function safeParse(raw: string): Record<string, unknown> {
   try {
-    const v = JSON.parse(raw);
-    return v && typeof v === 'object' ? (v as Record<string, unknown>) : {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {};
   } catch {
     return {};
   }
@@ -20,26 +20,26 @@ export function safeParse(raw: string): Record<string, unknown> {
 
 /** Friendly one-liner describing a tool call, shown in the transcript. */
 export function toolLabel(name: string, rawArgs: string): string {
-  const a = safeParse(rawArgs);
+  const args = safeParse(rawArgs);
   switch (name) {
     case 'list_files':
       return 'Listed the vault';
     case 'read_file':
-      return `Read ${str(a.path)}`;
+      return `Read ${str(args.path)}`;
     case 'search_notes':
-      return `Searched “${str(a.query)}”`;
+      return `Searched “${str(args.query)}”`;
     case 'web_search':
-      return `Searched the web for “${str(a.query)}”`;
+      return `Searched the web for “${str(args.query)}”`;
     case 'write_file':
-      return `Wrote ${str(a.path)}`;
+      return `Wrote ${str(args.path)}`;
     case 'move_path':
-      return `Moved ${str(a.from)} → ${str(a.to)}`;
+      return `Moved ${str(args.from)} → ${str(args.to)}`;
     case 'delete_path':
-      return `Deleted ${str(a.path)}`;
+      return `Deleted ${str(args.path)}`;
     case 'create_folder':
-      return `Created folder ${str(a.path)}`;
+      return `Created folder ${str(args.path)}`;
     case 'set_tags':
-      return `Tagged ${str(a.path)}`;
+      return `Tagged ${str(args.path)}`;
     default:
       return name;
   }

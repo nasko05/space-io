@@ -15,12 +15,9 @@ const HKDF_INFO = 'hearth-passkey-wrap';
 const IV_LENGTH = 12;
 
 /**
- * WebAuthn cannot work on IP-addressed origins — `rp.id` must be a
- * registrable domain suffix of the origin, and IPs never qualify.
- * The only usable loopback origin is `localhost`.
- *
- * Call this before any passkey operation; if we're on 127.0.0.1 or ::1 it
- * redirects to localhost (same port) so WebAuthn will succeed.
+ * WebAuthn rejects IP-addressed origins (`rp.id` must be a registrable domain
+ * suffix), so redirect a `127.0.0.1`/`::1` origin to `localhost` on the same
+ * port. Call before any passkey operation.
  */
 function ensureLocalhostOrigin(): void {
   const host = window.location.hostname;
@@ -79,10 +76,9 @@ function isInsideCrossOriginFrame(): boolean {
   }
 }
 
-/** Inspect the runtime for the conditions WebAuthn needs *before* we call
- *  into `navigator.credentials`. Surfacing this up-front lets the UI explain
- *  why the passkey path is unavailable instead of leaving the user to decode
- *  "The operation is insecure" out of a stack trace. */
+/** Check the conditions WebAuthn needs before calling `navigator.credentials`,
+ *  so the UI can explain why the passkey path is unavailable rather than
+ *  surfacing a raw "operation is insecure" error. */
 export function webauthnStatus(): WebAuthnStatus {
   if (typeof window === 'undefined') {
     return { ok: false, reason: 'ssr', message: 'No window object (server render).' };
@@ -135,19 +131,14 @@ export function webauthnStatus(): WebAuthnStatus {
 
 /** Throw a single Error explaining why WebAuthn can't run, if it can't. */
 function ensureWebAuthnUsable(): void {
-  const s = webauthnStatus();
-  if (!s.ok) throw new Error(s.message);
+  const status = webauthnStatus();
+  if (!status.ok) throw new Error(status.message);
 }
 
-/** Wrap the underlying browser error so the modal sees something more
- *  useful than the bare DOMException's default message. NotAllowedError
- *  in particular is overloaded — it covers user cancel, timeout, the PRF
- *  extension being unsupported by the authenticator, and a few more.
- *  Also dumps the page context (origin + rp.id) so the user can paste it
- *  into a bug report without us having to ask "what URL are you on?". */
+/** Turn the browser's overloaded WebAuthn errors (NotAllowedError covers
+ *  cancel, timeout, unsupported PRF, …) into a specific message, with the
+ *  origin + rp.id attached for bug reports. */
 function wrapWebAuthnError(stage: 'create' | 'get', err: unknown): Error {
-  // Pull the rp.id we tried + the origin so the message says exactly what
-  // failed, not just "something failed".
   const origin = typeof window !== 'undefined' ? window.location.origin : '<no-window>';
   const rpId = typeof window !== 'undefined' ? getEffectiveRpId() : '<no-window>';
 
@@ -324,17 +315,17 @@ async function sha256(data: Uint8Array): Promise<Uint8Array> {
 }
 
 function bytesToB64Url(bytes: Uint8Array): string {
-  let bin = '';
-  for (const b of bytes) bin += String.fromCharCode(b);
-  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
-function b64UrlToBytes(s: string): Uint8Array {
-  const pad = s.length % 4 === 0 ? '' : '='.repeat(4 - (s.length % 4));
-  const normalised = s.replace(/-/g, '+').replace(/_/g, '/') + pad;
-  const bin = atob(normalised);
-  const out = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i += 1) out[i] = bin.charCodeAt(i);
+function b64UrlToBytes(encoded: string): Uint8Array {
+  const pad = encoded.length % 4 === 0 ? '' : '='.repeat(4 - (encoded.length % 4));
+  const normalised = encoded.replace(/-/g, '+').replace(/_/g, '/') + pad;
+  const binary = atob(normalised);
+  const out = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) out[i] = binary.charCodeAt(i);
   return out;
 }
 

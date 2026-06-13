@@ -64,11 +64,9 @@ impl ChatMessage {
 /// string per the OpenAI contract (not a parsed object).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolCall {
-    /// Correlates this call with the tool result that answers it. The OpenAI
-    /// contract requires it, but several open-weight models proxied through
-    /// OpenRouter omit it, so we default to empty here and fill in a stable
-    /// placeholder after parsing (see `fill_missing_tool_call_ids`) rather than
-    /// failing the whole response to deserialize.
+    /// Correlates this call with its tool result. Required by the OpenAI
+    /// contract, but some open-weight models omit it, so we default to empty and
+    /// backfill via `fill_missing_tool_call_ids` rather than failing to parse.
     #[serde(default)]
     pub id: String,
     #[serde(rename = "type", default = "default_tool_type")]
@@ -230,21 +228,15 @@ impl OpenRouterClient {
     }
 }
 
-/// Give every tool call a non-empty `id`.
-///
-/// The OpenAI contract makes `id` mandatory, but open-weight models served
-/// through OpenRouter (the default `qwen/*` model among them) routinely emit
-/// tool calls with the field absent or blank. We need a stable, non-empty id
-/// to thread back to the model as the matching tool result — and, for the
-/// confirm-before-write tools, to round-trip through the browser as a
-/// `tool_call_id`. Synthesise one from the call's position when the provider
-/// leaves it empty; ids the provider did supply are left untouched. Indexing is
-/// per-message, which is all the OpenAI tool-result protocol needs.
+/// Give every tool call a non-empty `id`, synthesising one from the call's
+/// per-message position when the provider left it blank. A stable id is needed
+/// to thread the matching tool result back to the model and, for write tools, to
+/// round-trip through the browser; provider-supplied ids are left untouched.
 fn fill_missing_tool_call_ids(message: &mut ChatMessage) {
     if let Some(calls) = message.tool_calls.as_mut() {
-        for (i, call) in calls.iter_mut().enumerate() {
+        for (index, call) in calls.iter_mut().enumerate() {
             if call.id.trim().is_empty() {
-                call.id = format!("call_{i}");
+                call.id = format!("call_{index}");
             }
         }
     }
@@ -284,7 +276,6 @@ mod tests {
         let v = serde_json::to_value(&msg).unwrap();
         assert_eq!(v["role"], "user");
         assert_eq!(v["content"], "hi");
-        // Absent optional fields must not be emitted.
         assert!(v.get("tool_calls").is_none());
         assert!(v.get("tool_call_id").is_none());
     }
@@ -301,7 +292,6 @@ mod tests {
 
     #[test]
     fn deserializes_assistant_tool_call() {
-        // Shape mirrors a real OpenRouter assistant turn that calls one tool.
         let raw = r#"{
             "role": "assistant",
             "content": null,
@@ -320,9 +310,7 @@ mod tests {
 
     #[test]
     fn deserializes_tool_call_with_missing_id() {
-        // Open-weight models proxied through OpenRouter sometimes omit the
-        // OpenAI-mandated `id`. That must parse (to an empty id) rather than
-        // failing the whole response — otherwise the turn 500s.
+        // A missing `id` must parse to an empty id, not fail the whole response.
         let raw = r#"{
             "role": "assistant",
             "content": null,

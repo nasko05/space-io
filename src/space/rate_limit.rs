@@ -4,10 +4,8 @@ use std::time::{Duration, Instant};
 
 use dashmap::DashMap;
 
-/// Token-bucket-ish rate limit keyed by client IP. Designed for /auth/unlock
-/// where a successful unlock is cheap (one scrypt) but brute force is the
-/// realistic threat: we cap attempts in a short window and let the lock-out
-/// expire on its own.
+/// Fixed-window rate limit keyed by client IP, guarding `/auth/*` against brute
+/// force: cap attempts per window and let the lock-out expire on its own.
 pub const UNLOCK_MAX_ATTEMPTS: u32 = 8;
 pub const UNLOCK_WINDOW: Duration = Duration::from_secs(60);
 
@@ -47,18 +45,17 @@ impl RateLimiter {
         }
     }
 
-    /// Forget the bucket for a client — call after a successful unlock so
-    /// one earlier typo doesn't burn a slot on the next legitimate session.
+    /// Forget the bucket for a client after a successful unlock so an earlier
+    /// typo doesn't burn a slot on the next legitimate session.
     pub fn clear(&self, ip: IpAddr) {
         self.inner.remove(&ip);
     }
 
-    /// Drop windows that have rolled over. Cheap enough to call from a
-    /// periodic task; `O(n)` over a tiny `n`.
+    /// Drop windows that have rolled over. Cheap enough for a periodic task.
     pub fn sweep(&self) {
         let now = Instant::now();
         self.inner
-            .retain(|_, b| now.duration_since(b.window_start) < UNLOCK_WINDOW);
+            .retain(|_, bucket| now.duration_since(bucket.window_start) < UNLOCK_WINDOW);
     }
 }
 
@@ -73,37 +70,37 @@ mod tests {
 
     #[test]
     fn first_attempts_are_allowed() {
-        let rl = RateLimiter::new();
+        let limiter = RateLimiter::new();
         for _ in 0..UNLOCK_MAX_ATTEMPTS {
-            assert!(rl.check(ip(1)).is_none());
+            assert!(limiter.check(ip(1)).is_none());
         }
     }
 
     #[test]
     fn extra_attempt_in_window_is_rejected() {
-        let rl = RateLimiter::new();
+        let limiter = RateLimiter::new();
         for _ in 0..UNLOCK_MAX_ATTEMPTS {
-            assert!(rl.check(ip(1)).is_none());
+            assert!(limiter.check(ip(1)).is_none());
         }
-        assert!(rl.check(ip(1)).is_some());
+        assert!(limiter.check(ip(1)).is_some());
     }
 
     #[test]
     fn different_clients_dont_share_a_bucket() {
-        let rl = RateLimiter::new();
+        let limiter = RateLimiter::new();
         for _ in 0..UNLOCK_MAX_ATTEMPTS {
-            assert!(rl.check(ip(1)).is_none());
+            assert!(limiter.check(ip(1)).is_none());
         }
-        assert!(rl.check(ip(2)).is_none());
+        assert!(limiter.check(ip(2)).is_none());
     }
 
     #[test]
     fn clear_resets_a_client() {
-        let rl = RateLimiter::new();
+        let limiter = RateLimiter::new();
         for _ in 0..UNLOCK_MAX_ATTEMPTS {
-            let _ = rl.check(ip(1));
+            let _ = limiter.check(ip(1));
         }
-        rl.clear(ip(1));
-        assert!(rl.check(ip(1)).is_none());
+        limiter.clear(ip(1));
+        assert!(limiter.check(ip(1)).is_none());
     }
 }
