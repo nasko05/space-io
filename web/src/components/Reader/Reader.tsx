@@ -43,6 +43,7 @@ interface Props {
   entriesLabel: string;
   selectedDay: number | null;
   onClearSelectedDay: () => void;
+  onPickDate: (value: string) => void;
   titleToPath: Map<string, string>;
   onSelectFile: (path: string) => void;
   onSelectDay: (day: number) => void;
@@ -88,6 +89,7 @@ export function Reader({
   entriesLabel,
   selectedDay,
   onClearSelectedDay,
+  onPickDate,
   titleToPath,
   onSelectFile,
   onSelectDay,
@@ -505,6 +507,7 @@ export function Reader({
           entriesLabel={entriesLabel}
           selectedDay={selectedDay}
           onClearSelectedDay={onClearSelectedDay}
+          onPickDate={onPickDate}
           onNewEntry={onNewEntry}
           onSelectFile={railSelectFile}
           onSelectDay={onSelectDay}

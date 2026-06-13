@@ -13,6 +13,7 @@ interface Props {
    *  same day or the clear button to reset to today. */
   selectedDay?: number | null;
   onClearSelectedDay?: () => void;
+  onPickDate?: (value: string) => void;
   onNewEntry: () => void;
   onSelectFile: (path: string) => void;
   onSelectDay?: (day: number) => void;
@@ -34,6 +35,7 @@ function HearthRailImpl({
   entriesLabel,
   selectedDay = null,
   onClearSelectedDay,
+  onPickDate,
   onNewEntry,
   onSelectFile,
   onSelectDay,
@@ -43,6 +45,9 @@ function HearthRailImpl({
   activeSurface,
 }: Props) {
   const days = Array.from({ length: calendar.daysInMonth }, (_, i) => i + 1);
+  const activeDay = selectedDay ?? (calendar.today || 1);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const dateValue = `${calendar.year}-${pad(calendar.month + 1)}-${pad(activeDay)}`;
   return (
     <aside className={styles.rail}>
       <div className={styles.brandRow}>
@@ -72,7 +77,21 @@ function HearthRailImpl({
       </div>
 
       <div>
-        <div className={styles.sectionLabel}>{calendar.monthLabel}</div>
+        <label className={styles.calMonth}>
+          <span className={styles.calMonthLabel}>{calendar.monthLabel}</span>
+          {onPickDate && (
+            <input
+              type="date"
+              className={styles.calMonthInput}
+              value={dateValue}
+              onChange={(e) => {
+                if (e.target.value) onPickDate(e.target.value);
+              }}
+              onClick={(e) => e.currentTarget.showPicker?.()}
+              aria-label="Jump to a date"
+            />
+          )}
+        </label>
         <div className={styles.calendar}>
           {WEEKDAYS.map((d, i) => (
             <div key={`h${i}`} className={styles.calHead}>

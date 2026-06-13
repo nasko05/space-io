@@ -17,6 +17,7 @@ interface Props {
   entriesLabel: string;
   selectedDay: number | null;
   onClearSelectedDay: () => void;
+  onPickDate: (value: string) => void;
   onSelectFile: (path: string) => void;
   onSelectDay: (day: number) => void;
   onNewEntry: () => void;
@@ -41,6 +42,7 @@ export function Preview({
   entriesLabel,
   selectedDay,
   onClearSelectedDay,
+  onPickDate,
   onSelectFile,
   onSelectDay,
   onNewEntry,
@@ -102,6 +104,7 @@ export function Preview({
           entriesLabel={entriesLabel}
           selectedDay={selectedDay}
           onClearSelectedDay={onClearSelectedDay}
+          onPickDate={onPickDate}
           onNewEntry={onNewEntry}
           onSelectFile={onSelectFile}
           onSelectDay={onSelectDay}

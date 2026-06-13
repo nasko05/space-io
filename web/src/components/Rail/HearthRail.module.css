@@ -108,13 +108,37 @@
   border-color: var(--accent);
 }
 
-.sectionLabel {
+.calMonth {
+  position: relative;
+  display: block;
+  margin-bottom: 10px;
+}
+
+.calMonthLabel {
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.16em;
   color: var(--mute);
-  margin-bottom: 10px;
   font-weight: 600;
+  transition: color 0.12s;
+}
+
+.calMonth:hover .calMonthLabel {
+  color: var(--ink-2);
+}
+
+.calMonthInput {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  opacity: 0;
+  cursor: pointer;
+  font: inherit;
 }
 
 .calendar {

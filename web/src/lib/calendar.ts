@@ -58,12 +58,12 @@ function forEachMarkdown(
   walk(tree);
 }
 
-export function buildCalendar(now: Date, tree: TreeNode[]): CalendarView {
-  const year = now.getFullYear();
-  const month = now.getMonth();
-  const today = now.getDate();
+export function buildCalendar(view: Date, today: Date, tree: TreeNode[]): CalendarView {
+  const year = view.getFullYear();
+  const month = view.getMonth();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const startWeekday = new Date(year, month, 1).getDay();
+  const isCurrentMonth = today.getFullYear() === year && today.getMonth() === month;
 
   const filled = new Set<number>();
   forEachMarkdown(tree, (_, ts) => {
@@ -77,7 +77,7 @@ export function buildCalendar(now: Date, tree: TreeNode[]): CalendarView {
     year,
     month,
     monthLabel: `${MONTHS[month]} ${year}`,
-    today,
+    today: isCurrentMonth ? today.getDate() : 0,
     daysInMonth,
     startWeekday,
     filled,
