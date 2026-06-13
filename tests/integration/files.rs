@@ -1,18 +1,14 @@
-//! HTTP integration tests for `/api/files/*`.
-//!
-//! Covers the full file CRUD surface: create, read, write, move (single
-//! and bulk), delete (single and bulk), mkdir, tree, excerpts, meta tags
-//! (single and bulk), history, rollback, download.
+//! HTTP integration tests for `/api/files/*`, covering the full file CRUD
+//! surface: create, read, write, move, delete, mkdir, tree, excerpts, meta
+//! tags, history, rollback, and download.
 
 use axum::body::Body;
 use axum::http::{header, Method, Request, StatusCode};
 
 use super::common::{
     body_bytes, body_json, build_multipart, delete_authed, get_authed, post_authed, post_json,
-    put_authed, with_cookie, Harness, MultipartPart,
+    put_authed, urlencode, with_cookie, Harness, MultipartPart,
 };
-
-// ---- Create / read / write ----------------------------------------------
 
 #[tokio::test]
 async fn create_file_writes_an_encrypted_blob() {
@@ -30,7 +26,6 @@ async fn create_file_writes_an_encrypted_blob() {
     let body = body_json(res).await;
     assert_eq!(body["path"], "Journal/Morning notes.md");
 
-    // The blob landed on disk under the user's space.
     let on_disk = u.user_dir.join("space/Journal/Morning notes.md.age");
     assert!(on_disk.is_file(), "file should exist on disk");
 }
@@ -40,7 +35,6 @@ async fn read_then_write_then_read_round_trip() {
     let h = Harness::fresh();
     let u = h.register("ada@example.lan", "passphrase-9");
 
-    // Create.
     let r = post_authed(
         &h,
         &u,
@@ -50,7 +44,6 @@ async fn read_then_write_then_read_round_trip() {
     .await;
     let path = body_json(r).await["path"].as_str().unwrap().to_string();
 
-    // Read (empty).
     let r = get_authed(
         &h,
         &u,
@@ -58,9 +51,8 @@ async fn read_then_write_then_read_round_trip() {
     )
     .await;
     let body = body_json(r).await;
-    assert_eq!(body["content"], "");
+    assert_eq!(body["content"], "", "a freshly created note is empty");
 
-    // Write.
     let r = put_authed(
         &h,
         &u,
@@ -73,7 +65,6 @@ async fn read_then_write_then_read_round_trip() {
     .await;
     assert_eq!(r.status(), StatusCode::OK);
 
-    // Read again.
     let r = get_authed(
         &h,
         &u,
@@ -128,8 +119,6 @@ async fn unauthenticated_requests_are_rejected() {
         .await;
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
-
-// ---- Tree -----------------------------------------------------------------
 
 #[tokio::test]
 async fn tree_lists_created_files() {
@@ -188,8 +177,6 @@ async fn tree_strips_age_suffix_from_filenames() {
     assert_eq!(file["path"], "A/note.md");
     assert_eq!(file["kind"], "md");
 }
-
-// ---- Move (single + bulk) -------------------------------------------------
 
 #[tokio::test]
 async fn move_renames_the_file_on_disk() {
@@ -262,8 +249,6 @@ async fn move_bulk_renames_many_files_in_one_request() {
     }
 }
 
-// ---- Delete (single + bulk) ----------------------------------------------
-
 #[tokio::test]
 async fn delete_moves_file_to_trash() {
     let h = Harness::fresh();
@@ -328,16 +313,15 @@ async fn delete_bulk_moves_many_files_under_same_timestamp() {
     let results = body["results"].as_array().unwrap();
     assert_eq!(results.len(), 3);
 
-    // All three share the same `.trash/<ts>/...` prefix.
+    // Reduce each `.trash/<stamp>/x/a.md` to its `.trash/<stamp>` prefix.
     let prefixes: std::collections::HashSet<&str> = results
         .iter()
-        .map(|r| {
-            let p = r["trash_path"].as_str().unwrap();
-            // .trash/20260527-123456/x/a.md → .trash/20260527-123456
-            let mut iter = p.splitn(3, '/');
-            let a = iter.next().unwrap();
-            let b = iter.next().unwrap();
-            Box::leak(format!("{a}/{b}").into_boxed_str()) as &str
+        .map(|result| {
+            let trash_path = result["trash_path"].as_str().unwrap();
+            let mut segments = trash_path.splitn(3, '/');
+            let trash_dir = segments.next().unwrap();
+            let stamp = segments.next().unwrap();
+            Box::leak(format!("{trash_dir}/{stamp}").into_boxed_str()) as &str
         })
         .collect();
     assert_eq!(prefixes.len(), 1, "bulk-delete entries share a timestamp");
@@ -356,8 +340,6 @@ async fn delete_missing_path_is_404() {
     .await;
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
 }
-
-// ---- Mkdir ----------------------------------------------------------------
 
 #[tokio::test]
 async fn mkdir_creates_an_empty_folder() {
@@ -387,8 +369,6 @@ async fn mkdir_rejects_traversal() {
     .await;
     assert_eq!(res.status(), StatusCode::FORBIDDEN);
 }
-
-// ---- Excerpts -------------------------------------------------------------
 
 #[tokio::test]
 async fn excerpts_returns_title_and_body() {
@@ -427,8 +407,6 @@ async fn excerpts_returns_title_and_body() {
     );
 }
 
-// ---- Meta (tags) ---------------------------------------------------------
-
 #[tokio::test]
 async fn set_tags_then_meta_round_trips() {
     let h = Harness::fresh();
@@ -447,7 +425,7 @@ async fn set_tags_then_meta_round_trips() {
         "/api/files/meta",
         &serde_json::json!({
             "path": "Notes/tagged.md",
-            "tags": ["one", "two", "  "]   // whitespace dropped
+            "tags": ["one", "two", "  "]   // the blank tag must be dropped
         }),
     )
     .await;
@@ -529,8 +507,6 @@ async fn empty_tags_removes_the_entry() {
     );
 }
 
-// ---- History + Rollback --------------------------------------------------
-
 #[tokio::test]
 async fn drafts_do_not_create_history_but_checkpoints_do() {
     let h = Harness::fresh();
@@ -543,7 +519,7 @@ async fn drafts_do_not_create_history_but_checkpoints_do() {
     )
     .await;
 
-    // Two autosave drafts — these persist but must NOT add history entries.
+    // Autosave drafts persist but must not add history entries.
     put_authed(
         &h,
         &u,
@@ -567,11 +543,10 @@ async fn drafts_do_not_create_history_but_checkpoints_do() {
         "drafts should not appear in history: {entries:?}"
     );
 
-    // The latest draft is still what reads see.
     let read = body_json(get_authed(&h, &u, "/api/files/read?path=N/n.md").await).await;
-    assert_eq!(read["content"], "draft v3");
+    assert_eq!(read["content"], "draft v3", "reads see the latest draft");
 
-    // An explicit checkpoint mints exactly one history entry, with its label.
+    // An explicit checkpoint mints exactly one history entry.
     let res = post_authed(
         &h,
         &u,
@@ -584,8 +559,10 @@ async fn drafts_do_not_create_history_but_checkpoints_do() {
     let body = body_json(get_authed(&h, &u, "/api/files/history?path=N/n.md").await).await;
     let entries = body["entries"].as_array().unwrap();
     assert_eq!(entries.len(), 2, "got: {entries:?}");
-    // Newest commit first, carrying the user's label.
-    assert_eq!(entries[0]["message"], "🔖 milestone");
+    assert_eq!(
+        entries[0]["message"], "🔖 milestone",
+        "newest first, user label"
+    );
     assert_eq!(entries[0]["author"], "hearth");
 }
 
@@ -612,8 +589,7 @@ async fn checkpoint_without_message_uses_a_default_label() {
     let body = body_json(get_authed(&h, &u, "/api/files/history?path=N/n.md").await).await;
     let entries = body["entries"].as_array().unwrap();
     assert_eq!(entries.len(), 2);
-    // Blank/absent label falls back to the default "Edit: <path>" summary.
-    assert_eq!(entries[0]["message"], "Edit: N/n.md");
+    assert_eq!(entries[0]["message"], "Edit: N/n.md", "default label");
 }
 
 #[tokio::test]
@@ -651,8 +627,7 @@ async fn rollback_restores_an_earlier_version() {
     )
     .await;
 
-    // Roll back to the "first" checkpoint (history is newest-first, so it's
-    // entries[1] — entries[0] is the most recent "second" checkpoint).
+    // History is newest-first, so the "first" checkpoint is entries[1].
     let history = body_json(get_authed(&h, &u, "/api/files/history?path=N/n.md").await).await;
     let entries = history["entries"].as_array().unwrap();
     let first_commit = entries[1]["commit"].as_str().unwrap().to_string();
@@ -689,7 +664,7 @@ async fn rollback_preserves_an_uncheckpointed_draft() {
         &serde_json::json!({ "path": "N/n.md", "content": "v1", "message": "v1" }),
     )
     .await;
-    // An autosave draft that the user never checkpointed.
+    // An autosave draft the user never checkpointed.
     put_authed(
         &h,
         &u,
@@ -698,12 +673,11 @@ async fn rollback_preserves_an_uncheckpointed_draft() {
     )
     .await;
 
-    // History knows v1 + the creation, but not the draft.
     let history = body_json(get_authed(&h, &u, "/api/files/history?path=N/n.md").await).await;
     let entries = history["entries"].as_array().unwrap();
     let v1_commit = entries[0]["commit"].as_str().unwrap().to_string();
 
-    // Roll back to v1 — the draft must be snapshotted, not silently dropped.
+    // The draft must be snapshotted on rollback, not silently dropped.
     let res = post_authed(
         &h,
         &u,
@@ -760,8 +734,6 @@ async fn rollback_rejects_invalid_oid() {
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
 }
 
-// ---- Upload / Download ---------------------------------------------------
-
 #[tokio::test]
 async fn upload_stores_an_encrypted_blob_and_download_round_trips() {
     let h = Harness::fresh();
@@ -808,14 +780,12 @@ async fn upload_stores_an_encrypted_blob_and_download_round_trips() {
 
 #[tokio::test]
 async fn upload_accepts_a_file_larger_than_the_default_body_limit() {
-    // Regression: axum's 2 MB default body limit applied to every route, so a
-    // photo over ~2 MB made the multipart parser fail with "Error parsing
-    // multipart/form-data request" before the handler's own size checks ran.
-    // The /files/upload route now raises the limit; a ~3 MB file must succeed.
+    // Regression: axum's 2 MB per-route default once made the multipart parser
+    // reject larger uploads before the handler's own checks ran.
     let h = Harness::fresh();
     let u = h.register("ada@example.lan", "passphrase-9");
 
-    let payload = vec![0xABu8; 3 * 1024 * 1024]; // 3 MiB, well over the old 2 MB cap
+    let payload = vec![0xABu8; 3 * 1024 * 1024]; // over the old 2 MB cap
     let (boundary, body) = build_multipart(&[
         MultipartPart::Text {
             name: "folder",
@@ -845,7 +815,6 @@ async fn upload_accepts_a_file_larger_than_the_default_body_limit() {
     let json = body_json(res).await;
     assert_eq!(json["files"][0]["size"], payload.len());
 
-    // And it round-trips back through download byte-for-byte.
     let download = get_authed(
         &h,
         &u,
@@ -884,16 +853,16 @@ async fn upload_too_many_files_in_one_request_is_rejected() {
     let h = Harness::fresh();
     let u = h.register("ada@example.lan", "passphrase-9");
 
-    // Build a payload with more parts than `MAX_UPLOADS_PER_REQUEST` (64).
+    // More parts than MAX_UPLOADS_PER_REQUEST (64).
     let mut parts: Vec<MultipartPart> = vec![MultipartPart::Text {
         name: "folder",
         value: "Up",
     }];
     let names: Vec<String> = (0..70).map(|i| format!("f{i}.bin")).collect();
-    for n in &names {
+    for name in &names {
         parts.push(MultipartPart::File {
             name: "file",
-            filename: n,
+            filename: name,
             content_type: "application/octet-stream",
             bytes: b"x",
         });
@@ -922,8 +891,6 @@ async fn download_rejects_path_traversal() {
     let res = get_authed(&h, &u, "/api/files/download?path=../../etc/passwd").await;
     assert_eq!(res.status(), StatusCode::FORBIDDEN);
 }
-
-// ---- Search ---------------------------------------------------------------
 
 #[tokio::test]
 async fn search_finds_a_body_match() {
@@ -961,15 +928,12 @@ async fn search_returns_empty_for_blank_query() {
     assert!(body["hits"].as_array().unwrap().is_empty());
 }
 
-// ---- Multi-tenant isolation ----------------------------------------------
-
 #[tokio::test]
 async fn one_users_session_cannot_read_anothers_files() {
     let h = Harness::fresh();
     let ada = h.register("ada@example.lan", "passphrase-9");
     let bob = h.register("bob@example.lan", "passphrase-9");
 
-    // Ada writes a secret note.
     post_authed(
         &h,
         &ada,
@@ -988,38 +952,19 @@ async fn one_users_session_cannot_read_anothers_files() {
     )
     .await;
 
-    // Bob's session can't see the file in his tree.
     let body = body_json(get_authed(&h, &bob, "/api/files/tree").await).await;
     let names: Vec<String> = body["tree"]
         .as_array()
         .unwrap()
         .iter()
-        .map(|n| n["name"].as_str().unwrap().to_string())
+        .map(|node| node["name"].as_str().unwrap().to_string())
         .collect();
     assert!(
         !names.contains(&"Secrets".to_string()),
         "Bob saw Ada's folder: {names:?}",
     );
 
-    // And explicit reads against the path return 404 (because the file
-    // lives in Ada's directory, not Bob's).
+    // Ada's file lives in her directory, so Bob's read 404s.
     let res = get_authed(&h, &bob, "/api/files/read?path=Secrets/passwords.md").await;
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
-}
-
-// ---- Tiny URL-encode (no extra dep) --------------------------------------
-
-fn urlencode(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for ch in s.chars() {
-        match ch {
-            'A'..='Z' | 'a'..='z' | '0'..='9' | '-' | '_' | '.' | '~' => out.push(ch),
-            _ => {
-                for b in ch.to_string().as_bytes() {
-                    out.push_str(&format!("%{:02X}", b));
-                }
-            }
-        }
-    }
-    out
 }

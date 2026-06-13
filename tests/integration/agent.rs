@@ -1,9 +1,8 @@
 //! HTTP integration tests for `/api/agent/*`.
 //!
-//! These run with no provider key in the environment, so they cover the
-//! wiring that does *not* need network: session enforcement, the
-//! "unconfigured" reporting, and request validation. The agent loop itself is
-//! exercised by the unit tests under `src/agent/`.
+//! Run with no provider key, so they cover the non-network wiring: session
+//! enforcement, "unconfigured" reporting, and request validation. The agent
+//! loop itself is covered by the unit tests under `src/agent/`.
 
 use axum::http::StatusCode;
 
@@ -25,8 +24,7 @@ async fn status_reports_unconfigured_without_a_key() {
     assert_eq!(res.status(), StatusCode::OK);
     let body = body_json(res).await;
 
-    // No HEARTH_OPENROUTER_API_KEY in the test env → the assistant is off,
-    // but the model id and web-search mode are still reported.
+    // No key in the test env → off, but model id and web-search mode still show.
     assert_eq!(body["configured"], false);
     assert!(
         body["model"].as_str().is_some_and(|m| !m.is_empty()),
@@ -70,7 +68,6 @@ async fn chat_rejects_empty_messages() {
 
 #[tokio::test]
 async fn chat_rejects_a_trailing_assistant_message() {
-    // The browser must end the conversation on a user turn or a tool result.
     let h = Harness::fresh();
     let u = h.register("ada@example.lan", "passphrase-9");
 
