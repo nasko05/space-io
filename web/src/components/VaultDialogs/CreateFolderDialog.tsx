@@ -47,7 +47,7 @@ export function CreateFolderDialog({ open, tree, onClose, onCreate }: Props) {
 
   return (
     <div className={styles.scrim} onMouseDown={onClose}>
-      <div className={styles.panel} onMouseDown={(e) => e.stopPropagation()}>
+      <div className={styles.panel} onMouseDown={(event) => event.stopPropagation()}>
         <div className={styles.header}>
           <div>
             <h2 className={styles.title}>New folder</h2>
@@ -63,18 +63,18 @@ export function CreateFolderDialog({ open, tree, onClose, onCreate }: Props) {
         <div>
           <label className={styles.label}>Parent</label>
           <div className={styles.folderList}>
-            {folders.map((f) => (
+            {folders.map((folder) => (
               <button
-                key={f.path || 'root'}
+                key={folder.path || 'root'}
                 type="button"
                 className={`${styles.folderItem} ${
-                  parent === f.path ? styles.folderItemActive : ''
+                  parent === folder.path ? styles.folderItemActive : ''
                 }`}
-                style={{ paddingLeft: 10 + f.depth * 16 }}
-                onClick={() => setParent(f.path)}
+                style={{ paddingLeft: 10 + folder.depth * 16 }}
+                onClick={() => setParent(folder.path)}
                 disabled={busy}
               >
-                <FolderOpen size={12} /> {f.label}
+                <FolderOpen size={12} /> {folder.label}
               </button>
             ))}
           </div>
@@ -87,12 +87,12 @@ export function CreateFolderDialog({ open, tree, onClose, onCreate }: Props) {
               autoFocus
               className={styles.fieldInput}
               value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Recipes"
+              onChange={(event) => setName(event.target.value)}
+              placeholder="event.g. Recipes"
               disabled={busy}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault();
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault();
                   void submit();
                 }
               }}

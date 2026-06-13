@@ -11,8 +11,6 @@ interface Props {
   onToggleTheme?: () => void;
 }
 
-// Ported from dir-1-hearth.jsx:26-43. The Sun/Moon icon now toggles the
-// stored theme (Phase 3 QA fix); previously decorative.
 export function HearthShell({
   children,
   mode = 'reading',

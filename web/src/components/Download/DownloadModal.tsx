@@ -12,10 +12,8 @@ interface Props {
 
 type Phase = { kind: 'ready' } | { kind: 'fetching'; progress: number } | { kind: 'done' };
 
-// Ported from dir-1-hearth.jsx:865-994 (HearthDownload). Format chooser and
-// "keep a copy in my space" toggle are visual only — backend serves only the
-// original format for v1; encrypted-blob retention is implicit because the
-// canonical store lives in the space.
+// The format chooser and "keep a copy" toggle are visual only — the backend
+// serves the original format, and the canonical copy already lives in the space.
 export function DownloadModal({ open, file, onClose }: Props) {
   const [format, setFormat] = useState<'original' | 'archival' | 'print'>('original');
   const [phase, setPhase] = useState<Phase>({ kind: 'ready' });
@@ -41,12 +39,12 @@ export function DownloadModal({ open, file, onClose }: Props) {
       });
       const fileName = file.path.split('/').pop() ?? file.path;
       const objectUrl = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = objectUrl;
-      a.download = fileName;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
+      const anchor = document.createElement('a');
+      anchor.href = objectUrl;
+      anchor.download = fileName;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
       URL.revokeObjectURL(objectUrl);
       setPhase({ kind: 'done' });
       window.setTimeout(onClose, 500);
@@ -64,11 +62,11 @@ export function DownloadModal({ open, file, onClose }: Props) {
 
   return (
     <div className={styles.scrim} onMouseDown={onClose}>
-      <div className={styles.panel} onMouseDown={(e) => e.stopPropagation()}>
+      <div className={styles.panel} onMouseDown={(event) => event.stopPropagation()}>
         <div className={styles.top}>
           <div className={styles.thumb}>
-            {[0.85, 0.6, 0.95, 0.55, 0.8, 0.5].map((w, i) => (
-              <span key={i} className={styles.thumbLine} style={{ width: `${w * 100}%` }} />
+            {[0.85, 0.6, 0.95, 0.55, 0.8, 0.5].map((width, i) => (
+              <span key={i} className={styles.thumbLine} style={{ width: `${width * 100}%` }} />
             ))}
             <div className={styles.thumbBadge}>{kind}</div>
           </div>
@@ -125,17 +123,17 @@ export function DownloadModal({ open, file, onClose }: Props) {
               { id: 'archival', label: 'PDF/A', sub: 'archival' },
               { id: 'print', label: 'Print', sub: 'open in viewer' },
             ] as const
-          ).map((o) => (
+          ).map((option) => (
             <button
-              key={o.id}
+              key={option.id}
               type="button"
-              className={`${styles.format} ${format === o.id ? styles.formatActive : ''}`}
-              onClick={() => setFormat(o.id)}
-              disabled={o.id !== 'original'}
-              title={o.id !== 'original' ? 'coming soon' : undefined}
+              className={`${styles.format} ${format === option.id ? styles.formatActive : ''}`}
+              onClick={() => setFormat(option.id)}
+              disabled={option.id !== 'original'}
+              title={option.id !== 'original' ? 'coming soon' : undefined}
             >
-              <div className={styles.formatLabel}>{o.label}</div>
-              <div className={styles.formatSub}>{o.sub}</div>
+              <div className={styles.formatLabel}>{option.label}</div>
+              <div className={styles.formatSub}>{option.sub}</div>
             </button>
           ))}
         </div>
@@ -153,7 +151,7 @@ export function DownloadModal({ open, file, onClose }: Props) {
               type="checkbox"
               className={styles.keepInput}
               checked={keepCopy}
-              onChange={(e) => setKeepCopy(e.target.checked)}
+              onChange={(event) => setKeepCopy(event.target.checked)}
             />
             Keep a copy in my space
           </label>
@@ -186,8 +184,8 @@ function fetchWithProgress(
     xhr.open('GET', url, true);
     xhr.withCredentials = true;
     xhr.responseType = 'blob';
-    xhr.onprogress = (e) => {
-      if (e.lengthComputable) onProgress(e.loaded, e.total);
+    xhr.onprogress = (event) => {
+      if (event.lengthComputable) onProgress(event.loaded, event.total);
     };
     xhr.onload = () => {
       if (xhr.status >= 200 && xhr.status < 300) {

@@ -117,9 +117,9 @@ export function Preview({
           <div className={styles.toolbar}>
             <div className={styles.crumb}>
               <Folder size={13} />
-              {folderSegments.map((seg, i) => (
+              {folderSegments.map((segment, i) => (
                 <span key={i} className={styles.crumbSeg}>
-                  {seg}
+                  {segment}
                   <Chevron size={10} />
                 </span>
               ))}

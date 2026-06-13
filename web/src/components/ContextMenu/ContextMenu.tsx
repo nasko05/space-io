@@ -27,9 +27,9 @@ export function ContextMenu({ open, x, y, items, onClose }: Props) {
 
   useLayoutEffect(() => {
     if (!open) return;
-    const el = ref.current;
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
+    const element = ref.current;
+    if (!element) return;
+    const rect = element.getBoundingClientRect();
     const margin = 8;
     let left = x;
     let top = y;
@@ -44,13 +44,13 @@ export function ContextMenu({ open, x, y, items, onClose }: Props) {
 
   useEffect(() => {
     if (!open) return;
-    function onDocMouseDown(e: MouseEvent) {
+    function onDocMouseDown(event: MouseEvent) {
       if (!ref.current) return;
-      if (!ref.current.contains(e.target as Node)) onClose();
+      if (!ref.current.contains(event.target as Node)) onClose();
     }
-    function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') {
-        e.preventDefault();
+    function onKey(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        event.preventDefault();
         onClose();
       }
     }
@@ -70,25 +70,25 @@ export function ContextMenu({ open, x, y, items, onClose }: Props) {
       className={styles.menu}
       style={{ left: coords.left, top: coords.top }}
       role="menu"
-      onContextMenu={(e) => e.preventDefault()}
+      onContextMenu={(event) => event.preventDefault()}
     >
-      {items.map((it, i) =>
-        it.divider ? (
+      {items.map((item, i) =>
+        item.divider ? (
           <div key={`d${i}`} className={styles.divider} />
         ) : (
           <button
-            key={it.label + i}
+            key={item.label + i}
             type="button"
             role="menuitem"
-            disabled={it.disabled}
-            className={`${styles.item} ${it.destructive ? styles.destructive : ''}`}
+            disabled={item.disabled}
+            className={`${styles.item} ${item.destructive ? styles.destructive : ''}`}
             onClick={() => {
               onClose();
-              it.onClick();
+              item.onClick();
             }}
           >
-            {it.icon && <span className={styles.icon}>{it.icon}</span>}
-            <span className={styles.label}>{it.label}</span>
+            {item.icon && <span className={styles.icon}>{item.icon}</span>}
+            <span className={styles.label}>{item.label}</span>
           </button>
         ),
       )}

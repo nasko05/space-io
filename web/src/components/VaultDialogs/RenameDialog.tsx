@@ -28,16 +28,16 @@ export function RenameDialog({ open, currentName, siblingNames, onClose, onRenam
     if (!trimmed) return 'Name cannot be empty.';
     if (trimmed.includes('/') || trimmed.includes('\\')) return 'Slashes are not allowed.';
     if (trimmed.startsWith('.')) return 'Names cannot start with a dot.';
-    if (trimmed === currentName) return null; // no-op
+    if (trimmed === currentName) return null;
     if (siblingNames.has(trimmed.toLowerCase())) return 'Something here already has that name.';
     return null;
   }
 
-  async function submit(e: FormEvent) {
-    e.preventDefault();
-    const err = validate(name);
-    if (err) {
-      setError(err);
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    const validationError = validate(name);
+    if (validationError) {
+      setError(validationError);
       return;
     }
     if (name.trim() === currentName) {
@@ -49,7 +49,7 @@ export function RenameDialog({ open, currentName, siblingNames, onClose, onRenam
 
   return (
     <div className={styles.scrim} onMouseDown={onClose}>
-      <form className={styles.panel} onMouseDown={(e) => e.stopPropagation()} onSubmit={submit}>
+      <form className={styles.panel} onMouseDown={(event) => event.stopPropagation()} onSubmit={submit}>
         <div className={styles.header}>
           <div>
             <h2 className={styles.title}>Rename</h2>
@@ -66,8 +66,8 @@ export function RenameDialog({ open, currentName, siblingNames, onClose, onRenam
             <input
               className={styles.fieldInput}
               value={name}
-              onChange={(e) => {
-                setName(e.target.value);
+              onChange={(event) => {
+                setName(event.target.value);
                 clearError();
               }}
               autoFocus

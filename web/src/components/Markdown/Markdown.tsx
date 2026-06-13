@@ -7,20 +7,19 @@ interface Props {
   onWikilinkClick?: (title: string) => void;
 }
 
-// Renders markdown with the Hearth typography. Styles ported from
-// dir-1-hearth.jsx:260-277 into Markdown.module.css.
+// Renders markdown with the Hearth typography.
 export function Markdown({ source, onWikilinkClick }: Props) {
   const html = useMemo(() => renderMarkdown(source), [source]);
 
-  function onClick(e: MouseEvent<HTMLDivElement>) {
+  function onClick(event: MouseEvent<HTMLDivElement>) {
     if (!onWikilinkClick) return;
-    const target = e.target as HTMLElement | null;
+    const target = event.target as HTMLElement | null;
     if (!target) return;
     // Walk up to a few ancestors in case the click landed on a child of <a>.
     let node: HTMLElement | null = target;
     for (let i = 0; i < 4 && node; i += 1) {
       if (node.classList?.contains('wikilink')) {
-        e.preventDefault();
+        event.preventDefault();
         onWikilinkClick(node.textContent?.trim() ?? '');
         return;
       }

@@ -22,13 +22,13 @@ export function DeleteConfirmDialog({
 
   if (!open) return null;
 
-  async function go() {
+  async function confirmDelete() {
     await run(onConfirm, { onSuccess: onClose });
   }
 
   return (
     <div className={styles.scrim} onMouseDown={onClose}>
-      <div className={styles.panel} onMouseDown={(e) => e.stopPropagation()}>
+      <div className={styles.panel} onMouseDown={(event) => event.stopPropagation()}>
         <div className={styles.header}>
           <div>
             <h2 className={styles.title}>Delete?</h2>
@@ -61,7 +61,7 @@ export function DeleteConfirmDialog({
           <button type="button" className={styles.cancelBtn} onClick={onClose}>
             Cancel
           </button>
-          <button type="button" className={styles.destructiveBtn} onClick={go} disabled={busy}>
+          <button type="button" className={styles.destructiveBtn} onClick={confirmDelete} disabled={busy}>
             {busy ? 'Deleting…' : 'Move to trash'}
           </button>
         </div>
