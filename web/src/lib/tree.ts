@@ -14,11 +14,11 @@ export interface FolderEntry {
 export function collectFolders(tree: TreeNode[]): FolderEntry[] {
   const out: FolderEntry[] = [{ path: '', label: '/ (space root)', depth: 0 }];
   const walk = (nodes: TreeNode[], depth: number) => {
-    const folders = nodes.filter((n): n is TreeFolder => n.type === 'folder');
+    const folders = nodes.filter((node): node is TreeFolder => node.type === 'folder');
     folders.sort((a, b) => a.name.localeCompare(b.name));
-    for (const f of folders) {
-      out.push({ path: f.path, label: f.name, depth });
-      walk(f.children, depth + 1);
+    for (const folder of folders) {
+      out.push({ path: folder.path, label: folder.name, depth });
+      walk(folder.children, depth + 1);
     }
   };
   walk(tree, 1);

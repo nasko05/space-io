@@ -30,10 +30,8 @@ export function useAutosave({ delayMs = 800, onSave }: Options) {
   const onSaveRef = useRef(onSave);
 
   useEffect(() => {
-    // Before repointing at the new target, flush any edit still pending for
-    // the *previous* one. Otherwise switching files within the debounce window
-    // silently discards the last edits. Fire-and-forget — the effect body is
-    // synchronous — using the previous save fn captured before we reassign.
+    // Flush any edit still pending for the previous target before repointing,
+    // or switching files within the debounce window would drop the last edits.
     const previousSave = onSaveRef.current;
     const pending = pendingRef.current;
     if (pending !== null) {
