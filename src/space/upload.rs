@@ -4,7 +4,8 @@ use crate::crypto::age_io;
 use crate::error::AppResult;
 use crate::space::git::commit_paths;
 use crate::space::paths::{
-    find_unique_name, resolve_under, sanitise_filename, split_stem_ext, with_age_suffix,
+    find_unique_name, relative_to, resolve_under, sanitise_filename, split_stem_ext,
+    with_age_suffix,
 };
 use crate::space::Space;
 
@@ -14,9 +15,8 @@ pub struct UploadedFile {
     pub size: u64,
 }
 
-/// Encrypt `bytes` and write to `<folder>/<file_name>.age`. The file name is
+/// Encrypt `bytes` to `<folder>/<file_name>.age` as its own commit. The name is
 /// sanitised; collisions get a `(2)`/`(3)`/… suffix before the extension.
-/// Each file becomes its own commit.
 pub fn store_upload(
     space: &Space,
     passphrase: &SecretString,
@@ -41,10 +41,7 @@ pub fn store_upload(
     let on_disk = with_age_suffix(&folder_resolved.join(&candidate));
     let ciphertext = age_io::encrypt_bytes(bytes, passphrase)?;
     std::fs::write(&on_disk, &ciphertext)?;
-    let staged = on_disk
-        .strip_prefix(&root)
-        .map(|p| p.to_path_buf())
-        .unwrap_or_else(|_| on_disk.clone());
+    let staged = relative_to(&root, &on_disk);
     space.with_repo(|repo| commit_paths(repo, &format!("Upload: {rel_path}"), [staged]))?;
 
     Ok(UploadedFile {

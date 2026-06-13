@@ -48,10 +48,36 @@ pub fn resolve_under(root: &Path, rel: &str) -> AppResult<PathBuf> {
 }
 
 /// Append `.age` to a path.
-pub fn with_age_suffix(p: &Path) -> PathBuf {
-    let mut s = p.as_os_str().to_owned();
-    s.push(ENC_EXT);
-    PathBuf::from(s)
+pub fn with_age_suffix(path: &Path) -> PathBuf {
+    let mut name = path.as_os_str().to_owned();
+    name.push(ENC_EXT);
+    PathBuf::from(name)
+}
+
+/// Return `path` relative to `root` for git staging, or `path` unchanged if it
+/// isn't under root.
+pub fn relative_to(root: &Path, path: &Path) -> PathBuf {
+    path.strip_prefix(root)
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|_| path.to_path_buf())
+}
+
+/// If `path` is a visible markdown note (`*.md.age`) under `root`, return its
+/// vault-relative path with the `.age` suffix stripped and separators
+/// normalised to `/`. Returns `None` for anything else.
+pub fn visible_markdown_rel(root: &Path, path: &Path) -> Option<String> {
+    let file_name = path.file_name()?.to_str()?;
+    let visible = file_name.strip_suffix(ENC_EXT)?;
+    if !visible.to_ascii_lowercase().ends_with(".md") {
+        return None;
+    }
+    let rel = path.strip_prefix(root).ok()?;
+    Some(
+        rel.to_string_lossy()
+            .replace('\\', "/")
+            .trim_end_matches(ENC_EXT)
+            .to_string(),
+    )
 }
 
 /// Sanitise a literal uploaded filename (one segment, never a relative path),

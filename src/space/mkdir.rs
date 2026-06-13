@@ -3,8 +3,8 @@ use crate::space::git::commit_all;
 use crate::space::paths::resolve_under;
 use crate::space::Space;
 
-/// Create a folder under the space, with a tracked `.gitkeep` inside so the
-/// folder survives the next commit (git ignores empty directories).
+/// Create a folder with a tracked `.gitkeep` inside so it survives commits (git
+/// ignores empty directories).
 pub fn create_folder(space: &Space, path: &str) -> AppResult<()> {
     if path.is_empty() {
         return Err(AppError::BadRequest("empty folder path".into()));
@@ -27,37 +27,37 @@ mod tests {
 
     #[test]
     fn creates_a_folder_with_gitkeep() {
-        let (d, s, _) = make_space("p");
-        create_folder(&s, "Notes/Tomorrow").unwrap();
-        let f = d.path().join("space/Notes/Tomorrow");
-        assert!(f.is_dir());
-        assert!(f.join(".gitkeep").is_file());
+        let (dir, space, _) = make_space("p");
+        create_folder(&space, "Notes/Tomorrow").unwrap();
+        let folder = dir.path().join("space/Notes/Tomorrow");
+        assert!(folder.is_dir());
+        assert!(folder.join(".gitkeep").is_file());
     }
 
     #[test]
     fn rejects_empty_path() {
-        let (_d, s, _) = make_space("p");
+        let (_dir, space, _) = make_space("p");
         assert!(matches!(
-            create_folder(&s, "").unwrap_err(),
+            create_folder(&space, "").unwrap_err(),
             AppError::BadRequest(_)
         ));
     }
 
     #[test]
     fn rejects_traversal() {
-        let (_d, s, _) = make_space("p");
+        let (_dir, space, _) = make_space("p");
         assert!(matches!(
-            create_folder(&s, "../escape").unwrap_err(),
+            create_folder(&space, "../escape").unwrap_err(),
             AppError::Forbidden
         ));
     }
 
     #[test]
     fn rejects_existing_folder() {
-        let (_d, s, _) = make_space("p");
-        create_folder(&s, "Once").unwrap();
+        let (_dir, space, _) = make_space("p");
+        create_folder(&space, "Once").unwrap();
         assert!(matches!(
-            create_folder(&s, "Once").unwrap_err(),
+            create_folder(&space, "Once").unwrap_err(),
             AppError::BadRequest(_)
         ));
     }

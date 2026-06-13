@@ -10,9 +10,9 @@ use crate::space::git::commit_paths;
 use crate::space::paths::with_age_suffix;
 use crate::space::Space;
 
-/// Per-file metadata (currently just tags). Lives in a single encrypted
-/// index at the space root so a tag edit costs one decrypt + encrypt
-/// rather than a sidecar per file.
+/// Per-file metadata (currently just tags). Stored in one encrypted index at
+/// the space root so a tag edit costs one decrypt + encrypt, not a sidecar per
+/// file.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct FileMeta {
     #[serde(default)]
@@ -25,14 +25,45 @@ pub struct MetaIndex {
     pub paths: BTreeMap<String, FileMeta>,
 }
 
-/// In-memory cache for the decrypted meta index. The meta file is read on
-/// every tag edit, every search, and on every rename/delete to update path
-/// keys. Each load pays a full age-passphrase decrypt (scrypt-derived KDF,
-/// deliberately slow), so caching the parsed index avoids hundreds of
-/// milliseconds of CPU per request.
-///
-/// The cache stays consistent with disk because every successful `save`
-/// replaces the cached value with the freshly-persisted index.
+impl MetaIndex {
+    /// Move the entry at `from` to `to`, returning whether an entry moved.
+    pub fn move_entry(&mut self, from: &str, to: &str) -> bool {
+        match self.paths.remove(from) {
+            Some(entry) => {
+                self.paths.insert(to.to_string(), entry);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Rewrite every entry under the `from/` prefix to sit under `to/`,
+    /// returning whether any entry moved.
+    pub fn move_subtree(&mut self, from: &str, to: &str) -> bool {
+        let from_prefix = format!("{from}/");
+        let to_prefix = format!("{to}/");
+        let keys: Vec<String> = self
+            .paths
+            .keys()
+            .filter(|key| key.starts_with(&from_prefix))
+            .cloned()
+            .collect();
+        let mut moved = false;
+        for old_key in keys {
+            let new_key = old_key.replacen(&from_prefix, &to_prefix, 1);
+            if let Some(entry) = self.paths.remove(&old_key) {
+                self.paths.insert(new_key, entry);
+                moved = true;
+            }
+        }
+        moved
+    }
+}
+
+/// In-memory cache for the decrypted meta index. Each load otherwise pays a
+/// deliberately slow scrypt-derived age decrypt, and the index is read on every
+/// tag edit, search, rename, and delete. Stays consistent with disk because
+/// every `save` replaces the cached value with the freshly-persisted index.
 #[derive(Clone, Default)]
 pub struct MetaCache {
     inner: Arc<Mutex<Option<Arc<MetaIndex>>>>,
@@ -81,10 +112,9 @@ pub fn load(space: &Space, passphrase: &SecretString) -> AppResult<Arc<MetaIndex
     Ok(arc)
 }
 
-/// Encrypt + write the index to disk and refresh the cache. Does NOT
-/// commit. Use this when the caller wants to bundle the meta change with
-/// another filesystem change (e.g. a file rename) into a single commit;
-/// otherwise prefer `save`.
+/// Encrypt and write the index, refreshing the cache but without committing.
+/// Use when bundling the meta change with another filesystem change into one
+/// commit; otherwise prefer `save`.
 pub fn write_index(space: &Space, passphrase: &SecretString, index: &MetaIndex) -> AppResult<()> {
     let p = index_path(space);
     let text = toml::to_string_pretty(index)
@@ -98,10 +128,9 @@ pub fn write_index(space: &Space, passphrase: &SecretString, index: &MetaIndex) 
     Ok(())
 }
 
-/// Write the index to disk, commit "meta: update", and refresh the cache.
-/// The default save path for tag operations where the meta change is the
-/// only thing happening. Staging is narrowed to the meta blob so the
-/// commit doesn't scan the entire working tree.
+/// Write the index, commit "meta: update", and refresh the cache. The default
+/// path for tag-only changes; staging is narrowed to the meta blob so the commit
+/// doesn't scan the whole working tree.
 pub fn save(space: &Space, passphrase: &SecretString, index: &MetaIndex) -> AppResult<()> {
     write_index(space, passphrase, index)?;
     space.with_repo(|repo| {
@@ -167,51 +196,58 @@ pub fn set_tags(
 mod tests {
     use super::*;
     use crate::space::test_helpers::{count_commits, make_space};
+    use crate::space::write;
 
     #[test]
     fn empty_space_has_no_meta() {
-        let (_d, s, p) = make_space("p");
-        let idx = load(&s, &p).unwrap();
+        let (_dir, space, pass) = make_space("p");
+        let idx = load(&space, &pass).unwrap();
         assert!(idx.paths.is_empty());
     }
 
     #[test]
     fn set_tags_persists_and_roundtrips() {
-        let (_d, s, p) = make_space("p");
-        set_tags(&s, &p, "a.md", vec!["one".into(), "two".into()]).unwrap();
-        let idx = load(&s, &p).unwrap();
+        let (_dir, space, pass) = make_space("p");
+        set_tags(&space, &pass, "a.md", vec!["one".into(), "two".into()]).unwrap();
+        let idx = load(&space, &pass).unwrap();
         assert_eq!(idx.paths.len(), 1);
         assert_eq!(idx.paths["a.md"].tags, vec!["one", "two"]);
     }
 
     #[test]
     fn empty_tags_removes_entry() {
-        let (_d, s, p) = make_space("p");
-        set_tags(&s, &p, "a.md", vec!["one".into()]).unwrap();
-        set_tags(&s, &p, "a.md", vec![]).unwrap();
-        let idx = load(&s, &p).unwrap();
+        let (_dir, space, pass) = make_space("p");
+        set_tags(&space, &pass, "a.md", vec!["one".into()]).unwrap();
+        set_tags(&space, &pass, "a.md", vec![]).unwrap();
+        let idx = load(&space, &pass).unwrap();
         assert!(!idx.paths.contains_key("a.md"));
     }
 
     #[test]
     fn whitespace_only_tags_are_dropped() {
-        let (_d, s, p) = make_space("p");
-        set_tags(&s, &p, "a.md", vec![" ok ".into(), "   ".into(), "".into()]).unwrap();
-        let idx = load(&s, &p).unwrap();
+        let (_dir, space, pass) = make_space("p");
+        set_tags(
+            &space,
+            &pass,
+            "a.md",
+            vec![" ok ".into(), "   ".into(), "".into()],
+        )
+        .unwrap();
+        let idx = load(&space, &pass).unwrap();
         assert_eq!(idx.paths["a.md"].tags, vec!["ok"]);
     }
 
     #[test]
     fn set_tags_bulk_applies_all_updates_in_one_commit() {
-        let (d, s, p) = make_space("p");
-        crate::space::write::write_file(&s, &p, "a.md", "x", None).unwrap();
-        crate::space::write::write_file(&s, &p, "b.md", "y", None).unwrap();
-        crate::space::write::write_file(&s, &p, "c.md", "z", None).unwrap();
+        let (dir, space, pass) = make_space("p");
+        write::write_file(&space, &pass, "a.md", "x", None).unwrap();
+        write::write_file(&space, &pass, "b.md", "y", None).unwrap();
+        write::write_file(&space, &pass, "c.md", "z", None).unwrap();
 
-        let commits_before = count_commits(&d.path().join("space"));
+        let commits_before = count_commits(&dir.path().join("space"));
         set_tags_bulk(
-            &s,
-            &p,
+            &space,
+            &pass,
             vec![
                 ("a.md".into(), vec!["one".into()]),
                 ("b.md".into(), vec!["two".into()]),
@@ -219,14 +255,14 @@ mod tests {
             ],
         )
         .unwrap();
-        let commits_after = count_commits(&d.path().join("space"));
+        let commits_after = count_commits(&dir.path().join("space"));
         assert_eq!(
             commits_after - commits_before,
             1,
             "bulk set_tags should produce exactly one commit",
         );
 
-        let idx = load(&s, &p).unwrap();
+        let idx = load(&space, &pass).unwrap();
         assert_eq!(idx.paths["a.md"].tags, vec!["one"]);
         assert_eq!(idx.paths["b.md"].tags, vec!["two"]);
         assert_eq!(idx.paths["c.md"].tags, vec!["three"]);
@@ -234,40 +270,40 @@ mod tests {
 
     #[test]
     fn set_tags_bulk_empty_input_is_a_noop() {
-        let (d, s, p) = make_space("p");
-        let before = count_commits(&d.path().join("space"));
-        set_tags_bulk(&s, &p, vec![]).unwrap();
-        assert_eq!(count_commits(&d.path().join("space")), before);
+        let (dir, space, pass) = make_space("p");
+        let before = count_commits(&dir.path().join("space"));
+        set_tags_bulk(&space, &pass, vec![]).unwrap();
+        assert_eq!(count_commits(&dir.path().join("space")), before);
     }
 
     #[test]
     fn set_tags_bulk_skips_commit_when_nothing_changed() {
-        let (d, s, p) = make_space("p");
-        set_tags(&s, &p, "a.md", vec!["same".into()]).unwrap();
-        let before = count_commits(&d.path().join("space"));
-        set_tags_bulk(&s, &p, vec![("a.md".into(), vec!["same".into()])]).unwrap();
-        assert_eq!(count_commits(&d.path().join("space")), before);
+        let (dir, space, pass) = make_space("p");
+        set_tags(&space, &pass, "a.md", vec!["same".into()]).unwrap();
+        let before = count_commits(&dir.path().join("space"));
+        set_tags_bulk(&space, &pass, vec![("a.md".into(), vec!["same".into()])]).unwrap();
+        assert_eq!(count_commits(&dir.path().join("space")), before);
     }
 
     #[test]
     fn cache_makes_repeated_loads_return_same_arc() {
-        let (_d, s, p) = make_space("p");
-        set_tags(&s, &p, "a.md", vec!["t".into()]).unwrap();
-        let a = load(&s, &p).unwrap();
-        let b = load(&s, &p).unwrap();
+        let (_dir, space, pass) = make_space("p");
+        set_tags(&space, &pass, "a.md", vec!["t".into()]).unwrap();
+        let first = load(&space, &pass).unwrap();
+        let second = load(&space, &pass).unwrap();
         assert!(
-            Arc::ptr_eq(&a, &b),
+            Arc::ptr_eq(&first, &second),
             "cached load should return the same Arc",
         );
     }
 
     #[test]
     fn save_invalidates_cache_with_new_value() {
-        let (_d, s, p) = make_space("p");
-        set_tags(&s, &p, "a.md", vec!["one".into()]).unwrap();
-        let first = load(&s, &p).unwrap();
-        set_tags(&s, &p, "a.md", vec!["two".into()]).unwrap();
-        let second = load(&s, &p).unwrap();
+        let (_dir, space, pass) = make_space("p");
+        set_tags(&space, &pass, "a.md", vec!["one".into()]).unwrap();
+        let first = load(&space, &pass).unwrap();
+        set_tags(&space, &pass, "a.md", vec!["two".into()]).unwrap();
+        let second = load(&space, &pass).unwrap();
         assert!(!Arc::ptr_eq(&first, &second));
         assert_eq!(second.paths["a.md"].tags, vec!["two"]);
     }

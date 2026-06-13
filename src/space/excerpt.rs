@@ -6,7 +6,7 @@ use walkdir::WalkDir;
 
 use crate::crypto::age_io;
 use crate::error::AppResult;
-use crate::space::paths::ENC_EXT;
+use crate::space::paths::visible_markdown_rel;
 use crate::space::Space;
 
 pub struct Excerpt {
@@ -16,10 +16,8 @@ pub struct Excerpt {
 
 const EXCERPT_CHARS: usize = 180;
 
-/// Walk every `.md.age` file, decrypt (with cache), and return a `path →
-/// excerpt` map. Title is the first `# ...` line; excerpt is the first ~180
-/// chars of body. Cached plaintext keyed by `path + mtime` keeps repeated
-/// excerpt rebuilds cheap.
+/// Walk every `.md.age` file, decrypt (via cache), and return a `path → excerpt`
+/// map. Title is the first `# …` line; excerpt is the first ~180 chars of body.
 pub fn build_excerpts(
     space: &Space,
     passphrase: &SecretString,
@@ -36,30 +34,12 @@ pub fn build_excerpts(
             continue;
         }
         let path = entry.path();
-        let file_name = match path.file_name().and_then(|n| n.to_str()) {
-            Some(n) => n,
-            None => continue,
-        };
-        let Some(visible) = file_name.strip_suffix(ENC_EXT) else {
+        let Some(visible_rel) = visible_markdown_rel(&root, path) else {
             continue;
         };
-        if !visible.to_ascii_lowercase().ends_with(".md") {
+
+        let Some(mtime) = entry.metadata().ok().and_then(|m| m.modified().ok()) else {
             continue;
-        }
-
-        let rel = match path.strip_prefix(&root) {
-            Ok(r) => r,
-            Err(_) => continue,
-        };
-        let visible_rel = rel
-            .to_string_lossy()
-            .replace('\\', "/")
-            .trim_end_matches(ENC_EXT)
-            .to_string();
-
-        let mtime = match entry.metadata().ok().and_then(|m| m.modified().ok()) {
-            Some(t) => t,
-            None => continue,
         };
         let cache_key = path.to_string_lossy().into_owned();
         let text = if let Some(cached) = cache.get(&cache_key, mtime) {
@@ -90,15 +70,18 @@ pub fn build_excerpts(
 
 /// Pull the first `# …` heading from markdown source as the title.
 pub fn extract_title(src: &str) -> Option<String> {
-    src.lines()
-        .find_map(|l| l.strip_prefix("# ").map(|t| t.trim().to_string()))
+    src.lines().find_map(|line| {
+        line.strip_prefix("# ")
+            .map(|title| title.trim().to_string())
+    })
 }
 
 /// Strip the lightest markdown so a preview reads as prose: emphasis markers
 /// (`*`, `_`, `` ` ``) and wikilink brackets. Shared by the excerpt builder and
 /// the search-snippet builder so they can't drift apart.
-pub fn clean_markup(s: &str) -> String {
-    s.replace(['*', '_', '`'], "")
+pub fn clean_markup(source: &str) -> String {
+    source
+        .replace(['*', '_', '`'], "")
         .replace("[[", "")
         .replace("]]", "")
 }
@@ -106,7 +89,7 @@ pub fn clean_markup(s: &str) -> String {
 fn extract_excerpt(src: &str) -> String {
     let body: String = src
         .lines()
-        .filter(|l| !l.starts_with('#') && !l.trim().is_empty())
+        .filter(|line| !line.starts_with('#') && !line.trim().is_empty())
         .take(3)
         .collect::<Vec<_>>()
         .join(" ");
@@ -175,13 +158,11 @@ mod tests {
 
     #[test]
     fn build_excerpts_ignores_non_markdown() {
-        let (dir, space, pass) = make_space_with_note("p", "Note.md", "# N\n\nbody");
-        // Drop a fake encrypted pdf next door — should be skipped.
+        let (_dir, space, pass) = make_space_with_note("p", "Note.md", "# N\n\nbody");
         crate::space::upload::store_upload(&space, &pass, "", "scan.pdf", b"%PDF-1.4 minimal")
             .unwrap();
         let map = build_excerpts(&space, &pass).unwrap();
         assert_eq!(map.len(), 1, "only .md is returned");
         assert!(map.contains_key("Note.md"));
-        let _ = dir;
     }
 }

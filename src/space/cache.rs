@@ -2,17 +2,11 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
-/// Per-file decrypted-content cache used by `search` and `excerpt`.
-///
-/// We key by encrypted-file path + mtime: when the file changes on disk the
-/// mtime moves and the entry is invalidated automatically. Cache hits avoid
-/// the age decrypt (and its scrypt-derived passphrase verification) per
-/// search request, which dominated wall-clock time on every keystroke.
-///
-/// Entries also hold a lazily-computed ASCII-lowercased mirror of the body.
-/// Search lowercases the entire corpus once per query just to do
-/// case-insensitive matching; memoizing it here turns that cost into a
-/// one-time hit per file change.
+/// Per-file decrypted-content cache used by `search` and `excerpt`, keyed by
+/// encrypted-file path + mtime so a changed file invalidates automatically.
+/// Hits skip the age decrypt (and its slow scrypt verification) that otherwise
+/// dominated every keystroke. Entries also memoize an ASCII-lowercased mirror of
+/// the body so case-insensitive search lowercases each file only once.
 #[derive(Clone, Default)]
 pub struct DecryptedCache {
     inner: Arc<Mutex<HashMap<String, Entry>>>,
@@ -41,9 +35,8 @@ impl DecryptedCache {
         }
     }
 
-    /// Look up cached plaintext plus its ASCII-lowercased mirror. The
-    /// lowered string is computed on first request and reused until the
-    /// underlying file changes.
+    /// Look up cached plaintext plus its ASCII-lowercased mirror, computed on
+    /// first request and reused until the underlying file changes.
     pub fn get_with_lowered(&self, key: &str, mtime: SystemTime) -> Option<(Arc<str>, Arc<str>)> {
         let mut guard = self.inner.lock().ok()?;
         let entry = guard.get_mut(key)?;
@@ -52,11 +45,11 @@ impl DecryptedCache {
         }
         let text = entry.text.clone();
         let lowered = match &entry.lowered {
-            Some(l) => l.clone(),
+            Some(lowered) => lowered.clone(),
             None => {
-                let l: Arc<str> = Arc::from(text.to_ascii_lowercase());
-                entry.lowered = Some(l.clone());
-                l
+                let lowered: Arc<str> = Arc::from(text.to_ascii_lowercase());
+                entry.lowered = Some(lowered.clone());
+                lowered
             }
         };
         Some((text, lowered))
@@ -75,8 +68,8 @@ impl DecryptedCache {
         }
     }
 
-    /// Drop the entry for `key` — used when a file is moved, deleted, or
-    /// rewritten so a subsequent search doesn't return stale plaintext.
+    /// Drop the entry for `key` when a file is moved, deleted, or rewritten, so a
+    /// later search can't return stale plaintext.
     pub fn invalidate(&self, key: &str) {
         if let Ok(mut guard) = self.inner.lock() {
             guard.remove(key);

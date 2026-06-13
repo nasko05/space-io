@@ -1,7 +1,5 @@
-//! Test fixtures shared across the `space::*` test modules.
-//!
-//! Compiled only under `#[cfg(test)]`. Uses cheap KDF parameters
-//! (`log_n=4`) so test runs don't pay the production 150ms scrypt cost.
+//! Test fixtures shared across the `space::*` test modules, using cheap KDF
+//! parameters (`log_n=4`) so tests skip the production ~150ms scrypt cost.
 
 use age::secrecy::SecretString;
 use rand::RngCore;
