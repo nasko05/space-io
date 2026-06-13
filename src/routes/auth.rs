@@ -12,22 +12,21 @@ use uuid::Uuid;
 use crate::config::PasskeyConfig;
 use crate::crypto::kdf;
 use crate::error::{AppError, AppResult};
+use crate::routes::run_blocking;
 use crate::space::users::{normalise_email, UsersRegistry};
 use crate::space::Space;
 use crate::state::AppState;
 
 pub const SESSION_COOKIE: &str = "hearth_session";
 
-/// Smallest passphrase we'll accept on `/auth/init`. The frontend enforces the
-/// same minimum, but the backend re-checks it so a curl/CLI bypass can't sneak
-/// in a trivially crackable space. Applies to new registrations only; existing
-/// spaces keep whatever they were created with.
+/// Smallest passphrase accepted on `/auth/init`, re-checked server-side so a
+/// CLI bypass can't register a trivially crackable space. New registrations
+/// only; existing spaces keep their original passphrase.
 const MIN_PASSPHRASE_LEN: usize = 12;
 
-/// Upper bounds on the JSON-body strings we accept. axum's `Json` extractor
-/// already caps the body at ~2 MB, but a 2 MB email passed `normalise_email`
-/// and was then written verbatim into `.users.toml`; clamp the inputs early.
-const MAX_EMAIL_LEN: usize = 254; // RFC 5321 mailbox cap
+/// Upper bounds on accepted JSON-body strings, clamped early so an oversized
+/// field never reaches `normalise_email`, scrypt, or `.users.toml`.
+const MAX_EMAIL_LEN: usize = 254;
 const MAX_PASSPHRASE_LEN: usize = 1024;
 const MAX_OWNER_LEN: usize = 200;
 
@@ -42,10 +41,8 @@ pub fn router() -> Router<AppState> {
         .route("/auth/passkey", delete(passkey_delete))
 }
 
-/// Was this request delivered over HTTPS? We can't see the socket's TLS state
-/// from inside a handler (we run behind a reverse proxy that terminates TLS),
-/// so we trust the proxy's `X-Forwarded-Proto` header. True iff it equals
-/// `https` (case-insensitive).
+/// TLS is terminated by the reverse proxy, so HTTPS is detected from the
+/// proxy's `X-Forwarded-Proto` header rather than the socket.
 fn request_is_https(headers: &HeaderMap) -> bool {
     headers
         .get("x-forwarded-proto")
@@ -53,18 +50,11 @@ fn request_is_https(headers: &HeaderMap) -> bool {
         .is_some_and(|proto| proto.eq_ignore_ascii_case("https"))
 }
 
-/// Build the session cookie. It is a *session cookie* (no `Max-Age`/`Expires`),
-/// so it survives reloads and tab navigation but is cleared when the browser
-/// fully closes — the user's requested "stay logged in across a refresh, not
-/// forever" behaviour. The server-side store still enforces the real lifetime
-/// (`SESSION_IDLE_TTL` / `SESSION_ABSOLUTE_TTL`).
-///
-/// `Secure` is decided *per request*: a `Secure` cookie is silently dropped by
-/// the browser over plain HTTP, which is exactly what was logging users out on
-/// refresh. So we only set `Secure` when both the operator opted in
-/// (`cookie_secure`, the default — disabled by `HEARTH_INSECURE_COOKIES=1`) AND
-/// the request actually arrived over HTTPS (per `X-Forwarded-Proto`). Behind a
-/// TLS proxy → `Secure`; plain-HTTP dev → not `Secure`, so the cookie sticks.
+/// Build the session cookie. No `Max-Age`/`Expires`, so it survives reloads but
+/// clears when the browser closes; the server-side store enforces the real
+/// lifetime. `Secure` is set per request — only when the operator opted in and
+/// the request arrived over HTTPS — because browsers drop a `Secure` cookie
+/// over plain HTTP, which would log dev users out on refresh.
 fn session_cookie(
     state: &AppState,
     headers: &HeaderMap,
@@ -88,9 +78,9 @@ fn headers_from_jar(jar: &CookieJar) -> HeaderMap {
     headers
 }
 
-/// Translate a rate-limit hit into the `429 + Retry-After` response. Both
-/// `/auth/init` and `/auth/unlock` use the same per-IP throttle so an
-/// attacker can't sidestep the limiter by alternating endpoints.
+/// Translate a per-IP rate-limit hit into `429 + Retry-After`. Shared by
+/// `/auth/init`, `/auth/unlock`, and `/auth/passkey/info` so an attacker can't
+/// sidestep the limiter by alternating endpoints.
 fn enforce_throttle(state: &AppState, remote: SocketAddr) -> AppResult<()> {
     if let Some(retry_after) = state.unlock_limiter.check(remote.ip()) {
         return Err(AppError::TooManyRequests {
@@ -102,17 +92,25 @@ fn enforce_throttle(state: &AppState, remote: SocketAddr) -> AppResult<()> {
 
 #[derive(Serialize)]
 struct StatusResponse {
-    /// At least one user is registered. Drives the SPA's choice between the
-    /// registration page (false) and the login page (true).
+    /// At least one user is registered; drives the SPA's registration-vs-login
+    /// choice.
     any_users: bool,
-    /// Current cookie maps to a live session.
     unlocked: bool,
-    /// Owner display name of the unlocked user; empty when locked.
     owner: String,
-    /// Email of the unlocked user; empty when locked.
     email: String,
-    /// Whether the unlocked user has a registered passkey.
     has_passkey: bool,
+}
+
+impl StatusResponse {
+    fn locked(any_users: bool) -> Self {
+        Self {
+            any_users,
+            unlocked: false,
+            owner: String::new(),
+            email: String::new(),
+            has_passkey: false,
+        }
+    }
 }
 
 async fn status(State(state): State<AppState>, jar: CookieJar) -> Json<StatusResponse> {
@@ -122,45 +120,28 @@ async fn status(State(state): State<AppState>, jar: CookieJar) -> Json<StatusRes
         .and_then(|c| Uuid::parse_str(c.value()).ok())
         .and_then(|id| state.sessions.get(&id));
 
-    match session {
-        Some(s) => {
-            // Resolve the user's email from the registry (cheaper than holding
-            // it on the Session struct, and lets the email survive renames).
-            let users = state.users_snapshot();
-            let email = users
-                .users
-                .iter()
-                .find(|u| u.uuid == s.user_uuid)
-                .map(|u| u.email.clone())
-                .unwrap_or_default();
-            match state.space_for(&s.user_uuid) {
-                Ok(space) => {
-                    let cfg = space.config();
-                    Json(StatusResponse {
-                        any_users,
-                        unlocked: true,
-                        owner: cfg.owner.clone(),
-                        email,
-                        has_passkey: cfg.passkey.is_some(),
-                    })
-                }
-                Err(_) => Json(StatusResponse {
-                    any_users,
-                    unlocked: false,
-                    owner: String::new(),
-                    email: String::new(),
-                    has_passkey: false,
-                }),
-            }
-        }
-        None => Json(StatusResponse {
-            any_users,
-            unlocked: false,
-            owner: String::new(),
-            email: String::new(),
-            has_passkey: false,
-        }),
-    }
+    let Some(session) = session else {
+        return Json(StatusResponse::locked(any_users));
+    };
+    let Ok(space) = state.space_for(&session.user_uuid) else {
+        return Json(StatusResponse::locked(any_users));
+    };
+
+    let email = state
+        .users_snapshot()
+        .users
+        .iter()
+        .find(|u| u.uuid == session.user_uuid)
+        .map(|u| u.email.clone())
+        .unwrap_or_default();
+    let cfg = space.config();
+    Json(StatusResponse {
+        any_users,
+        unlocked: true,
+        owner: cfg.owner.clone(),
+        email,
+        has_passkey: cfg.passkey.is_some(),
+    })
 }
 
 #[derive(Deserialize)]
@@ -174,16 +155,11 @@ struct InitRequest {
 
 #[derive(Serialize)]
 struct InitResponse {
-    /// The UUID assigned to this user. Surfaced to the SPA so users can see
-    /// the folder name maps cleanly to an opaque identifier (and to make the
-    /// "mapped it" half of the request explicit).
     user_uuid: String,
 }
 
-/// First-run (or additional-user) registration. Mints a UUID, creates
-/// `<root>/<uuid>/.space.toml` + git-backed `space/`, appends the
-/// `email -> uuid` mapping to `<root>/.users.toml`, then auto-mints a session
-/// cookie so the browser drops straight into the Reader.
+/// Registration: mints a UUID, creates `<root>/<uuid>/.space.toml` + git-backed
+/// `space/`, records the `email -> uuid` mapping, then mints a session cookie.
 async fn init(
     State(state): State<AppState>,
     ConnectInfo(remote): ConnectInfo<SocketAddr>,
@@ -191,13 +167,8 @@ async fn init(
     jar: CookieJar,
     Json(req): Json<InitRequest>,
 ) -> AppResult<impl IntoResponse> {
-    // Same per-IP throttle as /auth/unlock. Registration is even more
-    // expensive (scrypt + git init + initial commit), so a flood is more
-    // damaging.
     enforce_throttle(&state, remote)?;
 
-    // Length caps up-front so a multi-megabyte field never makes it into
-    // .users.toml or scrypt.
     if req.email.len() > MAX_EMAIL_LEN {
         return Err(AppError::BadRequest("email is too long".into()));
     }
@@ -226,32 +197,27 @@ async fn init(
         .filter(|o| !o.is_empty())
         .unwrap_or_else(|| email.clone());
 
-    // Append to the registry first; collisions surface as 400 before we touch
-    // the filesystem. Cheap (small TOML write) and atomic enough.
+    // Register first so an email collision surfaces as 400 before we touch disk.
     let entry = state.register_user(&email)?;
     let space_dir = UsersRegistry::space_dir_for(&state.root, &entry.uuid);
 
-    // init_space is CPU-heavy (scrypt + git2). Offload so we don't tie up the
-    // tokio reactor.
+    // init_space is CPU-heavy (scrypt + git2); offload off the reactor.
     let space_dir_for_init = space_dir.clone();
     let owner_for_init = owner.clone();
     let passphrase_for_init = passphrase.clone();
-    let init_result = tokio::task::spawn_blocking(move || {
+    let init_result = run_blocking(move || {
         crate::space::init::init_space(crate::space::init::InitOptions {
             space_dir: space_dir_for_init,
             passphrase: age::secrecy::SecretString::from(passphrase_for_init),
             owner: owner_for_init,
         })
     })
-    .await
-    .map_err(|e| AppError::Internal(format!("init join: {e}")))?;
+    .await;
 
-    // If init_space failed mid-way (disk full, bad permissions, etc.), the
-    // registry has an entry pointing at a directory that doesn't exist.
-    // Roll back so the user isn't permanently locked out of their email.
+    // If init failed mid-way, roll back the registry entry (and any partial
+    // directory) so the email isn't permanently locked out.
     if let Err(e) = init_result {
         state.unregister_user(&entry.uuid);
-        // Best-effort cleanup of any partial directory the init left behind.
         let _ = std::fs::remove_dir_all(&space_dir);
         return Err(e);
     }
@@ -259,8 +225,6 @@ async fn init(
     let space = Space::open(space_dir)?;
     state.cache_space(entry.uuid, space);
 
-    // Successful sign-up clears the throttle on this IP so the just-created
-    // user isn't held back by their own registration attempt.
     state.unlock_limiter.clear(remote.ip());
 
     let id = state
@@ -288,8 +252,7 @@ async fn unlock(
     jar: CookieJar,
     Json(req): Json<UnlockRequest>,
 ) -> AppResult<impl IntoResponse> {
-    // Throttle brute force per source IP. We count attempts *before* doing
-    // the scrypt work so a flood doesn't pin the worker pool.
+    // Throttle before the scrypt work so a flood can't pin the worker pool.
     enforce_throttle(&state, remote)?;
 
     if req.email.len() > MAX_EMAIL_LEN {
@@ -299,16 +262,12 @@ async fn unlock(
         return Err(AppError::WrongPassphrase);
     }
 
-    // Email lookup. Unknown email maps to the same response as a wrong
-    // passphrase to avoid leaking which addresses are registered.
+    // Unknown email and a broken space both collapse to WrongPassphrase so we
+    // never reveal which addresses are registered.
     let normalised = normalise_email(&req.email).map_err(|_| AppError::WrongPassphrase)?;
     let entry = state
         .find_user_by_email(&normalised)
         .ok_or(AppError::WrongPassphrase)?;
-
-    // Anything past the email lookup also collapses to "wrong passphrase":
-    // a registered email whose space directory is broken (NotFound) still
-    // shouldn't tell the attacker that the address exists.
     let space = state.space_for(&entry.uuid).map_err(|e| match e {
         AppError::NotFound => AppError::WrongPassphrase,
         other => other,
@@ -322,17 +281,13 @@ async fn unlock(
         return Err(AppError::Internal("verifier length mismatch".into()));
     }
 
-    // scrypt is CPU-bound (~150 ms at our default params) — running it on
-    // the async worker would block every other request on the same thread.
+    // scrypt is CPU-bound (~150 ms); offload it off the async worker.
     let passphrase_for_kdf = req.passphrase.clone();
     let log_n = cfg.kdf_log_n;
     let r = cfg.kdf_r;
     let p = cfg.kdf_p;
-    let derived = tokio::task::spawn_blocking(move || {
-        kdf::derive_verifier(&passphrase_for_kdf, &salt, log_n, r, p)
-    })
-    .await
-    .map_err(|e| AppError::Internal(format!("scrypt join: {e}")))??;
+    let derived =
+        run_blocking(move || kdf::derive_verifier(&passphrase_for_kdf, &salt, log_n, r, p)).await?;
 
     let mut expected_arr = [0u8; kdf::VERIFIER_LEN];
     expected_arr.copy_from_slice(&expected);
@@ -340,8 +295,6 @@ async fn unlock(
         return Err(AppError::WrongPassphrase);
     }
 
-    // A successful unlock clears the throttling so a typo earlier in the
-    // window doesn't penalise the next legitimate sign-in.
     state.unlock_limiter.clear(remote.ip());
 
     let id = state
@@ -362,10 +315,7 @@ async fn lock(
             state.sessions.drop(&id);
         }
     }
-    // `jar.remove` matches on name/path/domain to emit the removal cookie; the
-    // Secure attribute on the template doesn't affect that, but we build it
-    // through the same helper so the cleared cookie stays consistent with the
-    // one we set.
+    // Built through the same helper so the cleared cookie matches the one we set.
     let cookie = session_cookie(&state, &headers, "");
     let jar = jar.remove(cookie);
     let resp_headers = headers_from_jar(&jar);
@@ -379,28 +329,20 @@ struct PasskeyInfoResponse {
     wrapped_passphrase_b64: String,
 }
 
-/// Returns the registered passkey's public material for the user identified
-/// by `?email=`. Requires NO session — it's what the browser needs to drive
-/// a WebAuthn authentication. The wrapped passphrase is opaque to the server;
-/// only the passkey holder can decrypt it.
 #[derive(Deserialize)]
 struct PasskeyInfoQuery {
     email: String,
 }
 
+/// Public passkey material for `?email=`, needed by the browser to start a
+/// WebAuthn assertion *before* the user is authenticated. Unauthenticated by
+/// necessity; the throttle bounds enumeration of the known user set, and the
+/// wrapped passphrase stays opaque to the server.
 async fn passkey_info(
     State(state): State<AppState>,
     ConnectInfo(remote): ConnectInfo<SocketAddr>,
     axum::extract::Query(q): axum::extract::Query<PasskeyInfoQuery>,
 ) -> AppResult<Json<PasskeyInfoResponse>> {
-    // Per-IP throttle, same bucket as unlock. The endpoint is unauthenticated
-    // and its 200/404 split leaks whether a given email has a passkey. That
-    // split is inherent to the pre-auth WebAuthn flow — the browser needs the
-    // credential id + PRF salt to start an assertion *before* the user is
-    // authenticated, so we can't hide it without breaking passkey login.
-    // Accepted risk for the self-hosted / trusted-network deployment model;
-    // the per-IP throttle bounds how fast the small, known user set can be
-    // enumerated. The wrapped passphrase remains opaque to the server.
     enforce_throttle(&state, remote)?;
 
     let normalised = normalise_email(&q.email).map_err(|_| AppError::NotFound)?;
@@ -424,16 +366,13 @@ struct RegisterPasskeyRequest {
     wrapped_passphrase_b64: String,
 }
 
-/// Generous upper bounds on the base64 strings we'll accept for a passkey
-/// registration. Real-world WebAuthn credentials are well under these caps;
-/// the limits exist so a malicious client can't store megabytes in the
-/// per-user `.space.toml` (which we read into memory on every request).
+/// Upper bounds on passkey base64 strings so a client can't store megabytes in
+/// `.space.toml`, which is read into memory on every request.
 const MAX_PASSKEY_CREDENTIAL_LEN: usize = 4 * 1024;
 const MAX_PASSKEY_SALT_LEN: usize = 1024;
 const MAX_PASSKEY_WRAPPED_LEN: usize = 16 * 1024;
 
-/// Persist the passkey wrapping material for the unlocked user. Requires an
-/// active session.
+/// Persist passkey wrapping material for the unlocked user.
 async fn passkey_register(
     State(state): State<AppState>,
     jar: CookieJar,
@@ -463,9 +402,8 @@ async fn passkey_delete(State(state): State<AppState>, jar: CookieJar) -> AppRes
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// Resolve the active session into (passphrase, Space) or return Unauthorized.
-/// Centralised so every protected handler short-circuits identically and
-/// the Space-cache hits go through one place.
+/// Resolve the active session into `(passphrase, Space)` or `Unauthorized`.
+/// Shared by every protected handler so they short-circuit identically.
 pub fn require_session(
     state: &AppState,
     jar: &CookieJar,

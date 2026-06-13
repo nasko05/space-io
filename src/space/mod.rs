@@ -49,17 +49,14 @@ pub struct Space {
 struct SpaceInner {
     space_dir: PathBuf,
     config: RwLock<SpaceConfig>,
-    /// Cached git repository. Opening a repo scans pack indices and parses
-    /// refs; we do it once at startup and hand callers a borrowed handle.
-    /// git2::Repository is `!Sync`, hence the `Mutex`.
+    /// Opened once at startup (opening scans pack indices and refs). `!Sync`,
+    /// hence the `Mutex`.
     repo: Mutex<git2::Repository>,
-    /// Decrypted plaintext cache for search and excerpt builders. Lives
-    /// here so it's tied to the unlocked vault and dropped when `Space`
-    /// is dropped.
+    /// Decrypted plaintext cache for search and excerpt builders, tied to the
+    /// unlocked vault and dropped with `Space`.
     decrypted: DecryptedCache,
-    /// In-memory mirror of the meta index. The on-disk file is age-encrypted
-    /// with a scrypt-derived key; caching the parsed tree avoids paying that
-    /// KDF cost on every tag edit, search, rename, and delete.
+    /// In-memory mirror of the age-encrypted meta index, so tag edits, search,
+    /// rename, and delete don't pay the scrypt KDF cost each time.
     meta_cache: MetaCache,
 }
 
@@ -100,9 +97,8 @@ impl Space {
         SpaceConfig::space_root(&self.inner.space_dir)
     }
 
-    /// Run a closure against the cached git repository under the internal
-    /// mutex. Callers should keep the closure short — we serialise writes
-    /// across the whole vault on this lock.
+    /// Run a closure against the cached git repository under the internal mutex.
+    /// Keep it short: this lock serialises writes across the whole vault.
     pub fn with_repo<R, F>(&self, f: F) -> AppResult<R>
     where
         F: FnOnce(&git2::Repository) -> AppResult<R>,
@@ -115,8 +111,8 @@ impl Space {
         f(&guard)
     }
 
-    /// Cheap snapshot of the current on-disk config — clone so callers can
-    /// read fields without holding the lock.
+    /// Cloned snapshot of the current config so callers read fields without
+    /// holding the lock.
     pub fn config(&self) -> SpaceConfig {
         self.inner
             .config

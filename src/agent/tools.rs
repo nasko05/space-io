@@ -1,12 +1,11 @@
-//! The agent's tool catalogue and the dispatch for the read-only ones.
+//! The agent's tool catalogue and dispatch for the read-only tools.
 //!
-//! Read-only tools (`list_files`, `read_file`, `search_notes`) run here,
-//! server-side, against the unlocked [`Space`]. Mutating tools
-//! (`write_file`, `move_path`, `delete_path`, `create_folder`, `set_tags`)
-//! are *never* executed here — [`build_pending`] turns them into a
-//! [`PendingAction`] the browser confirms and then applies through the
-//! existing `/api/files/*` endpoints. `web_search` is handled by the loop
-//! itself because it is async (network), not a vault operation.
+//! Read-only tools (`list_files`, `read_file`, `search_notes`) run here against
+//! the unlocked [`Space`]. Mutating tools (`write_file`, `move_path`,
+//! `delete_path`, `create_folder`, `set_tags`) are never executed here:
+//! [`build_pending`] turns them into a [`PendingAction`] the browser confirms
+//! and applies via `/api/files/*`. `web_search` lives in the loop because it is
+//! async network I/O, not a vault operation.
 
 use age::secrecy::SecretString;
 use serde::Serialize;
@@ -220,7 +219,7 @@ pub fn build_pending(call: &ToolCall) -> AppResult<PendingAction> {
 
 /// Human one-liner describing a proposed change, shown on the confirmation card.
 fn summarize(name: &str, args: &Value) -> String {
-    let s = |k: &str| args.get(k).and_then(Value::as_str).unwrap_or("?");
+    let arg = |key: &str| args.get(key).and_then(Value::as_str).unwrap_or("?");
     match name {
         "write_file" => {
             let chars = args
@@ -228,23 +227,24 @@ fn summarize(name: &str, args: &Value) -> String {
                 .and_then(Value::as_str)
                 .map(str::len)
                 .unwrap_or(0);
-            format!("Write “{}” ({chars} chars)", s("path"))
+            format!("Write “{}” ({chars} chars)", arg("path"))
         }
-        "move_path" => format!("Move {} → {}", s("from"), s("to")),
-        "delete_path" => format!("Delete {} (to trash)", s("path")),
-        "create_folder" => format!("Create folder {}", s("path")),
+        "move_path" => format!("Move {} → {}", arg("from"), arg("to")),
+        "delete_path" => format!("Delete {} (to trash)", arg("path")),
+        "create_folder" => format!("Create folder {}", arg("path")),
         "set_tags" => {
             let tags = args
                 .get("tags")
                 .and_then(Value::as_array)
-                .map(|a| {
-                    a.iter()
+                .map(|values| {
+                    values
+                        .iter()
                         .filter_map(Value::as_str)
                         .collect::<Vec<_>>()
                         .join(", ")
                 })
                 .unwrap_or_default();
-            format!("Set tags on {} to [{tags}]", s("path"))
+            format!("Set tags on {} to [{tags}]", arg("path"))
         }
         other => format!("{other} {args}"),
     }

@@ -18,16 +18,14 @@ pub fn router() -> Router<AppState> {
 
 #[derive(Serialize)]
 struct StatusResponse {
-    /// An OpenRouter key is present — the assistant is usable.
     configured: bool,
-    /// The chat model id in use (e.g. `qwen/qwen3.6-27b`).
     model: String,
     /// `"brave"`, `"builtin"`, or `"off"`.
     web_search: &'static str,
 }
 
-/// Report whether the agent is usable. Requires a session so the server's
-/// configuration isn't exposed to anonymous probes.
+/// Report whether the agent is usable. Session-gated so the server config isn't
+/// exposed to anonymous probes.
 async fn status(State(state): State<AppState>, jar: CookieJar) -> AppResult<Json<StatusResponse>> {
     require_session(&state, &jar)?;
     let cfg = &state.agent;
@@ -38,9 +36,9 @@ async fn status(State(state): State<AppState>, jar: CookieJar) -> AppResult<Json
     }))
 }
 
-/// Upper bounds on the conversation a single request may carry. The history
-/// rides along on every turn (the server is stateless between turns), so we
-/// clamp it to keep request bodies and token spend bounded.
+/// Upper bounds on the conversation a single request may carry. The server is
+/// stateless between turns, so the full history rides along each time; clamp it
+/// to bound request size and token spend.
 const MAX_MESSAGES: usize = 200;
 const MAX_TOTAL_CHARS: usize = 600_000;
 
@@ -72,8 +70,8 @@ async fn chat(
 ) -> AppResult<Json<ChatResponseBody>> {
     let (passphrase, space) = require_session(&state, &jar)?;
 
-    // Validate the request body before anything else so a malformed call is
-    // rejected the same way whether or not a provider key is configured.
+    // Validate first so a malformed call is rejected identically whether or not
+    // a provider key is configured.
     if body.messages.is_empty() {
         return Err(AppError::BadRequest("messages must not be empty".into()));
     }
@@ -92,8 +90,8 @@ async fn chat(
             "conversation is too large; start a new chat".into(),
         ));
     }
-    // The last message must be something the model can act on — a user turn or
-    // the tool results the browser produced after confirming actions.
+    // The last message must be actionable: a user turn or browser-produced tool
+    // results.
     let last_ok = matches!(
         body.messages.last().map(|m| m.role),
         Some(Role::User) | Some(Role::Tool)

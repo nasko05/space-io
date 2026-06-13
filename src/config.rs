@@ -4,34 +4,32 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{AppError, AppResult};
 
-/// `.space.toml` — persisted alongside the encrypted space. Plaintext.
-/// Contains everything needed to verify a passphrase and identify the owner;
-/// no key material.
+/// Plaintext `.space.toml` persisted alongside the encrypted space. Holds
+/// everything needed to verify a passphrase and identify the owner; no key
+/// material.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SpaceConfig {
     pub owner: String,
     pub salt_verify_hex: String,
     pub verifier_hash_hex: String,
-    /// scrypt log2(N). Default 15 (N = 32768).
+    /// scrypt log2(N); default 15 (N = 32768).
     pub kdf_log_n: u8,
     pub kdf_r: u32,
     pub kdf_p: u32,
-    /// Optional WebAuthn-passkey unlock material. The server stores only
-    /// opaque ciphertext + PRF salt; the actual decryption happens in the
-    /// browser via the WebAuthn PRF extension.
+    /// Optional WebAuthn-passkey unlock material. The server stores only opaque
+    /// ciphertext + PRF salt; decryption happens in the browser.
     #[serde(default)]
     pub passkey: Option<PasskeyConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PasskeyConfig {
-    /// Base64url-encoded WebAuthn credential ID (returned during create).
+    /// Base64url-encoded WebAuthn credential ID.
     pub credential_id_b64: String,
-    /// Base64-encoded 32-byte random salt fed to the PRF extension on every
-    /// register/authenticate.
+    /// Base64-encoded 32-byte salt fed to the PRF extension.
     pub prf_salt_b64: String,
-    /// Base64-encoded `iv (12B) || ciphertext` of the passphrase, wrapped
-    /// under a key derived from the PRF output via HKDF.
+    /// Base64-encoded `iv (12B) || ciphertext` of the passphrase, wrapped under
+    /// a key derived from the PRF output via HKDF.
     pub wrapped_passphrase_b64: String,
 }
 
@@ -59,8 +57,7 @@ impl SpaceConfig {
         let path = Self::config_path(space_dir);
         let text =
             toml::to_string_pretty(self).map_err(|e| AppError::Internal(format!("toml: {e}")))?;
-        // Atomic write so a crash can't tear `.space.toml` (salt + verifier hex)
-        // and lock the user out of their own space.
+        // Atomic so a crash can't tear `.space.toml` and lock the user out.
         crate::fs_atomic::write_atomic(&path, text.as_bytes())?;
         Ok(())
     }
@@ -142,8 +139,6 @@ mod tests {
 
     #[test]
     fn legacy_config_without_passkey_section_loads() {
-        // Older `.space.toml` files written before the passkey feature do
-        // not have a [passkey] block; serde(default) should let them load.
         let dir = TempDir::new().unwrap();
         std::fs::write(
             SpaceConfig::config_path(dir.path()),

@@ -1,13 +1,12 @@
-//! AI agent chat. A server-side tool-calling loop over an OpenRouter
+//! AI agent chat: a server-side tool-calling loop over an OpenRouter
 //! (OpenAI-compatible) chat model.
 //!
-//! The agent can inspect the vault on its own — `list_files`, `read_file`,
-//! `search_notes`, and (when configured) `web_search` all run here. Anything
-//! that *changes* the vault is never executed in this module: the model's
-//! mutating tool calls are returned to the browser as [`tools::PendingAction`]
-//! proposals, and only applied — through the existing, audited `/api/files/*`
-//! endpoints — once the user approves them. That is what makes the "confirm
-//! each change" contract hold end to end.
+//! Read-only tools (`list_files`, `read_file`, `search_notes`, and when
+//! configured `web_search`) run here. Mutating tool calls are never executed in
+//! this module; they are returned to the browser as [`tools::PendingAction`]
+//! proposals and applied only after the user approves, through the audited
+//! `/api/files/*` endpoints. That is what makes the "confirm each change"
+//! contract hold end to end.
 
 pub mod openrouter;
 pub mod tools;
@@ -48,8 +47,8 @@ impl WebSearch {
 }
 
 /// Agent configuration, sourced entirely from the environment so secrets never
-/// touch the on-disk space config. Deliberately *not* `Debug`: the API keys
-/// must never land in a log line.
+/// touch the on-disk space config. Deliberately not `Debug`: the API keys must
+/// never land in a log line.
 #[derive(Clone)]
 pub struct AgentConfig {
     openrouter_api_key: Option<String>,
@@ -70,9 +69,8 @@ impl AgentConfig {
         let base_url = env_nonempty("HEARTH_OPENROUTER_BASE_URL")
             .unwrap_or_else(|| DEFAULT_BASE_URL.to_string());
 
-        // Web search is on by default; an explicit falsey value forces it off.
-        // With a Brave key we expose the explicit tool; otherwise we lean on
-        // OpenRouter's built-in plugin so search still works out of the box.
+        // On by default; a Brave key selects the explicit tool, otherwise fall
+        // back to OpenRouter's built-in plugin so search works out of the box.
         let web_enabled = std::env::var("HEARTH_AGENT_WEB_SEARCH")
             .ok()
             .map(|v| truthy(&v))
@@ -104,7 +102,7 @@ impl AgentConfig {
         }
     }
 
-    /// Whether an OpenRouter key is present. Without it the chat endpoint is
+    /// Whether an OpenRouter key is present; without it the chat endpoint is
     /// disabled and the UI hides the assistant.
     pub fn is_configured(&self) -> bool {
         self.openrouter_api_key
@@ -138,23 +136,18 @@ fn truthy(v: &str) -> bool {
 
 /// The result of one `/agent/chat` round-trip.
 pub struct AgentTurn {
-    /// Updated conversation (without the server-side system prompt) for the
-    /// browser to echo back on the next call.
+    /// Updated conversation (without the system prompt) for the browser to echo
+    /// back next call.
     pub messages: Vec<ChatMessage>,
-    /// The assistant's latest prose, if it produced any this turn.
     pub assistant_text: Option<String>,
-    /// Mutating tool calls awaiting user confirmation. Empty when the turn is
-    /// complete.
+    /// Mutating tool calls awaiting user confirmation; empty when complete.
     pub pending_actions: Vec<tools::PendingAction>,
-    /// True when there is nothing left for the user to confirm.
     pub done: bool,
 }
 
-/// Run the model until it produces a final answer or asks to change the vault.
-///
-/// Read-only tool calls are executed inline and the loop continues. The first
-/// time the model proposes a *mutating* change, the loop stops and hands the
-/// proposals back for confirmation.
+/// Run the model until it produces a final answer or proposes a vault change.
+/// Read-only tool calls execute inline and the loop continues; the first
+/// mutating proposal stops the loop and hands the proposals back for approval.
 pub async fn run_turn(
     cfg: &AgentConfig,
     space: Space,
@@ -185,10 +178,9 @@ pub async fn run_turn(
             break (content, Vec::new());
         }
 
-        // Execute read-only calls now; collect mutating ones as proposals.
-        // Mutating calls with unparseable arguments are answered with an error
-        // tool result instead, so the conversation stays valid and the model
-        // can correct itself.
+        // Execute read-only calls now; collect mutating ones as proposals. A
+        // mutating call with unparseable arguments gets an error tool result so
+        // the conversation stays valid and the model can correct itself.
         let mut pending = Vec::new();
         for call in &tool_calls {
             if tools::is_mutating(&call.function.name) {
@@ -213,13 +205,11 @@ pub async fn run_turn(
         if !pending.is_empty() {
             break (content, pending);
         }
-        // Otherwise every call was answered server-side; loop so the model can
-        // act on the results.
     };
 
     let done = pending.is_empty();
     // The system prompt is server-owned; never echo it back to the browser.
-    messages.retain(|m| m.role != Role::System);
+    messages.retain(|message| message.role != Role::System);
 
     Ok(AgentTurn {
         messages,
@@ -229,8 +219,8 @@ pub async fn run_turn(
     })
 }
 
-/// Dispatch a single read-only tool call, folding any error into the returned
-/// string so a bad call informs the model rather than aborting the turn.
+/// Dispatch one read-only tool call, folding any error into the returned string
+/// so a bad call informs the model rather than aborting the turn.
 async fn run_readonly(
     cfg: &AgentConfig,
     space: &Space,
@@ -275,19 +265,17 @@ fn with_system_prompt(
     let mut out = Vec::with_capacity(incoming.len() + 1);
     out.push(ChatMessage::system(system_prompt(cfg, today)));
     // Drop any client-supplied system messages — the prompt is ours.
-    for m in incoming {
-        if m.role != Role::System {
-            out.push(m);
+    for message in incoming {
+        if message.role != Role::System {
+            out.push(message);
         }
     }
     out
 }
 
-/// The current UTC date as a human sentence fragment, e.g. "Wednesday, 3 June
-/// 2026". Fed into the system prompt so the model resolves "today" against the
-/// real date instead of guessing — or, worse, copying a date out of a note (the
-/// seed welcome note carries a fixed date, which the model otherwise reports as
-/// today). The server stamps everything else in UTC, so we match that here.
+/// The current UTC date as a human sentence fragment ("Wednesday, 3 June 2026"),
+/// fed into the system prompt so the model resolves "today" against the real
+/// date rather than guessing or copying a date out of a note.
 fn current_date_utc() -> String {
     let now = OffsetDateTime::now_utc();
     format!(
@@ -338,8 +326,8 @@ exactly what you provide. Keep a single top-level `# Title`.
 
 /// Translate an `AppError` into a short, non-sensitive string suitable for
 /// feeding back to the model as a tool result.
-fn error_text(e: &AppError) -> String {
-    match e {
+fn error_text(error: &AppError) -> String {
+    match error {
         AppError::NotFound => "not found".to_string(),
         AppError::Forbidden => "forbidden path".to_string(),
         AppError::BadRequest(m) => m.clone(),
@@ -348,8 +336,6 @@ fn error_text(e: &AppError) -> String {
         AppError::Io(_) | AppError::Internal(_) => "internal error".to_string(),
     }
 }
-
-// ---- Brave web search ----
 
 #[derive(Deserialize)]
 struct BraveResponse {
@@ -424,8 +410,11 @@ async fn brave_search(cfg: &AgentConfig, args: &serde_json::Value) -> AppResult<
     }
 
     let mut out = format!("Top web results for \"{query}\":\n");
-    for r in results.iter().take(BRAVE_RESULT_COUNT) {
-        out.push_str(&format!("- {} — {}\n  {}\n", r.title, r.url, r.description));
+    for result in results.iter().take(BRAVE_RESULT_COUNT) {
+        out.push_str(&format!(
+            "- {} — {}\n  {}\n",
+            result.title, result.url, result.description
+        ));
     }
     Ok(out)
 }
@@ -466,8 +455,6 @@ mod tests {
             prompt.contains("Wednesday, 3 June 2026"),
             "the prompt must tell the model today's date: {prompt}"
         );
-        // The guard against reading a date out of a note is the actual fix for
-        // the "AI thinks today is the welcome note's date" hallucination.
         assert!(prompt
             .to_lowercase()
             .contains("never infer the current date"));
@@ -475,8 +462,7 @@ mod tests {
 
     #[test]
     fn current_date_utc_is_a_weekday_then_date() {
-        // Non-deterministic value, so assert shape rather than an exact string:
-        // "<Weekday>, <day> <Month> <year>".
+        // Non-deterministic, so assert the shape "<Weekday>, <day> <Month> <year>".
         let today = current_date_utc();
         let parts: Vec<&str> = today.splitn(2, ", ").collect();
         assert_eq!(parts.len(), 2, "expected 'Weekday, rest': {today}");
@@ -490,7 +476,6 @@ mod tests {
             "Sunday",
         ];
         assert!(weekdays.contains(&parts[0]), "bad weekday in {today}");
-        // The remainder ends in a 4-digit year.
         let year = parts[1].rsplit(' ').next().unwrap();
         assert_eq!(year.len(), 4, "expected a 4-digit year in {today}");
         assert!(
@@ -513,7 +498,6 @@ mod tests {
             },
         ];
         let out = with_system_prompt(incoming, &cfg, "Wednesday, 3 June 2026");
-        // Exactly one system message, and it's ours (first), not the client's.
         let systems: Vec<_> = out.iter().filter(|m| m.role == Role::System).collect();
         assert_eq!(systems.len(), 1);
         assert!(systems[0].content.as_deref().unwrap().contains("Hearth"));
@@ -537,8 +521,6 @@ mod tests {
         assert_eq!(WebSearch::Brave.as_str(), "brave");
         assert_eq!(WebSearch::OpenRouterPlugin.as_str(), "builtin");
     }
-
-    // ---- Full-loop tests against a local mock chat-completions server ----
 
     /// Spin up a throwaway OpenAI-compatible endpoint that replays `responses`
     /// in order (repeating the last one). Returns its base URL.
@@ -608,14 +590,12 @@ mod tests {
             turn.assistant_text.as_deref(),
             Some("The note body is present. DONE")
         );
-        // The decrypted body was fed back as a tool result…
         let tool_msg = turn
             .messages
             .iter()
             .find(|m| m.role == Role::Tool)
             .expect("a tool result in the transcript");
         assert!(tool_msg.content.as_deref().unwrap().contains("secret body"));
-        // …and the server-owned system prompt is never echoed back.
         assert!(turn.messages.iter().all(|m| m.role != Role::System));
     }
 
@@ -628,7 +608,7 @@ mod tests {
                 "content":"I'll create that note.",
                 "tool_calls":[{"id":"w1","type":"function","function":{
                     "name":"write_file","arguments":"{\"path\":\"new.md\",\"content\":\"# New\"}"}}]}}]}),
-            // Must not be reached: the loop stops to ask for confirmation.
+            // Unreachable: the loop stops to ask for confirmation.
             serde_json::json!({"choices":[{"message":{"role":"assistant","content":"unreachable"}}]}),
         ])
         .await;
@@ -645,7 +625,6 @@ mod tests {
         assert_eq!(turn.pending_actions.len(), 1);
         assert_eq!(turn.pending_actions[0].tool, "write_file");
         assert_eq!(turn.pending_actions[0].args["path"], "new.md");
-        // Crucially, nothing was written — the proposal awaits user approval.
         assert!(
             !dir.path().join("space/new.md.age").exists(),
             "mutating tool must not touch disk server-side"
@@ -654,16 +633,14 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn loop_handles_mutating_tool_call_without_a_provider_id() {
-        // Regression: "create a file" returned 500 because the model's
-        // write_file tool call arrived with no `id` (common with open-weight
-        // models on OpenRouter) and the response failed to deserialise. The
-        // turn must now succeed, proposing the change with a synthesised id.
+        // Regression: a write_file call arriving with no `id` (common with
+        // open-weight models) used to fail to deserialise and 500. The turn must
+        // now succeed, proposing the change with a synthesised id.
         use crate::space::test_helpers::make_space_with_note;
 
         let base = spawn_mock(vec![serde_json::json!({"choices":[{"message":{
             "role":"assistant",
             "content":"I'll create that note.",
-            // Note: the tool call has no "id" field at all.
             "tool_calls":[{"type":"function","function":{
                 "name":"write_file","arguments":"{\"path\":\"new.md\",\"content\":\"# New\"}"}}]}}]})])
         .await;
@@ -679,9 +656,6 @@ mod tests {
         assert!(!turn.done);
         assert_eq!(turn.pending_actions.len(), 1);
         assert_eq!(turn.pending_actions[0].tool, "write_file");
-        // A non-empty id is essential: the browser echoes it back as the
-        // tool_call_id when it reports the result, and the model needs it to
-        // match the result to its call.
         assert!(
             !turn.pending_actions[0].tool_call_id.trim().is_empty(),
             "a tool_call_id must be present so the result can be correlated"

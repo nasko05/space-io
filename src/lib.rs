@@ -1,7 +1,6 @@
-//! Library facade that lets integration tests (under `tests/`) reach the
-//! same modules `main.rs` consumes. Re-exports the bits the binary already
-//! wires up; the binary stays the single point of truth for argv parsing
-//! and the tokio runtime.
+//! Library facade exposing the modules the binary wires up, so integration
+//! tests under `tests/` can reach them. `main.rs` owns argv parsing and the
+//! tokio runtime.
 
 pub mod agent;
 pub mod config;

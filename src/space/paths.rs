@@ -4,9 +4,8 @@ use crate::error::{AppError, AppResult};
 
 pub const ENC_EXT: &str = ".age";
 
-/// Maximum length we'll accept for a single filename segment. 200 bytes
-/// fits comfortably under common filesystem limits (255 on ext4/APFS) with
-/// headroom for the `.age` suffix.
+/// Max length for a single filename segment. Stays under common filesystem
+/// limits (255 on ext4/APFS) with headroom for the `.age` suffix.
 pub const MAX_FILENAME: usize = 200;
 
 /// Resolve a relative path against `root`, rejecting `..`, absolute paths,
@@ -14,9 +13,9 @@ pub const MAX_FILENAME: usize = 200;
 pub fn resolve_under(root: &Path, rel: &str) -> AppResult<PathBuf> {
     let mut out = root.to_path_buf();
     let candidate = Path::new(rel);
-    for comp in candidate.components() {
-        match comp {
-            Component::Normal(seg) => out.push(seg),
+    for component in candidate.components() {
+        match component {
+            Component::Normal(segment) => out.push(segment),
             _ => return Err(AppError::Forbidden),
         }
     }
@@ -28,9 +27,8 @@ pub fn resolve_under(root: &Path, rel: &str) -> AppResult<PathBuf> {
                 }
             }
             Err(_) => {
-                // The target itself doesn't exist (e.g. we're about to
-                // create it). Walk up until we hit an ancestor that does,
-                // canonicalise *that*, and confirm it sits under the root.
+                // Target doesn't exist yet (e.g. about to be created): validate
+                // the first existing ancestor instead.
                 let mut walker = out.as_path();
                 let mut ancestor = loop {
                     match walker.parent() {
@@ -56,13 +54,9 @@ pub fn with_age_suffix(p: &Path) -> PathBuf {
     PathBuf::from(s)
 }
 
-/// Sanitise a *literal* uploaded filename — the contents of a single
-/// segment, never a relative path. Rejects path separators, NULs, and
+/// Sanitise a literal uploaded filename (one segment, never a relative path),
+/// preserving it character for character. Rejects path separators, NULs, and
 /// leading dots; truncates to `MAX_FILENAME` bytes.
-///
-/// This is the "no surprises" mode: the input is preserved character for
-/// character. Used by upload.rs where the user supplied a real filename
-/// (`Q3 report.pdf`) and we shouldn't be opinionated about Unicode.
 pub fn sanitise_filename(input: &str) -> AppResult<String> {
     let trimmed = input.trim();
     if trimmed.is_empty() {
@@ -100,7 +94,7 @@ pub fn sanitise_title(title: &str) -> Option<String> {
         if ch.is_ascii_alphanumeric() || ch == ' ' || ch == '-' || ch == '_' {
             out.push(ch);
         } else if ch == ',' || ch == '.' || ch == '!' || ch == '?' {
-            // skip
+            // Sentence punctuation is dropped entirely rather than dashed.
         } else {
             out.push('-');
         }
@@ -204,10 +198,9 @@ mod tests {
 
     #[test]
     fn rejects_empty_segment_via_double_slash() {
-        // `Path::components` collapses `//` so this just round-trips; the
-        // canonical-root guard still keeps us safe. This test pins that
-        // observation so a refactor that re-introduces empty segments fails
-        // here, not in production.
+        // `Path::components` collapses `//`; the canonical-root guard still
+        // protects us. Pinned so a refactor re-introducing empty segments fails
+        // here rather than in production.
         let root = make_root();
         let out = resolve_under(root.path(), "Journal//2026/note.md").expect("ok");
         assert!(out.starts_with(root.path()));
@@ -228,7 +221,6 @@ mod tests {
         {
             use std::os::unix::fs::symlink;
             let root = make_root();
-            // Create /tmp/outside and a symlink Journal/2026/escape → /tmp/outside.
             let outside = TempDir::new().unwrap();
             fs::write(outside.path().join("secret"), b"do not read").unwrap();
             symlink(outside.path(), root.path().join("Journal/2026/escape")).unwrap();
@@ -240,9 +232,8 @@ mod tests {
 
     #[test]
     fn nonexistent_target_validated_via_first_existing_ancestor() {
-        // Build a path several levels deeper than anything that exists on
-        // disk; resolve_under should still accept it because the first
-        // existing ancestor is the legit Journal folder.
+        // Deeper than anything on disk; accepted because the first existing
+        // ancestor (Journal) sits under the root.
         let root = make_root();
         let out = resolve_under(root.path(), "Journal/2026/deep/new/note.md").expect("ok");
         assert!(out.starts_with(root.path()));
