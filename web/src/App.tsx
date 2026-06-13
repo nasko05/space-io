@@ -51,6 +51,7 @@ export function App() {
   // are memoized on `file.updated`, so they don't need a minute-rate tick
   // to stay accurate — the previous `now` state was unread machinery.
   const [todayDate, setTodayDate] = useState(() => startOfDay(new Date()));
+  const [viewMonth, setViewMonth] = useState(() => startOfMonth(new Date()));
   const [hasPasskey, setHasPasskey] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false);
@@ -428,6 +429,13 @@ export function App() {
 
   const clearSelectedDay = useCallback(() => setSelectedDay(null), []);
 
+  const pickDate = useCallback((value: string) => {
+    const [year, month, day] = value.split('-').map(Number);
+    if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return;
+    setViewMonth(new Date(year, month - 1, 1));
+    setSelectedDay(day);
+  }, []);
+
   // Resolve a path to a `TreeFile` (for preview routing) and select. Wrapped
   // here so HearthVault gets a stable handler reference, which keeps the
   // memoized rail from re-rendering on unrelated parent updates.
@@ -615,9 +623,10 @@ export function App() {
   // both treat their first arg as a day-precision date — they don't read
   // hours/minutes — so a day-stable input is exactly what they need.
   const calendar: CalendarView = useMemo(
-    () => buildCalendar(todayDate, tree),
-    [todayDate, tree],
+    () => buildCalendar(viewMonth, todayDate, tree),
+    [viewMonth, todayDate, tree],
   );
+  const isCurrentMonth = calendar.today > 0;
   // If the calendar slides into a new month while a day is pinned (e.g. a
   // long-running session ticks past midnight on the last of the month),
   // drop the selection so we don't keep highlighting a day that no longer
@@ -632,11 +641,28 @@ export function App() {
     view.kind === 'unlocked' && view.surface.kind === 'reader' ? view.surface.file.path : null;
   const railEntries: TodayEntry[] = useMemo(() => {
     const target =
-      selectedDay != null ? new Date(calendar.year, calendar.month, selectedDay) : todayDate;
-    return entriesForDate(target, tree, excerpts, currentPath);
-  }, [todayDate, selectedDay, calendar.year, calendar.month, tree, excerpts, currentPath]);
+      selectedDay != null
+        ? new Date(calendar.year, calendar.month, selectedDay)
+        : isCurrentMonth
+          ? todayDate
+          : null;
+    return target ? entriesForDate(target, tree, excerpts, currentPath) : [];
+  }, [
+    todayDate,
+    selectedDay,
+    isCurrentMonth,
+    calendar.year,
+    calendar.month,
+    tree,
+    excerpts,
+    currentPath,
+  ]);
   const railLabel: string =
-    selectedDay != null ? shortDayLabel(calendar.month, selectedDay) : 'Today';
+    selectedDay != null
+      ? shortDayLabel(calendar.month, selectedDay)
+      : isCurrentMonth
+        ? 'Today'
+        : calendar.monthLabel;
   const titleToPath = useMemo(() => buildTitleMap(tree, excerpts), [tree, excerpts]);
 
   if (view.kind === 'loading') return <LoadingScreen />;
@@ -680,6 +706,7 @@ export function App() {
           entriesLabel={railLabel}
           selectedDay={selectedDay}
           onClearSelectedDay={clearSelectedDay}
+          onPickDate={pickDate}
           titleToPath={titleToPath}
           onSelectFile={selectFile}
           onSelectDay={selectDay}
@@ -707,6 +734,7 @@ export function App() {
           entriesLabel={railLabel}
           selectedDay={selectedDay}
           onClearSelectedDay={clearSelectedDay}
+          onPickDate={pickDate}
           onSelectFile={onVaultSelectPath}
           onSelectDay={selectDay}
           onNewEntry={newEntry}
@@ -731,6 +759,7 @@ export function App() {
           entriesLabel={railLabel}
           selectedDay={selectedDay}
           onClearSelectedDay={clearSelectedDay}
+          onPickDate={pickDate}
           onSelectFile={selectFile}
           onSelectDay={selectDay}
           onNewEntry={newEntry}
@@ -824,6 +853,10 @@ export function App() {
  *  actually crosses midnight, not on every minute tick. */
 function startOfDay(d: Date): Date {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+}
+
+function startOfMonth(d: Date): Date {
+  return new Date(d.getFullYear(), d.getMonth(), 1);
 }
 
 function hasFiles(e: DragEvent): boolean {

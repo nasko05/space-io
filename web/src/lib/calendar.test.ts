@@ -16,7 +16,7 @@ function mdFile(path: string, updated: string): TreeNode {
 describe('buildCalendar', () => {
   it('computes correct month metadata', () => {
     const now = new Date(2026, 4, 27); // May 27, 2026
-    const cal = buildCalendar(now, []);
+    const cal = buildCalendar(now, now, []);
     expect(cal.year).toBe(2026);
     expect(cal.month).toBe(4);
     expect(cal.today).toBe(27);
@@ -31,7 +31,7 @@ describe('buildCalendar', () => {
       mdFile('b.md', '2026-05-15T12:00:00Z'),
       mdFile('c.md', '2026-04-10T08:00:00Z'), // different month
     ];
-    const cal = buildCalendar(now, tree);
+    const cal = buildCalendar(now, now, tree);
     expect(cal.filled.has(10)).toBe(true);
     expect(cal.filled.has(15)).toBe(true);
     expect(cal.filled.has(1)).toBe(false);
@@ -42,7 +42,7 @@ describe('buildCalendar', () => {
     const tree: TreeNode[] = [
       { type: 'file', name: 'img.png', path: 'img.png', kind: 'image', updated: '2026-05-15T12:00:00Z', size: 500 },
     ];
-    const cal = buildCalendar(now, tree);
+    const cal = buildCalendar(now, now, tree);
     expect(cal.filled.size).toBe(0);
   });
 
@@ -56,8 +56,17 @@ describe('buildCalendar', () => {
         children: [mdFile('Journal/note.md', '2026-05-20T10:00:00Z')],
       },
     ];
-    const cal = buildCalendar(now, tree);
+    const cal = buildCalendar(now, now, tree);
     expect(cal.filled.has(20)).toBe(true);
+  });
+
+  it('renders the viewed month but only highlights today in the live month', () => {
+    const today = new Date(2026, 4, 27);
+    const browsed = buildCalendar(new Date(2026, 1, 1), today, []);
+    expect(browsed.month).toBe(1);
+    expect(browsed.daysInMonth).toBe(28);
+    expect(browsed.today).toBe(0);
+    expect(buildCalendar(new Date(2026, 4, 1), today, []).today).toBe(27);
   });
 });
 
