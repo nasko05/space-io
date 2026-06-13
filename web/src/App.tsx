@@ -46,10 +46,8 @@ export function App() {
   const [tree, setTree] = useState<TreeNode[]>([]);
   const [excerpts, setExcerpts] = useState<ExcerptMap>({});
   const [meta, setMeta] = useState<MetaMap>({});
-  // The calendar and the entries list only care about which **day** it is,
-  // so we track a day-stable date that flips only across midnight. Cards
-  // are memoized on `file.updated`, so they don't need a minute-rate tick
-  // to stay accurate — the previous `now` state was unread machinery.
+  // Day-stable date that flips only across midnight, so the calendar and
+  // entries list don't rebuild on a minute tick.
   const [todayDate, setTodayDate] = useState(() => startOfDay(new Date()));
   const [viewMonth, setViewMonth] = useState(() => startOfMonth(new Date()));
   const [hasPasskey, setHasPasskey] = useState(false);
@@ -60,9 +58,8 @@ export function App() {
   const [passkeyOpen, setPasskeyOpen] = useState(false);
   const [agentOpen, setAgentOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
-  // Calendar selection. `null` means "show today" (the default); a number
-  // pins the rail's entry list to that day-of-month in the displayed
-  // calendar. Clicking the same day again clears the selection.
+  // `null` shows today; a number pins the rail to that day-of-month. Clicking
+  // the same day again clears it.
   const [selectedDay, setSelectedDay] = useState<number | null>(null);
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     const stored = typeof window !== 'undefined' ? window.localStorage.getItem('hearth.theme') : null;
@@ -76,7 +73,7 @@ export function App() {
   }, [theme]);
 
   const toggleTheme = useCallback(() => {
-    setTheme((t) => (t === 'dark' ? 'light' : 'dark'));
+    setTheme((current) => (current === 'dark' ? 'light' : 'dark'));
   }, []);
 
   useEffect(() => {
@@ -84,8 +81,8 @@ export function App() {
       const next = startOfDay(new Date());
       setTodayDate((prev) => (prev.getTime() === next.getTime() ? prev : next));
     };
-    const t = window.setInterval(tick, 60_000);
-    return () => window.clearInterval(t);
+    const timer = window.setInterval(tick, 60_000);
+    return () => window.clearInterval(timer);
   }, []);
 
   const previousPathRef = useRef<string | null>(null);
@@ -128,10 +125,10 @@ export function App() {
   const enterReader = useCallback(
     async (owner: string, email: string) => {
       try {
-        const t = await refreshTree();
+        const loadedTree = await refreshTree();
         void refreshExcerpts();
         void refreshMeta();
-        const leaf = firstMarkdownLeaf(t);
+        const leaf = firstMarkdownLeaf(loadedTree);
         if (!leaf) {
           const { path } = await api.create(DEFAULT_NEW_FOLDER);
           await refreshTree();
@@ -191,10 +188,8 @@ export function App() {
   }, [enterReader]);
 
   const onRegistered = useCallback(async () => {
-    // `/api/auth/init` mints the session cookie itself, so we just need to
-    // re-fetch status (to learn the chosen display name) and drop into the
-    // reader. The seed welcome note is already in place under the new UUID
-    // folder.
+    // `/api/auth/init` already minted the session cookie; re-fetch status for
+    // the display name and drop into the reader.
     try {
       const status = await api.status();
       setHasPasskey(status.has_passkey);
@@ -238,15 +233,14 @@ export function App() {
     try {
       await api.lock();
     } catch {
-      // ignore
+      // Locking is best-effort; clear local state regardless.
     }
     setTree([]);
     setExcerpts({});
     setMeta({});
     previousPathRef.current = null;
-    // Reset every overlay/modal piece so reopening the app after a lock
-    // never starts inside a half-open dialog or with a stale upload queue
-    // pinned to a now-defunct session.
+    // Reset every overlay so the next session doesn't reopen into a half-open
+    // dialog or a stale upload queue.
     setSearchOpen(false);
     setUploadOpen(false);
     setUploadInitial(undefined);
@@ -353,16 +347,14 @@ export function App() {
     }
   }, [refreshExcerpts, refreshTree, view]);
 
-  // Recompute the local title/excerpt for `path` so wikilink autocomplete +
-  // the Today list reflect the latest content without a full server walk-and-
-  // decrypt on every keystroke (the prior implementation made the UI very
-  // slow as the corpus grew). Shared by autosave and checkpoint.
+  // Patch the local title/excerpt for `path` so the Today list and wikilink
+  // autocomplete update without a full server re-walk on every keystroke.
   const patchExcerpt = useCallback((path: string, content: string) => {
     const titleMatch = /^# (.+)$/m.exec(content);
     const title = titleMatch ? titleMatch[1].trim() : null;
     const bodyLines = content
       .split('\n')
-      .filter((l) => !l.startsWith('#') && l.trim().length > 0)
+      .filter((line) => !line.startsWith('#') && line.trim().length > 0)
       .slice(0, 3)
       .join(' ');
     const excerpt = bodyLines
@@ -372,7 +364,7 @@ export function App() {
     setExcerpts((cur) => ({ ...cur, [path]: { title, excerpt } }));
   }, []);
 
-  // Autosave: persist the draft to disk. Does NOT create a history entry.
+  // Autosave: persist the draft without a history entry.
   const saveFile = useCallback(
     async (path: string, content: string) => {
       await api.saveDraft(path, content);
@@ -394,10 +386,8 @@ export function App() {
     async (path: string, commit: string) => {
       if (view.kind !== 'unlocked') return;
       await api.rollback(path, commit);
-      // Server wrote a new commit on top of HEAD with the old content. Pull
-      // the fresh file + refresh the tree so the rail / Today list reflect
-      // the restored excerpt, then re-open the file in the Reader so the
-      // editor's local state isn't stuck on the pre-rollback content.
+      // Re-read and refresh so the rail reflects the restored content and the
+      // editor isn't stuck on the pre-rollback text.
       const file = await api.read(path);
       void refreshTree();
       void refreshExcerpts();
@@ -436,14 +426,13 @@ export function App() {
     setSelectedDay(day);
   }, []);
 
-  // Resolve a path to a `TreeFile` (for preview routing) and select. Wrapped
-  // here so HearthVault gets a stable handler reference, which keeps the
-  // memoized rail from re-rendering on unrelated parent updates.
+  // Resolve a path to its `TreeFile` (for preview routing) and select it. A
+  // stable reference keeps the memoized rail from re-rendering needlessly.
   const onVaultSelectPath = useCallback(
-    (p: string) => {
-      const file = findInTree(tree, p);
+    (path: string) => {
+      const file = findInTree(tree, path);
       if (file) onSelectVaultFile(file);
-      else void selectFile(p);
+      else void selectFile(path);
     },
     [onSelectVaultFile, selectFile, tree],
   );
@@ -451,8 +440,7 @@ export function App() {
   const openSearch = useCallback(() => setSearchOpen(true), []);
   const openPasskey = useCallback(() => setPasskeyOpen(true), []);
 
-  // After the assistant applies an approved change, pull fresh tree/excerpts/
-  // tags so the rail, calendar, and vault reflect it immediately.
+  // Refresh the vault views after the assistant applies an approved change.
   const onAgentVaultChanged = useCallback(() => {
     void refreshTree();
     void refreshExcerpts();
@@ -463,8 +451,6 @@ export function App() {
     await refreshTree();
     void refreshExcerpts();
   }, [refreshExcerpts, refreshTree]);
-
-  // ---- Vault CRUD handlers (Phase 4) ----
 
   const handleRenameFile = useCallback(
     async (from: string, to: string) => {
@@ -489,7 +475,7 @@ export function App() {
             const to = destinationFolder ? `${destinationFolder}/${name}` : name;
             return { from, to };
           })
-          .filter((m) => m.from !== m.to);
+          .filter((move) => move.from !== move.to);
         if (moves.length === 0) return;
         await api.moveBulk(moves);
         await refreshTree();
@@ -540,12 +526,12 @@ export function App() {
       try {
         await api.setTagsBulk(paths.map((path) => ({ path, tags })));
         // Patch local state immediately so the UI doesn't blink while the
-        // server walk catches up.
+        // server catches up.
         setMeta((cur) => {
           const next = { ...cur };
-          for (const p of paths) {
-            if (tags.length === 0) delete next[p];
-            else next[p] = { tags };
+          for (const path of paths) {
+            if (tags.length === 0) delete next[path];
+            else next[path] = { tags };
           }
           return next;
         });
@@ -563,13 +549,13 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+    function onKey(event: KeyboardEvent) {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
         if (view.kind === 'unlocked') {
-          e.preventDefault();
-          setSearchOpen((v) => !v);
+          event.preventDefault();
+          setSearchOpen((open) => !open);
         }
-      } else if (e.key === 'Escape') {
+      } else if (event.key === 'Escape') {
         if (searchOpen) setSearchOpen(false);
       }
     }
@@ -580,17 +566,17 @@ export function App() {
   const dragCounter = useRef(0);
   const [dragOverlay, setDragOverlay] = useState(false);
   const handleWindowDragEnter = useCallback(
-    (e: DragEvent) => {
+    (event: DragEvent) => {
       if (view.kind !== 'unlocked') return;
-      if (!hasFiles(e)) return;
-      e.preventDefault();
+      if (!hasFiles(event)) return;
+      event.preventDefault();
       dragCounter.current += 1;
       setDragOverlay(true);
     },
     [view],
   );
-  const handleWindowDragLeave = useCallback((e: DragEvent) => {
-    e.preventDefault();
+  const handleWindowDragLeave = useCallback((event: DragEvent) => {
+    event.preventDefault();
     dragCounter.current -= 1;
     if (dragCounter.current <= 0) {
       dragCounter.current = 0;
@@ -598,13 +584,13 @@ export function App() {
     }
   }, []);
   const handleWindowDrop = useCallback(
-    (e: DragEvent) => {
+    (event: DragEvent) => {
       if (view.kind !== 'unlocked') return;
-      if (!hasFiles(e)) return;
-      e.preventDefault();
+      if (!hasFiles(event)) return;
+      event.preventDefault();
       dragCounter.current = 0;
       setDragOverlay(false);
-      const files = Array.from(e.dataTransfer?.files ?? []);
+      const files = Array.from(event.dataTransfer?.files ?? []);
       if (files.length === 0) return;
       setUploadInitial(files);
       setUploadOpen(true);
@@ -614,23 +600,19 @@ export function App() {
 
   useEffect(() => {
     if (!toast) return;
-    const t = window.setTimeout(() => setToast(null), 3200);
-    return () => window.clearTimeout(t);
+    const timer = window.setTimeout(() => setToast(null), 3200);
+    return () => window.clearTimeout(timer);
   }, [toast]);
 
-  // Memoize on `todayDate` (advances only across midnight) so the calendar
-  // doesn't rebuild on every minute tick. `buildCalendar` and `entriesForDate`
-  // both treat their first arg as a day-precision date — they don't read
-  // hours/minutes — so a day-stable input is exactly what they need.
+  // Memoize on `todayDate` (day-precision) so the calendar doesn't rebuild on
+  // every minute tick.
   const calendar: CalendarView = useMemo(
     () => buildCalendar(viewMonth, todayDate, tree),
     [viewMonth, todayDate, tree],
   );
   const isCurrentMonth = calendar.today > 0;
-  // If the calendar slides into a new month while a day is pinned (e.g. a
-  // long-running session ticks past midnight on the last of the month),
-  // drop the selection so we don't keep highlighting a day that no longer
-  // exists in the displayed grid.
+  // Drop a pinned day if the grid slides to a month without it (e.g. a session
+  // ticks past midnight on the last of the month).
   useEffect(() => {
     if (selectedDay != null && selectedDay > calendar.daysInMonth) {
       setSelectedDay(null);
@@ -776,8 +758,8 @@ export function App() {
       <SearchOverlay
         open={searchOpen}
         onClose={() => setSearchOpen(false)}
-        onSelect={(p) => {
-          void selectFile(p);
+        onSelect={(path) => {
+          void selectFile(path);
         }}
       />
 
@@ -848,22 +830,21 @@ export function App() {
   );
 }
 
-/** Truncate a `Date` to the start of its calendar day in local time. Used to
- *  give the calendar/today memos a value that only changes when the day
- *  actually crosses midnight, not on every minute tick. */
-function startOfDay(d: Date): Date {
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+/** Truncate a `Date` to the start of its calendar day, so the calendar/today
+ *  memos only change across midnight rather than on every minute tick. */
+function startOfDay(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
 }
 
-function startOfMonth(d: Date): Date {
-  return new Date(d.getFullYear(), d.getMonth(), 1);
+function startOfMonth(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), 1);
 }
 
-function hasFiles(e: DragEvent): boolean {
-  const types = e.dataTransfer?.types;
+function hasFiles(event: DragEvent): boolean {
+  const types = event.dataTransfer?.types;
   if (!types) return false;
-  for (const t of Array.from(types)) {
-    if (t === 'Files') return true;
+  for (const type of Array.from(types)) {
+    if (type === 'Files') return true;
   }
   return false;
 }
@@ -871,12 +852,12 @@ function hasFiles(e: DragEvent): boolean {
 function buildTitleMap(tree: TreeNode[], excerpts: ExcerptMap): Map<string, string> {
   const out = new Map<string, string>();
   const walk = (nodes: TreeNode[]) => {
-    for (const n of nodes) {
-      if (n.type === 'file' && n.kind === 'md') {
-        const title = excerpts[n.path]?.title ?? n.name.replace(/\.(md|markdown)$/i, '');
-        if (title && !out.has(title)) out.set(title, n.path);
-      } else if (n.type === 'folder') {
-        walk(n.children);
+    for (const node of nodes) {
+      if (node.type === 'file' && node.kind === 'md') {
+        const title = excerpts[node.path]?.title ?? node.name.replace(/\.(md|markdown)$/i, '');
+        if (title && !out.has(title)) out.set(title, node.path);
+      } else if (node.type === 'folder') {
+        walk(node.children);
       }
     }
   };
@@ -886,10 +867,10 @@ function buildTitleMap(tree: TreeNode[], excerpts: ExcerptMap): Map<string, stri
 
 function findInTree(tree: TreeNode[], path: string): TreeFile | null {
   const walk = (nodes: TreeNode[]): TreeFile | null => {
-    for (const n of nodes) {
-      if (n.type === 'file' && n.path === path) return n;
-      if (n.type === 'folder') {
-        const hit = walk(n.children);
+    for (const node of nodes) {
+      if (node.type === 'file' && node.path === path) return node;
+      if (node.type === 'folder') {
+        const hit = walk(node.children);
         if (hit) return hit;
       }
     }

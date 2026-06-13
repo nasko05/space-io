@@ -123,24 +123,21 @@ export function HearthVault({
   const [menu, setMenu] = useState<MenuState>(EMPTY_MENU);
   const [dialog, setDialog] = useState<DialogState>({ kind: 'none' });
 
-  // Single tree walk produces both the shelf list (top-level folder → sorted
-  // files) and a totalled count. Each shelf now separates direct files from
-  // subfolders so the UI can display a nested tree structure.
+  // One tree walk yields the shelves (top-level folder → sorted direct files +
+  // subfolders), the total count, and the set of known paths.
   const { shelves, totalFiles, knownPaths } = useMemo(() => {
     const shelves: Shelf[] = [];
     let totalFiles = 0;
     const knownPaths = new Set<string>();
     for (const node of tree) {
       if (node.type !== 'folder') continue;
-      // Collect ALL files recursively for count & selection tracking
       const allFiles = collectFilesUnder(node);
       totalFiles += allFiles.length;
-      for (const f of allFiles) knownPaths.add(f.path);
-      // Separate direct children: files at this level vs subfolders
+      for (const file of allFiles) knownPaths.add(file.path);
       const directFiles = node.children
-        .filter((c): c is TreeFile => c.type === 'file')
+        .filter((child): child is TreeFile => child.type === 'file')
         .sort((a, b) => Date.parse(b.updated) - Date.parse(a.updated));
-      const subfolders = node.children.filter((c): c is TreeFolder => c.type === 'folder');
+      const subfolders = node.children.filter((child): child is TreeFolder => child.type === 'folder');
       shelves.push({ folder: node, files: directFiles, subfolders, totalCount: allFiles.length });
     }
     return { shelves, totalFiles, knownPaths };
@@ -148,19 +145,18 @@ export function HearthVault({
 
   const orderedPaths = useMemo(() => {
     const list: string[] = [];
-    for (const shelf of shelves) for (const f of shelf.files) list.push(f.path);
+    for (const shelf of shelves) for (const file of shelf.files) list.push(file.path);
     return list;
   }, [shelves]);
 
-  // If files disappear (deleted / moved), drop them from the selection.
-  // Using the prebuilt Set keeps this O(n) instead of O(n*m).
+  // Drop deleted/moved files from the selection.
   useEffect(() => {
     setSelection((cur) => {
       if (cur.size === 0) return cur;
       let changed = false;
       const next = new Set<string>();
-      for (const p of cur) {
-        if (knownPaths.has(p)) next.add(p);
+      for (const path of cur) {
+        if (knownPaths.has(path)) next.add(path);
         else changed = true;
       }
       return changed ? next : cur;
@@ -169,13 +165,12 @@ export function HearthVault({
 
   const knownTags = useMemo(() => {
     const set = new Set<string>();
-    for (const v of Object.values(meta)) for (const t of v.tags) set.add(t);
+    for (const entry of Object.values(meta)) for (const tag of entry.tags) set.add(tag);
     return Array.from(set).sort((a, b) => a.localeCompare(b));
   }, [meta]);
 
-  // Refs let the card callbacks remain referentially stable across renders
-  // (and thus play nicely with React.memo on HearthCard) while still reading
-  // the latest values.
+  // Refs keep the card callbacks referentially stable (so React.memo on
+  // HearthCard holds) while still reading the latest values.
   const selectionRef = useRef(selection);
   selectionRef.current = selection;
   const anchorRef = useRef(anchor);
@@ -195,10 +190,11 @@ export function HearthVault({
       const next = new Set(cur);
       if (mods.shift && anchorRef.current) {
         const paths = orderedPathsRef.current;
-        const a = paths.indexOf(anchorRef.current);
-        const b = paths.indexOf(path);
-        if (a >= 0 && b >= 0) {
-          const [lo, hi] = a < b ? [a, b] : [b, a];
+        const anchorIndex = paths.indexOf(anchorRef.current);
+        const targetIndex = paths.indexOf(path);
+        if (anchorIndex >= 0 && targetIndex >= 0) {
+          const [lo, hi] =
+            anchorIndex < targetIndex ? [anchorIndex, targetIndex] : [targetIndex, anchorIndex];
           for (let i = lo; i <= hi; i += 1) next.add(paths[i]);
           setSelection(next);
           return;
@@ -280,9 +276,9 @@ export function HearthVault({
       if (!droppedPath) return;
       const sel = selectionRef.current;
       const targets = sel.has(droppedPath) ? Array.from(sel) : [droppedPath];
-      // Anything already inside the target subtree would be a no-op move.
+      // A target already inside the destination subtree would be a no-op move.
       const prefix = `${folderPath}/`;
-      const movable = targets.filter((p) => !p.startsWith(prefix));
+      const movable = targets.filter((path) => !path.startsWith(prefix));
       if (movable.length === 0) return;
       void onMoveFiles(movable, folderPath).then(clearSelection);
     },
@@ -315,8 +311,6 @@ export function HearthVault({
     [],
   );
 
-  // ---- Dialog wiring ----
-
   async function handleRename(newName: string) {
     if (dialog.kind !== 'rename') return;
     const file = dialog.file;
@@ -332,7 +326,7 @@ export function HearthVault({
     const parts = folder.path.split('/');
     parts[parts.length - 1] = newName;
     const newPath = parts.join('/');
-    // Backend's /api/files/move handles both files and folders.
+    // /api/files/move handles both files and folders.
     await onRenameFile(folder.path, newPath);
   }
 
@@ -358,8 +352,6 @@ export function HearthVault({
     clearSelection();
   }
 
-  // ---- Render ----
-
   const dialogInitialTags = useMemo(() => {
     if (dialog.kind !== 'tags') return [];
     return intersectionTags(dialog.paths, meta);
@@ -372,12 +364,12 @@ export function HearthVault({
 
   const renameSiblings = useMemo(() => {
     if (dialog.kind !== 'rename') return new Set<string>();
-    return new Set(siblingsOf(dialog.file.path, tree).map((s) => s.toLowerCase()));
+    return new Set(siblingsOf(dialog.file.path, tree).map((name) => name.toLowerCase()));
   }, [dialog, tree]);
 
   const folderRenameSiblings = useMemo(() => {
     if (dialog.kind !== 'rename-folder') return new Set<string>();
-    return new Set(siblingsOf(dialog.folder.path, tree).map((s) => s.toLowerCase()));
+    return new Set(siblingsOf(dialog.folder.path, tree).map((name) => name.toLowerCase()));
   }, [dialog, tree]);
 
   return (
@@ -577,6 +569,59 @@ export function HearthVault({
 
 function noop() {}
 
+interface FolderDropTarget {
+  isDropTarget: boolean;
+  dragProps: {
+    onDragEnter: (event: DragEvent<HTMLElement>) => void;
+    onDragOver: (event: DragEvent<HTMLElement>) => void;
+    onDragLeave: (event: DragEvent<HTMLElement>) => void;
+    onDrop: (event: DragEvent<HTMLElement>) => void;
+  };
+}
+
+/** Drag-and-drop handlers for a folder drop zone. Each zone tracks its own
+ *  highlight so a dragover only re-renders that zone. Nested zones pass
+ *  `stopPropagation` so a drop lands on the innermost folder. */
+function useFolderDropTarget(
+  folderPath: string,
+  onDropFile: (folderPath: string, droppedPath: string) => void,
+  options?: { stopPropagation?: boolean },
+): FolderDropTarget {
+  const [isDropTarget, setIsDropTarget] = useState(false);
+  const dragDepth = useRef(0);
+  const stopPropagation = options?.stopPropagation ?? false;
+
+  const dragProps = {
+    onDragEnter(event: DragEvent<HTMLElement>) {
+      if (!hasHearthDrag(event)) return;
+      event.preventDefault();
+      if (stopPropagation) event.stopPropagation();
+      dragDepth.current += 1;
+      if (dragDepth.current === 1) setIsDropTarget(true);
+    },
+    onDragOver(event: DragEvent<HTMLElement>) {
+      if (!hasHearthDrag(event)) return;
+      event.preventDefault();
+      if (stopPropagation) event.stopPropagation();
+      event.dataTransfer.dropEffect = 'move';
+    },
+    onDragLeave(event: DragEvent<HTMLElement>) {
+      if (stopPropagation) event.stopPropagation();
+      dragDepth.current = Math.max(0, dragDepth.current - 1);
+      if (dragDepth.current === 0) setIsDropTarget(false);
+    },
+    onDrop(event: DragEvent<HTMLElement>) {
+      event.preventDefault();
+      if (stopPropagation) event.stopPropagation();
+      dragDepth.current = 0;
+      setIsDropTarget(false);
+      onDropFile(folderPath, event.dataTransfer.getData(DRAG_MIME));
+    },
+  };
+
+  return { isDropTarget, dragProps };
+}
+
 interface VaultShelfProps {
   folder: TreeFolder;
   files: TreeFile[];
@@ -594,9 +639,6 @@ interface VaultShelfProps {
   onFolderMenu: (folder: TreeFolder, x: number, y: number) => void;
 }
 
-// Each shelf owns its own drag-over highlight so a dragover transition only
-// re-renders the shelf that's gaining/losing the highlight — not the entire
-// vault and all its visible cards.
 const VaultShelf = memo(function VaultShelf({
   folder,
   files,
@@ -613,44 +655,12 @@ const VaultShelf = memo(function VaultShelf({
   onBackToReader,
   onFolderMenu,
 }: VaultShelfProps) {
-  const [isDropTarget, setIsDropTarget] = useState(false);
-  const dragDepth = useRef(0);
+  const { isDropTarget, dragProps } = useFolderDropTarget(folder.path, onDropFile);
 
   const visible = files.length > SHELF_VISIBLE_LIMIT ? files.slice(0, SHELF_VISIBLE_LIMIT) : files;
 
-  function onDragEnter(e: DragEvent<HTMLElement>) {
-    if (!hasHearthDrag(e)) return;
-    e.preventDefault();
-    dragDepth.current += 1;
-    if (dragDepth.current === 1) setIsDropTarget(true);
-  }
-
-  function onDragOver(e: DragEvent<HTMLElement>) {
-    if (!hasHearthDrag(e)) return;
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-  }
-
-  function onDragLeave() {
-    dragDepth.current = Math.max(0, dragDepth.current - 1);
-    if (dragDepth.current === 0) setIsDropTarget(false);
-  }
-
-  function onDrop(e: DragEvent<HTMLElement>) {
-    e.preventDefault();
-    dragDepth.current = 0;
-    setIsDropTarget(false);
-    onDropFile(folder.path, e.dataTransfer.getData(DRAG_MIME));
-  }
-
   return (
-    <section
-      className={`${styles.shelf} ${isDropTarget ? styles.shelfDrop : ''}`}
-      onDragEnter={onDragEnter}
-      onDragOver={onDragOver}
-      onDragLeave={onDragLeave}
-      onDrop={onDrop}
-    >
+    <section className={`${styles.shelf} ${isDropTarget ? styles.shelfDrop : ''}`} {...dragProps}>
       <div className={styles.shelfHead}>
         <h2 className={styles.shelfTitle}>
           <span className={styles.shelfRoman}>{romanNumeral(index + 1)}.</span>{' '}
@@ -668,9 +678,9 @@ const VaultShelf = memo(function VaultShelf({
         <button
           type="button"
           className={styles.shelfMenuBtn}
-          onClick={(e) => {
-            const r = e.currentTarget.getBoundingClientRect();
-            onFolderMenu(folder, r.right, r.bottom);
+          onClick={(event) => {
+            const rect = event.currentTarget.getBoundingClientRect();
+            onFolderMenu(folder, rect.right, rect.bottom);
           }}
           aria-label={`Manage ${folder.name}`}
           title="Rename, move, or delete this folder"
@@ -722,8 +732,6 @@ const VaultShelf = memo(function VaultShelf({
   );
 });
 
-// --- Nested folder tree node ---
-
 interface NestedFolderProps {
   folder: TreeFolder;
   depth: number;
@@ -752,19 +760,19 @@ const NestedFolder = memo(function NestedFolder({
   onFolderMenu,
 }: NestedFolderProps) {
   const [expanded, setExpanded] = useState(false);
-  const [isDropTarget, setIsDropTarget] = useState(false);
-  const dragDepth = useRef(0);
+  const { isDropTarget, dragProps } = useFolderDropTarget(folder.path, onDropFile, {
+    stopPropagation: true,
+  });
 
-  // Separate direct children into files and subfolders
   const directFiles = useMemo(
     () =>
       folder.children
-        .filter((c): c is TreeFile => c.type === 'file')
+        .filter((child): child is TreeFile => child.type === 'file')
         .sort((a, b) => Date.parse(b.updated) - Date.parse(a.updated)),
     [folder.children],
   );
   const subfolders = useMemo(
-    () => folder.children.filter((c): c is TreeFolder => c.type === 'folder'),
+    () => folder.children.filter((child): child is TreeFolder => child.type === 'folder'),
     [folder.children],
   );
 
@@ -773,49 +781,17 @@ const NestedFolder = memo(function NestedFolder({
     ? directFiles.slice(0, NESTED_VISIBLE_LIMIT)
     : directFiles;
 
-  function onDragEnter(e: DragEvent<HTMLElement>) {
-    if (!hasHearthDrag(e)) return;
-    e.preventDefault();
-    e.stopPropagation();
-    dragDepth.current += 1;
-    if (dragDepth.current === 1) setIsDropTarget(true);
-  }
-
-  function onDragOver(e: DragEvent<HTMLElement>) {
-    if (!hasHearthDrag(e)) return;
-    e.preventDefault();
-    e.stopPropagation();
-    e.dataTransfer.dropEffect = 'move';
-  }
-
-  function onDragLeave(e: DragEvent<HTMLElement>) {
-    e.stopPropagation();
-    dragDepth.current = Math.max(0, dragDepth.current - 1);
-    if (dragDepth.current === 0) setIsDropTarget(false);
-  }
-
-  function onDrop(e: DragEvent<HTMLElement>) {
-    e.preventDefault();
-    e.stopPropagation();
-    dragDepth.current = 0;
-    setIsDropTarget(false);
-    onDropFile(folder.path, e.dataTransfer.getData(DRAG_MIME));
-  }
-
   return (
     <div
       className={`${styles.nestedFolder} ${isDropTarget ? styles.nestedFolderDrop : ''}`}
       style={{ paddingLeft: `${depth * 16}px` }}
-      onDragEnter={onDragEnter}
-      onDragOver={onDragOver}
-      onDragLeave={onDragLeave}
-      onDrop={onDrop}
+      {...dragProps}
     >
       <div className={styles.nestedFolderHead}>
         <button
           type="button"
           className={styles.nestedFolderToggle}
-          onClick={() => setExpanded((v) => !v)}
+          onClick={() => setExpanded((current) => !current)}
           aria-expanded={expanded}
           aria-label={`${expanded ? 'Collapse' : 'Expand'} folder ${folder.name}`}
         >
@@ -831,9 +807,9 @@ const NestedFolder = memo(function NestedFolder({
         <button
           type="button"
           className={styles.shelfMenuBtn}
-          onClick={(e) => {
-            const r = e.currentTarget.getBoundingClientRect();
-            onFolderMenu(folder, r.right, r.bottom);
+          onClick={(event) => {
+            const rect = event.currentTarget.getBoundingClientRect();
+            onFolderMenu(folder, rect.right, rect.bottom);
           }}
           aria-label={`Manage ${folder.name}`}
           title="Rename, move, or delete this folder"
@@ -891,8 +867,8 @@ const NestedFolder = memo(function NestedFolder({
   );
 });
 
-function hasHearthDrag(e: DragEvent<HTMLElement>): boolean {
-  const types = e.dataTransfer?.types;
+function hasHearthDrag(event: DragEvent<HTMLElement>): boolean {
+  const types = event.dataTransfer?.types;
   if (!types) return false;
   for (let i = 0; i < types.length; i += 1) {
     if (types[i] === DRAG_MIME) return true;
@@ -904,7 +880,7 @@ function intersectionTags(paths: string[], meta: MetaMap): string[] {
   if (paths.length === 0) return [];
   const first = meta[paths[0]]?.tags ?? [];
   if (paths.length === 1) return first;
-  return first.filter((t) => paths.every((p) => (meta[p]?.tags ?? []).includes(t)));
+  return first.filter((tag) => paths.every((path) => (meta[path]?.tags ?? []).includes(tag)));
 }
 
 function siblingsOf(targetPath: string, tree: TreeNode[]): string[] {
@@ -913,7 +889,7 @@ function siblingsOf(targetPath: string, tree: TreeNode[]): string[] {
   const parent = parts.join('/');
   const folder = findFolder(tree, parent);
   if (!folder) return [];
-  return folder.children.map((c) => c.name).filter((n) => n !== leaf);
+  return folder.children.map((child) => child.name).filter((name) => name !== leaf);
 }
 
 function findFolder(tree: TreeNode[], path: string): TreeFolder | null {
@@ -921,10 +897,10 @@ function findFolder(tree: TreeNode[], path: string): TreeFolder | null {
     return { type: 'folder', name: '', path: '', children: tree };
   }
   const walk = (nodes: TreeNode[]): TreeFolder | null => {
-    for (const n of nodes) {
-      if (n.type === 'folder') {
-        if (n.path === path) return n;
-        const hit = walk(n.children);
+    for (const node of nodes) {
+      if (node.type === 'folder') {
+        if (node.path === path) return node;
+        const hit = walk(node.children);
         if (hit) return hit;
       }
     }
@@ -936,14 +912,12 @@ function findFolder(tree: TreeNode[], path: string): TreeFolder | null {
 function collectFilesUnder(folder: TreeFolder): TreeFile[] {
   const out: TreeFile[] = [];
   const walk = (nodes: TreeNode[]) => {
-    for (const n of nodes) {
-      if (n.type === 'file') out.push(n);
-      else walk(n.children);
+    for (const node of nodes) {
+      if (node.type === 'file') out.push(node);
+      else walk(node.children);
     }
   };
   walk(folder.children);
-  // Parse once per file; previously parsed each `updated` twice on every
-  // comparison via `new Date(...)` which dominated the sort cost.
   out.sort((a, b) => Date.parse(b.updated) - Date.parse(a.updated));
   return out;
 }
@@ -952,9 +926,9 @@ function collectFilesUnder(folder: TreeFolder): TreeFile[] {
 function countFilesUnder(folder: TreeFolder): number {
   let count = 0;
   const walk = (nodes: TreeNode[]) => {
-    for (const n of nodes) {
-      if (n.type === 'file') count += 1;
-      else walk(n.children);
+    for (const node of nodes) {
+      if (node.type === 'file') count += 1;
+      else walk(node.children);
     }
   };
   walk(folder.children);
@@ -963,6 +937,6 @@ function countFilesUnder(folder: TreeFolder): number {
 
 const ROMAN = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X'];
 
-function romanNumeral(n: number): string {
-  return ROMAN[n - 1] ?? String(n);
+function romanNumeral(value: number): string {
+  return ROMAN[value - 1] ?? String(value);
 }
