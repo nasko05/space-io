@@ -35,8 +35,7 @@ export function HistoryPanel({ open, path, reloadToken, onClose, onRollback }: P
     setError(null);
     try {
       await onRollback(path, commit);
-      // Refresh the history list so the new "Rollback …" commit shows up
-      // at the top.
+      // Reload so the new "Rollback …" commit appears at the top.
       const { entries } = await api.history(path);
       setEntries(entries);
     } catch (err) {
@@ -92,19 +91,19 @@ export function HistoryPanel({ open, path, reloadToken, onClose, onRollback }: P
           </div>
         )}
         <ol className={styles.list}>
-          {entries.map((e, i) => (
-            <li key={e.commit} className={styles.entry}>
+          {entries.map((entry, i) => (
+            <li key={entry.commit} className={styles.entry}>
               <span className={styles.dot}>
                 <Commit size={12} />
               </span>
               <div className={styles.entryBody}>
-                <div className={styles.entryMessage}>{e.message || '(no message)'}</div>
+                <div className={styles.entryMessage}>{entry.message || '(no message)'}</div>
                 <div className={styles.entryMeta}>
-                  <span className={styles.entryAuthor}>{e.author}</span>
+                  <span className={styles.entryAuthor}>{entry.author}</span>
                   <span>·</span>
-                  <span>{formatWhen(e.when)}</span>
+                  <span>{formatWhen(entry.when)}</span>
                   <span>·</span>
-                  <span className={styles.entryHash}>{e.commit.slice(0, 7)}</span>
+                  <span className={styles.entryHash}>{entry.commit.slice(0, 7)}</span>
                   {i === 0 && <span className={styles.entryHead}>HEAD</span>}
                 </div>
               </div>
@@ -112,11 +111,11 @@ export function HistoryPanel({ open, path, reloadToken, onClose, onRollback }: P
                 <button
                   type="button"
                   className={styles.restoreBtn}
-                  onClick={() => void restore(e.commit)}
+                  onClick={() => void restore(entry.commit)}
                   disabled={restoring !== null}
                   title="Restore the file to this version"
                 >
-                  {restoring === e.commit ? 'Restoring…' : 'Restore'}
+                  {restoring === entry.commit ? 'Restoring…' : 'Restore'}
                 </button>
               )}
             </li>
@@ -129,15 +128,15 @@ export function HistoryPanel({ open, path, reloadToken, onClose, onRollback }: P
 
 function formatWhen(iso: string): string {
   if (!iso) return '';
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return iso;
+  const date = new Date(iso);
+  if (isNaN(date.getTime())) return iso;
   const now = new Date();
-  const diff = (now.getTime() - d.getTime()) / 1000;
+  const diff = (now.getTime() - date.getTime()) / 1000;
   if (diff < 60) return 'just now';
   if (diff < 3600) return `${Math.round(diff / 60)} min ago`;
   if (diff < 86400) return `${Math.round(diff / 3600)}h ago`;
   if (diff < 86400 * 7) return `${Math.round(diff / 86400)}d ago`;
-  return d.toLocaleString(undefined, {
+  return date.toLocaleString(undefined, {
     month: 'short',
     day: 'numeric',
     hour: '2-digit',

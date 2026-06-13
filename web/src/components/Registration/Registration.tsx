@@ -11,11 +11,8 @@ interface Props {
   onBackToLogin?: () => void;
 }
 
-// First-run (or additional-user) registration. Collects email + passphrase
-// and posts to /api/auth/init, which mints a UUID-named folder under
-// `data/` and persists the email→UUID mapping in `data/.users.toml`. Both
-// the per-user folder and the mapping survive process restarts; the only
-// thing the user has to type again after a restart is the passphrase.
+// Registration: collects email + passphrase and posts to /api/auth/init, which
+// creates the user's UUID-named folder and records the email→UUID mapping.
 export function Registration({ showBackToLogin = false, onRegistered, onBackToLogin }: Props) {
   const [email, setEmail] = useState('');
   const [passphrase, setPassphrase] = useState('');
@@ -36,11 +33,11 @@ export function Registration({ showBackToLogin = false, onRegistered, onBackToLo
     return null;
   }
 
-  async function submit(e: FormEvent) {
-    e.preventDefault();
-    const v = validate();
-    if (v) {
-      setError(v);
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    const validationError = validate();
+    if (validationError) {
+      setError(validationError);
       return;
     }
     setBusy(true);
@@ -111,7 +108,7 @@ export function Registration({ showBackToLogin = false, onRegistered, onBackToLo
                   className={styles.identityInput}
                   type="email"
                   value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  onChange={(event) => setEmail(event.target.value)}
                   placeholder="you@home.lan"
                   spellCheck={false}
                   autoComplete="email"
@@ -131,7 +128,7 @@ export function Registration({ showBackToLogin = false, onRegistered, onBackToLo
                   className={styles.passInput}
                   type={visible ? 'text' : 'password'}
                   value={passphrase}
-                  onChange={(e) => setPassphrase(e.target.value)}
+                  onChange={(event) => setPassphrase(event.target.value)}
                   autoComplete="new-password"
                   spellCheck={false}
                   disabled={busy}
@@ -140,7 +137,7 @@ export function Registration({ showBackToLogin = false, onRegistered, onBackToLo
                 <button
                   type="button"
                   className={styles.eyeBtn}
-                  onClick={() => setVisible((v) => !v)}
+                  onClick={() => setVisible((current) => !current)}
                   tabIndex={-1}
                   aria-label={visible ? 'Hide passphrase' : 'Show passphrase'}
                 >
@@ -159,7 +156,7 @@ export function Registration({ showBackToLogin = false, onRegistered, onBackToLo
                   className={styles.passInput}
                   type={visible ? 'text' : 'password'}
                   value={confirm}
-                  onChange={(e) => setConfirm(e.target.value)}
+                  onChange={(event) => setConfirm(event.target.value)}
                   autoComplete="new-password"
                   spellCheck={false}
                   disabled={busy}

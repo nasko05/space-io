@@ -12,11 +12,8 @@ interface Props {
   onRegister?: () => void;
 }
 
-// Multi-tenant login: the user types email + passphrase. The server looks up
-// the email in `data/.users.toml`, opens the corresponding UUID folder, and
-// verifies the passphrase against that user's `.space.toml`. Unknown emails
-// surface as "wrong passphrase" so the form doesn't leak which addresses are
-// registered.
+// Multi-tenant login by email + passphrase. Unknown emails surface as "wrong
+// passphrase" so the form doesn't leak which addresses are registered.
 export function Auth({ showRegisterLink = false, onUnlocked, onRegister }: Props) {
   const [email, setEmail] = useState('');
   const [passphrase, setPassphrase] = useState('');
@@ -25,17 +22,17 @@ export function Auth({ showRegisterLink = false, onUnlocked, onRegister }: Props
   const [busy, setBusy] = useState(false);
   const [passkeyBusy, setPasskeyBusy] = useState(false);
 
-  async function submit(e: FormEvent) {
-    e.preventDefault();
+  async function submit(event: FormEvent) {
+    event.preventDefault();
     if (!email.trim() || !passphrase) return;
     await runUnlock(email.trim(), passphrase);
   }
 
-  async function runUnlock(addr: string, secret: string) {
+  async function runUnlock(emailAddress: string, secret: string) {
     setBusy(true);
     setError(null);
     try {
-      await api.unlock(addr, secret);
+      await api.unlock(emailAddress, secret);
       onUnlocked();
     } catch (err) {
       if (err instanceof ApiError && err.code === 'wrong_passphrase') {
@@ -129,7 +126,7 @@ export function Auth({ showRegisterLink = false, onUnlocked, onRegister }: Props
                   className={styles.identityInput}
                   type="email"
                   value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  onChange={(event) => setEmail(event.target.value)}
                   placeholder="you@home.lan"
                   spellCheck={false}
                   autoComplete="email"
@@ -149,7 +146,7 @@ export function Auth({ showRegisterLink = false, onUnlocked, onRegister }: Props
                   className={styles.passInput}
                   type={visible ? 'text' : 'password'}
                   value={passphrase}
-                  onChange={(e) => setPassphrase(e.target.value)}
+                  onChange={(event) => setPassphrase(event.target.value)}
                   autoComplete="current-password"
                   spellCheck={false}
                   disabled={busy || passkeyBusy}
@@ -158,7 +155,7 @@ export function Auth({ showRegisterLink = false, onUnlocked, onRegister }: Props
                 <button
                   type="button"
                   className={styles.eyeBtn}
-                  onClick={() => setVisible((v) => !v)}
+                  onClick={() => setVisible((current) => !current)}
                   tabIndex={-1}
                   aria-label={visible ? 'Hide passphrase' : 'Show passphrase'}
                 >

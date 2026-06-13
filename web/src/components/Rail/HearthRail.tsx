@@ -25,10 +25,6 @@ interface Props {
 
 const WEEKDAYS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 
-// Ported from dir-1-hearth.jsx:52-153. Phase 2 wires real tree data:
-// - Calendar dots reflect days with .md updates in the current month.
-// - Today list shows files updated today, sorted newest first.
-// - "my space" badge in the brand row navigates to the Vault surface.
 function HearthRailImpl({
   calendar,
   entries,
@@ -46,7 +42,7 @@ function HearthRailImpl({
 }: Props) {
   const days = Array.from({ length: calendar.daysInMonth }, (_, i) => i + 1);
   const activeDay = selectedDay ?? (calendar.today || 1);
-  const pad = (n: number) => String(n).padStart(2, '0');
+  const pad = (value: number) => String(value).padStart(2, '0');
   const dateValue = `${calendar.year}-${pad(calendar.month + 1)}-${pad(activeDay)}`;
   return (
     <aside className={styles.rail}>
@@ -84,54 +80,54 @@ function HearthRailImpl({
               type="date"
               className={styles.calMonthInput}
               value={dateValue}
-              onChange={(e) => {
-                if (e.target.value) onPickDate(e.target.value);
+              onChange={(event) => {
+                if (event.target.value) onPickDate(event.target.value);
               }}
-              onClick={(e) => e.currentTarget.showPicker?.()}
+              onClick={(event) => event.currentTarget.showPicker?.()}
               aria-label="Jump to a date"
             />
           )}
         </label>
         <div className={styles.calendar}>
-          {WEEKDAYS.map((d, i) => (
+          {WEEKDAYS.map((letter, i) => (
             <div key={`h${i}`} className={styles.calHead}>
-              {d}
+              {letter}
             </div>
           ))}
           {Array.from({ length: calendar.startWeekday }, (_, i) => (
             <div key={`e${i}`} />
           ))}
-          {days.map((d) => {
-            const has = calendar.filled.has(d);
-            const cur = d === calendar.today;
-            const sel = d === selectedDay;
+          {days.map((day) => {
+            const hasNotes = calendar.filled.has(day);
+            const isToday = day === calendar.today;
+            const isSelected = day === selectedDay;
             const clickable = !!onSelectDay;
             const className = [
               styles.calCell,
-              cur ? styles.calCellCurrent : '',
-              sel && !cur ? styles.calCellSelected : '',
-              has && !cur && !sel ? styles.calCellHas : '',
+              isToday ? styles.calCellCurrent : '',
+              isSelected && !isToday ? styles.calCellSelected : '',
+              hasNotes && !isToday && !isSelected ? styles.calCellHas : '',
               clickable ? styles.calCellClickable : '',
             ]
               .filter(Boolean)
               .join(' ');
             return (
               <button
-                key={d}
+                key={day}
                 type="button"
                 className={className}
-                onClick={clickable ? () => onSelectDay?.(d) : undefined}
+                onClick={clickable ? () => onSelectDay?.(day) : undefined}
                 disabled={!clickable}
                 aria-label={
                   clickable
-                    ? has
-                      ? `Notes from day ${d}`
-                      : `No notes on day ${d}`
+                    ? hasNotes
+                      ? `Notes from day ${day}`
+                      : `No notes on day ${day}`
                     : undefined
                 }
               >
-                {d}
-                {has && !cur && !sel && <span className={styles.calDot} />}
+                {day}
+                {hasNotes && !isToday && !isSelected && <span className={styles.calDot} />}
               </button>
             );
           })}
@@ -171,23 +167,20 @@ function HearthRailImpl({
           </div>
         ) : (
           <ul className={styles.todayList}>
-            {entries.map((it) => (
+            {entries.map((entry) => (
               <li
-                key={it.path}
-                className={[
-                  styles.todayItem,
-                  it.current ? styles.todayItemCurrent : '',
-                ]
+                key={entry.path}
+                className={[styles.todayItem, entry.current ? styles.todayItemCurrent : '']
                   .filter(Boolean)
                   .join(' ')}
               >
                 <button
                   type="button"
                   className={styles.todayBtn}
-                  onClick={() => onSelectFile(it.path)}
+                  onClick={() => onSelectFile(entry.path)}
                 >
-                  <span className={styles.todayTime}>{it.time}</span>
-                  <span className={styles.todayTitle}>{it.title}</span>
+                  <span className={styles.todayTime}>{entry.time}</span>
+                  <span className={styles.todayTitle}>{entry.title}</span>
                 </button>
               </li>
             ))}
@@ -209,7 +202,6 @@ function HearthRailImpl({
   );
 }
 
-// Memoized so the rail (with its 30+ day buttons and today list) doesn't
-// re-render on every keystroke in the Reader. Callers need to keep callback
-// props stable for the memo to hit.
+// Memoized so the rail doesn't re-render on every keystroke in the Reader;
+// callers must keep callback props stable for the memo to hit.
 export const HearthRail = memo(HearthRailImpl);
