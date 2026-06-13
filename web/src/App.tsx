@@ -670,8 +670,8 @@ export function App() {
   return (
     <div
       onDragEnter={handleWindowDragEnter}
-      onDragOver={(e) => {
-        if (hasFiles(e)) e.preventDefault();
+      onDragOver={(event) => {
+        if (hasFiles(event)) event.preventDefault();
       }}
       onDragLeave={handleWindowDragLeave}
       onDrop={handleWindowDrop}
