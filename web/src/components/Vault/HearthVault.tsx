@@ -123,8 +123,6 @@ export function HearthVault({
   const [menu, setMenu] = useState<MenuState>(EMPTY_MENU);
   const [dialog, setDialog] = useState<DialogState>({ kind: 'none' });
 
-  // One tree walk yields the shelves (top-level folder → sorted direct files +
-  // subfolders), the total count, and the set of known paths.
   const { shelves, totalFiles, knownPaths } = useMemo(() => {
     const shelves: Shelf[] = [];
     let totalFiles = 0;
@@ -149,7 +147,6 @@ export function HearthVault({
     return list;
   }, [shelves]);
 
-  // Drop deleted/moved files from the selection.
   useEffect(() => {
     setSelection((cur) => {
       if (cur.size === 0) return cur;
@@ -169,8 +166,8 @@ export function HearthVault({
     return Array.from(set).sort((a, b) => a.localeCompare(b));
   }, [meta]);
 
-  // Refs keep the card callbacks referentially stable (so React.memo on
-  // HearthCard holds) while still reading the latest values.
+  /** Refs keep the card callbacks referentially stable (so `React.memo` on
+   *  `HearthCard` holds) while still reading the latest selection/anchor/order. */
   const selectionRef = useRef(selection);
   selectionRef.current = selection;
   const anchorRef = useRef(anchor);
@@ -220,10 +217,10 @@ export function HearthVault({
       const sel = selectionRef.current;
       const selected = sel.has(file.path);
       const targets = selected && sel.size > 1 ? Array.from(sel) : [file.path];
-      const multi = targets.length > 1;
+      const isMulti = targets.length > 1;
 
       const items: MenuItem[] = [];
-      if (!multi) {
+      if (!isMulti) {
         items.push({
           label: file.kind === 'md' ? 'Open' : 'Preview',
           icon: <FolderOpen size={13} />,
@@ -236,16 +233,16 @@ export function HearthVault({
         });
       }
       items.push({
-        label: multi ? `Move ${targets.length} items…` : 'Move to…',
+        label: isMulti ? `Move ${targets.length} items…` : 'Move to…',
         icon: <FolderOpen size={13} />,
         onClick: () => setDialog({ kind: 'move', paths: targets }),
       });
       items.push({
-        label: multi ? `Edit tags on ${targets.length} items…` : 'Edit tags…',
+        label: isMulti ? `Edit tags on ${targets.length} items…` : 'Edit tags…',
         icon: <Tag size={13} />,
         onClick: () => setDialog({ kind: 'tags', paths: targets }),
       });
-      if (!multi) {
+      if (!isMulti) {
         items.push({
           label: 'Save to disk',
           icon: <DownloadIcon size={13} />,
@@ -254,7 +251,7 @@ export function HearthVault({
       }
       items.push({ divider: true, label: '', onClick: () => {} });
       items.push({
-        label: multi ? `Delete ${targets.length} items` : 'Delete',
+        label: isMulti ? `Delete ${targets.length} items` : 'Delete',
         icon: <Close size={13} />,
         destructive: true,
         onClick: () => setDialog({ kind: 'delete', paths: targets }),
@@ -271,12 +268,13 @@ export function HearthVault({
     [buildFileMenu],
   );
 
+  /** Move dropped (or selected) paths into `folderPath`, skipping any target
+   *  already inside the destination subtree — moving it there is a no-op. */
   const onShelfDrop = useCallback(
     (folderPath: string, droppedPath: string) => {
       if (!droppedPath) return;
       const sel = selectionRef.current;
       const targets = sel.has(droppedPath) ? Array.from(sel) : [droppedPath];
-      // A target already inside the destination subtree would be a no-op move.
       const prefix = `${folderPath}/`;
       const movable = targets.filter((path) => !path.startsWith(prefix));
       if (movable.length === 0) return;
@@ -326,7 +324,6 @@ export function HearthVault({
     const parts = folder.path.split('/');
     parts[parts.length - 1] = newName;
     const newPath = parts.join('/');
-    // /api/files/move handles both files and folders.
     await onRenameFile(folder.path, newPath);
   }
 

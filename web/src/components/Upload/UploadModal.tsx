@@ -31,7 +31,6 @@ export function UploadModal({ open, initialFiles, tree, onClose, onUploaded }: P
   const [dragOver, setDragOver] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
-  // Seed queue when reopened.
   useEffect(() => {
     if (open) {
       setItems(
@@ -75,8 +74,6 @@ export function UploadModal({ open, initialFiles, tree, onClose, onUploaded }: P
   }
 
   async function submit() {
-    // Snapshot the queued items by id so edits during the loop can't shuffle
-    // indices under us.
     const ready = items.filter((item) => item.state === 'queued');
     if (ready.length === 0 || submitting) return;
     setSubmitting(true);

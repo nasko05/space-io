@@ -1,9 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { sanitizeHtml } from './sanitizeHtml';
 
-// Adversarial cases for the DOCX→HTML sanitiser. These pin the dangerous
-// shapes a hostile document could smuggle through mammoth's output so a future
-// refactor of sanitizeHtml can't silently reopen a hole.
 describe('sanitizeHtml hardening', () => {
   it('drops a top-level <script>', () => {
     const out = sanitizeHtml('<p>ok</p><script>alert(1)</script>');

@@ -9,12 +9,15 @@ export interface TodayEntry {
 
 export interface CalendarView {
   year: number;
-  month: number; // 0-indexed
+  /** 0-indexed. */
+  month: number;
   monthLabel: string;
   today: number;
   daysInMonth: number;
-  startWeekday: number; // Sunday = 0
-  filled: Set<number>; // days with at least one entry
+  /** Sunday = 0. */
+  startWeekday: number;
+  /** Days with at least one entry. */
+  filled: Set<number>;
 }
 
 const MONTHS = [

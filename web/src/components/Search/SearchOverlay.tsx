@@ -16,20 +16,17 @@ export function SearchOverlay({ open, onClose, onSelect }: Props) {
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
-  // Focus the input each time the overlay opens.
   useEffect(() => {
     if (open) {
       setQuery('');
       setHits([]);
       setActiveIndex(0);
-      // Defer a tick so the input exists.
       const timer = window.setTimeout(() => inputRef.current?.focus(), 0);
       return () => window.clearTimeout(timer);
     }
     return undefined;
   }, [open]);
 
-  // Debounced query.
   useEffect(() => {
     if (!open) return;
     const trimmed = query.trim();
@@ -83,7 +80,6 @@ export function SearchOverlay({ open, onClose, onSelect }: Props) {
     }
   }
 
-  // Build the highlight regex once per query, not once per hit × field.
   const highlightPattern = useMemo(() => {
     const tokens = query
       .trim()

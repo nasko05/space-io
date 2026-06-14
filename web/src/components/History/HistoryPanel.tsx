@@ -35,7 +35,6 @@ export function HistoryPanel({ open, path, reloadToken, onClose, onRollback }: P
     setError(null);
     try {
       await onRollback(path, commit);
-      // Reload so the new "Rollback …" commit appears at the top.
       const { entries } = await api.history(path);
       setEntries(entries);
     } catch (err) {

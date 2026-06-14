@@ -1,11 +1,6 @@
 @import './tokens.css';
 @import './reset.css';
 
-/* ----- Scrollbars -----
- * Match the warm paper palette so the rail / column / dialog scrollers
- * don't punch a system-grey rectangle through the design. Firefox needs
- * the `scrollbar-*` properties; everyone else gets the more controllable
- * Webkit pseudo-elements. */
 :root {
   scrollbar-width: thin;
   scrollbar-color: var(--accent-soft) transparent;
@@ -115,8 +110,6 @@
   }
 }
 
-/* Floating launcher for the AI assistant drawer. Sits clear of the toast,
-   below the drawer's own z-index so it tucks away when the drawer opens. */
 .hearthAgentFab {
   position: fixed;
   right: 24px;

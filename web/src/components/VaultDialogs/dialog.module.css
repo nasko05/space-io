@@ -156,7 +156,6 @@
   filter: brightness(0.93);
 }
 
-/* Folder picker (MoveDialog, NewFolderDialog parent select). */
 .folderList {
   max-height: 220px;
   overflow: auto;
@@ -197,7 +196,6 @@
   font-style: italic;
 }
 
-/* Tag chips. */
 .chipRow {
   display: flex;
   flex-wrap: wrap;

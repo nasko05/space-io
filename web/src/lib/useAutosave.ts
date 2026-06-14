@@ -30,8 +30,6 @@ export function useAutosave({ delayMs = 800, onSave }: Options) {
   const onSaveRef = useRef(onSave);
 
   useEffect(() => {
-    // Flush any edit still pending for the previous target before repointing,
-    // or switching files within the debounce window would drop the last edits.
     const previousSave = onSaveRef.current;
     const pending = pendingRef.current;
     if (pending !== null) {
@@ -55,7 +53,6 @@ export function useAutosave({ delayMs = 800, onSave }: Options) {
     setStatus({ kind: 'saving' });
     try {
       await onSaveRef.current(value);
-      // If more edits arrived while we were saving, schedule another round.
       if (pendingRef.current !== null) {
         inFlightRef.current = false;
         setStatus({ kind: 'dirty' });
@@ -102,7 +99,6 @@ export function useAutosave({ delayMs = 800, onSave }: Options) {
   useEffect(
     () => () => {
       if (timerRef.current !== null) clearTimeout(timerRef.current);
-      // Don't lose a pending edit if the editor unmounts mid-debounce.
       if (pendingRef.current !== null) {
         void onSaveRef.current(pendingRef.current);
         pendingRef.current = null;
@@ -111,8 +107,6 @@ export function useAutosave({ delayMs = 800, onSave }: Options) {
     [],
   );
 
-  // Best-effort flush when the tab/window is closing. Browsers won't await an
-  // async handler here, so this is a last-ditch attempt, not a guarantee.
   useEffect(() => {
     const flushOnUnload = () => {
       if (pendingRef.current !== null) {

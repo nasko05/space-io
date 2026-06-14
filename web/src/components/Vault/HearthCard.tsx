@@ -172,8 +172,9 @@ function HearthCardImpl({
   );
 }
 
-// Memoized so a selection toggle or drag highlight re-renders only the affected
-// card, not every visible card in the vault.
+/** Memoized so a selection toggle or drag highlight re-renders only the affected
+ *  card, not every visible card in the vault. Callers must keep its callback
+ *  props referentially stable for the memo to hold. */
 export const HearthCard = memo(HearthCardImpl);
 
 interface SurfaceProps {

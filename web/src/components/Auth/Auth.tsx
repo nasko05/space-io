@@ -12,8 +12,10 @@ interface Props {
   onRegister?: () => void;
 }
 
-// Multi-tenant login by email + passphrase. Unknown emails surface as "wrong
-// passphrase" so the form doesn't leak which addresses are registered.
+/**
+ * Multi-tenant login by email + passphrase. Unknown emails surface as "wrong
+ * passphrase" so the form doesn't leak which addresses are registered.
+ */
 export function Auth({ showRegisterLink = false, onUnlocked, onRegister }: Props) {
   const [email, setEmail] = useState('');
   const [passphrase, setPassphrase] = useState('');

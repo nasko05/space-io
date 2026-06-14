@@ -65,7 +65,8 @@ const WIKILINK_MAX_SUGGESTIONS = 6;
 
 interface AutocompleteState {
   open: boolean;
-  start: number; // character index of the first char after `[[`
+  /** Character index of the first char after `[[`. */
+  start: number;
   query: string;
   hits: string[];
   activeIdx: number;
@@ -112,15 +113,11 @@ export function Reader({
   const [ac, setAc] = useState<AutocompleteState>(EMPTY_AC);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
-  // Checkpoint state — the deliberate, labelled point the user can return to,
-  // separate from autosave's draft on disk.
   const [checkpointOpen, setCheckpointOpen] = useState(false);
   const [checkpointLabel, setCheckpointLabel] = useState('');
   const [checkpointing, setCheckpointing] = useState(false);
   const [checkpointError, setCheckpointError] = useState<string | null>(null);
-  // Edited since opened/last checkpointed — drives the unsaved-version dot.
   const [dirtySinceCheckpoint, setDirtySinceCheckpoint] = useState(false);
-  // Bumped after a checkpoint so an open HistoryPanel reloads its list.
   const [historyReloadToken, setHistoryReloadToken] = useState(0);
   const checkpointWrapRef = useRef<HTMLDivElement | null>(null);
 
@@ -142,7 +139,7 @@ export function Reader({
   );
   const { status, markDirty, flush } = useAutosave({ onSave: saveFn });
 
-  // Wrap `markDirty` so every edit also flags changes not yet checkpointed.
+  /** Wrap `markDirty` so every edit also flags changes not yet checkpointed. */
   const touch = useCallback(
     (next: string) => {
       markDirty(next);
@@ -168,7 +165,6 @@ export function Reader({
     }
   }, [checkpointLabel, checkpointing, content, onCheckpoint, path]);
 
-  // Dismiss the checkpoint label popover on an outside click.
   useEffect(() => {
     if (!checkpointOpen) return;
     function onPointerDown(event: PointerEvent) {
@@ -191,8 +187,9 @@ export function Reader({
     return () => window.removeEventListener('keydown', onKey);
   }, [flush]);
 
-  // Editor formatting helpers: update content via state, then restore the caret
-  // on the next frame so the controlled textarea doesn't fight us.
+  /** Apply a transform to the textarea selection: update content via state, then
+   *  restore the caret on the next frame so the controlled textarea doesn't fight
+   *  us. The shared primitive behind every editor formatting helper. */
   const applyToSelection = useCallback(
     (transform: (value: string, start: number, end: number) => { text: string; selStart: number; selEnd: number }) => {
       const textarea = textareaRef.current;
@@ -228,7 +225,6 @@ export function Reader({
   const prefixLine = useCallback(
     (prefix: string) =>
       applyToSelection((value, start, end) => {
-        // Find the start of the current line.
         let lineStart = start;
         while (lineStart > 0 && value[lineStart - 1] !== '\n') lineStart -= 1;
         const before = value.slice(0, lineStart);
@@ -259,8 +255,8 @@ export function Reader({
     if (mode === 'edit' || mode === 'split') textareaRef.current?.focus();
   }, [mode]);
 
-  // Pre-lower each title once per `titleToPath` change so the autocomplete
-  // filter doesn't lowercase the whole corpus on every keystroke.
+  /** Pre-lowered titles so the autocomplete filter doesn't lowercase the whole
+   *  corpus on every keystroke; rebuilt only when `titleToPath` changes. */
   const titleIndex = useMemo(() => {
     const list: { title: string; lower: string }[] = [];
     for (const title of titleToPath.keys()) {
@@ -269,9 +265,9 @@ export function Reader({
     return list;
   }, [titleToPath]);
 
+  /** Find the most recent `[[` to the left of the caret with no closing `]]` or
+   *  newline between, and open the autocomplete with matching note titles. */
   function recomputeAutocomplete(value: string, caret: number) {
-    // Find the most recent `[[` to the left of the caret with no closing `]]`
-    // or whitespace between.
     let i = caret - 1;
     while (i >= 0) {
       const ch = value[i];
@@ -280,7 +276,6 @@ export function Reader({
         return;
       }
       if (i >= 1 && value[i - 1] === '[' && value[i] === '[') {
-        // i points at the second `[`. Query starts at i + 1.
         const start = i + 1;
         const between = value.slice(start, caret);
         if (between.includes(']') || between.includes('[')) {
@@ -320,14 +315,12 @@ export function Reader({
     const start = ac.start;
     if (start < 0) return;
     const before = content.slice(0, start);
-    // Replace the in-progress query and add a closing `]]`.
     const after = content.slice(start + ac.query.length);
     const insertText = `${title}]]`;
     const next = `${before}${insertText}${after}`;
     setContent(next);
     touch(next);
     setAc(EMPTY_AC);
-    // Restore caret to just after the inserted `]]`.
     const caret = before.length + insertText.length;
     window.requestAnimationFrame(() => {
       textarea.focus();
@@ -336,7 +329,6 @@ export function Reader({
   }
 
   function onTextareaKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
-    // Formatting shortcuts work whether or not autocomplete is open.
     if (event.metaKey || event.ctrlKey) {
       const key = event.key.toLowerCase();
       if (key === 'b') {
@@ -380,8 +372,9 @@ export function Reader({
     [flush, onSelectFile, onWikilinkMiss, titleToPath],
   );
 
-  // Keep these callbacks referentially stable so the memoized rail doesn't
-  // re-render on every keystroke.
+  /** Flush-then-select for the rail. Kept referentially stable (alongside
+   *  `railOpenVault`) so the memoized `HearthRail` doesn't re-render on every
+   *  keystroke. */
   const railSelectFile = useCallback(
     (selectedPath: string) => {
       void flush();
@@ -402,8 +395,6 @@ export function Reader({
     };
   }, [path]);
 
-  // Memoize the content-derived values; they re-run on every keystroke and
-  // compound as the note grows.
   const titleFromContent = useMemo(() => extractTitle(content), [content]);
   const wordCount = useMemo(() => countWords(content), [content]);
   const bodySource = useMemo(
@@ -422,8 +413,6 @@ export function Reader({
   const isEmpty = content.length === 0 || content.trim().length === 0;
   const saveLabel = saveStatusLabel(status);
 
-  // Reused by single-pane edit and the left side of split, so the textarea +
-  // autocomplete share one source of truth regardless of layout.
   const editorPane = (
     <div className={styles.editorWrap}>
       <textarea

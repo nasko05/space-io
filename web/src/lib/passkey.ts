@@ -13,6 +13,8 @@
 
 const HKDF_INFO = 'hearth-passkey-wrap';
 const IV_LENGTH = 12;
+const ES256_ALGORITHM = -7;
+const RS256_ALGORITHM = -257;
 
 /**
  * WebAuthn rejects IP-addressed origins (`rp.id` must be a registrable domain
@@ -71,7 +73,6 @@ function isInsideCrossOriginFrame(): boolean {
   try {
     return window.top !== null && window.top !== window;
   } catch {
-    // Accessing window.top across origins throws — that's the definition.
     return true;
   }
 }
@@ -200,8 +201,8 @@ export async function registerPasskey(
           displayName: owner,
         },
         pubKeyCredParams: [
-          { type: 'public-key', alg: -7 }, // ES256
-          { type: 'public-key', alg: -257 }, // RS256
+          { type: 'public-key', alg: ES256_ALGORITHM },
+          { type: 'public-key', alg: RS256_ALGORITHM },
         ],
         authenticatorSelection: {
           userVerification: 'preferred',

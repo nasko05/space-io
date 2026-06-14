@@ -129,7 +129,6 @@
   border-radius: 999px;
 }
 
-/* Document card (PDF / DOCX) — visual stub until uploads land. */
 .docCard {
   padding: 14px 16px;
   height: 158px;
@@ -200,7 +199,6 @@
   color: var(--mute);
 }
 
-/* Media card (image / video) — visual stub. */
 .mediaCard {
   height: 158px;
   overflow: hidden;

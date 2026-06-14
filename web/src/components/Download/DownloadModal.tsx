@@ -12,8 +12,10 @@ interface Props {
 
 type Phase = { kind: 'ready' } | { kind: 'fetching'; progress: number } | { kind: 'done' };
 
-// The format chooser and "keep a copy" toggle are visual only — the backend
-// serves the original format, and the canonical copy already lives in the space.
+/**
+ * The format chooser and "keep a copy" toggle are visual only — the backend
+ * serves the original format, and the canonical copy already lives in the space.
+ */
 export function DownloadModal({ open, file, onClose }: Props) {
   const [format, setFormat] = useState<'original' | 'archival' | 'print'>('original');
   const [phase, setPhase] = useState<Phase>({ kind: 'ready' });

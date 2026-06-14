@@ -64,7 +64,6 @@ export function TagsDialog({
   }
 
   async function save() {
-    // Commit any in-progress draft into the tag set before saving.
     const finalTags = (() => {
       const trimmed = draft.trim();
       if (!trimmed) return tags;

@@ -46,8 +46,6 @@ export function App() {
   const [tree, setTree] = useState<TreeNode[]>([]);
   const [excerpts, setExcerpts] = useState<ExcerptMap>({});
   const [meta, setMeta] = useState<MetaMap>({});
-  // Day-stable date that flips only across midnight, so the calendar and
-  // entries list don't rebuild on a minute tick.
   const [todayDate, setTodayDate] = useState(() => startOfDay(new Date()));
   const [viewMonth, setViewMonth] = useState(() => startOfMonth(new Date()));
   const [hasPasskey, setHasPasskey] = useState(false);
@@ -58,8 +56,6 @@ export function App() {
   const [passkeyOpen, setPasskeyOpen] = useState(false);
   const [agentOpen, setAgentOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
-  // `null` shows today; a number pins the rail to that day-of-month. Clicking
-  // the same day again clears it.
   const [selectedDay, setSelectedDay] = useState<number | null>(null);
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     const stored = typeof window !== 'undefined' ? window.localStorage.getItem('hearth.theme') : null;
@@ -188,8 +184,6 @@ export function App() {
   }, [enterReader]);
 
   const onRegistered = useCallback(async () => {
-    // `/api/auth/init` already minted the session cookie; re-fetch status for
-    // the display name and drop into the reader.
     try {
       const status = await api.status();
       setHasPasskey(status.has_passkey);
@@ -229,18 +223,16 @@ export function App() {
     setView({ kind: 'auth', anyUsers: true });
   }, []);
 
+  /** Lock the session. The server call is best-effort: local state is cleared
+   *  regardless of whether it succeeds. */
   const onLock = useCallback(async () => {
     try {
       await api.lock();
-    } catch {
-      // Locking is best-effort; clear local state regardless.
-    }
+    } catch {}
     setTree([]);
     setExcerpts({});
     setMeta({});
     previousPathRef.current = null;
-    // Reset every overlay so the next session doesn't reopen into a half-open
-    // dialog or a stale upload queue.
     setSearchOpen(false);
     setUploadOpen(false);
     setUploadInitial(undefined);
@@ -347,8 +339,8 @@ export function App() {
     }
   }, [refreshExcerpts, refreshTree, view]);
 
-  // Patch the local title/excerpt for `path` so the Today list and wikilink
-  // autocomplete update without a full server re-walk on every keystroke.
+  /** Patch the local title/excerpt for `path` so the Today list and wikilink
+   *  autocomplete update without a full server re-walk on every keystroke. */
   const patchExcerpt = useCallback((path: string, content: string) => {
     const titleMatch = /^# (.+)$/m.exec(content);
     const title = titleMatch ? titleMatch[1].trim() : null;
@@ -364,7 +356,7 @@ export function App() {
     setExcerpts((cur) => ({ ...cur, [path]: { title, excerpt } }));
   }, []);
 
-  // Autosave: persist the draft without a history entry.
+  /** Autosave: persist the draft without a history entry. */
   const saveFile = useCallback(
     async (path: string, content: string) => {
       await api.saveDraft(path, content);
@@ -373,7 +365,7 @@ export function App() {
     [patchExcerpt],
   );
 
-  // Checkpoint: persist + record a labelled point in the version history.
+  /** Checkpoint: persist and record a labelled point in the version history. */
   const checkpointFile = useCallback(
     async (path: string, content: string, message?: string) => {
       await api.checkpoint(path, content, message);
@@ -386,8 +378,6 @@ export function App() {
     async (path: string, commit: string) => {
       if (view.kind !== 'unlocked') return;
       await api.rollback(path, commit);
-      // Re-read and refresh so the rail reflects the restored content and the
-      // editor isn't stuck on the pre-rollback text.
       const file = await api.read(path);
       void refreshTree();
       void refreshExcerpts();
@@ -426,8 +416,8 @@ export function App() {
     setSelectedDay(day);
   }, []);
 
-  // Resolve a path to its `TreeFile` (for preview routing) and select it. A
-  // stable reference keeps the memoized rail from re-rendering needlessly.
+  /** Resolve a path to its `TreeFile` (for preview routing) and select it. Kept
+   *  referentially stable so the memoized rail doesn't re-render needlessly. */
   const onVaultSelectPath = useCallback(
     (path: string) => {
       const file = findInTree(tree, path);
@@ -440,7 +430,6 @@ export function App() {
   const openSearch = useCallback(() => setSearchOpen(true), []);
   const openPasskey = useCallback(() => setPasskeyOpen(true), []);
 
-  // Refresh the vault views after the assistant applies an approved change.
   const onAgentVaultChanged = useCallback(() => {
     void refreshTree();
     void refreshExcerpts();
@@ -525,8 +514,6 @@ export function App() {
       if (paths.length === 0) return;
       try {
         await api.setTagsBulk(paths.map((path) => ({ path, tags })));
-        // Patch local state immediately so the UI doesn't blink while the
-        // server catches up.
         setMeta((cur) => {
           const next = { ...cur };
           for (const path of paths) {
@@ -604,15 +591,11 @@ export function App() {
     return () => window.clearTimeout(timer);
   }, [toast]);
 
-  // Memoize on `todayDate` (day-precision) so the calendar doesn't rebuild on
-  // every minute tick.
   const calendar: CalendarView = useMemo(
     () => buildCalendar(viewMonth, todayDate, tree),
     [viewMonth, todayDate, tree],
   );
   const isCurrentMonth = calendar.today > 0;
-  // Drop a pinned day if the grid slides to a month without it (e.g. a session
-  // ticks past midnight on the last of the month).
   useEffect(() => {
     if (selectedDay != null && selectedDay > calendar.daysInMonth) {
       setSelectedDay(null);

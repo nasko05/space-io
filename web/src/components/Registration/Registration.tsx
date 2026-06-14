@@ -11,8 +11,10 @@ interface Props {
   onBackToLogin?: () => void;
 }
 
-// Registration: collects email + passphrase and posts to /api/auth/init, which
-// creates the user's UUID-named folder and records the email→UUID mapping.
+/**
+ * Registration: collects email + passphrase and posts to /api/auth/init, which
+ * creates the user's UUID-named folder and records the email→UUID mapping.
+ */
 export function Registration({ showBackToLogin = false, onRegistered, onBackToLogin }: Props) {
   const [email, setEmail] = useState('');
   const [passphrase, setPassphrase] = useState('');

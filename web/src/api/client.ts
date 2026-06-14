@@ -140,7 +140,7 @@ async function readJson<T>(res: Response): Promise<T> {
       code = body?.error?.code ?? code;
       message = body?.error?.message ?? message;
     } catch {
-      // Body wasn't JSON; keep the text/statusText defaults.
+      message = text || res.statusText;
     }
     throw new ApiError(res.status, code, message);
   }
