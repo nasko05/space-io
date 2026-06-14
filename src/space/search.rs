@@ -43,8 +43,6 @@ pub fn search(space: &Space, passphrase: &SecretString, query: &str) -> AppResul
     }
     let cache = space.cache();
 
-    // Load tags once so each per-file tag check is an in-memory lookup, not
-    // another decrypt.
     let meta_index = crate::space::meta::load(space, passphrase)
         .unwrap_or_else(|_| std::sync::Arc::new(crate::space::meta::MetaIndex::default()));
 
@@ -78,7 +76,6 @@ pub fn search(space: &Space, passphrase: &SecretString, query: &str) -> AppResul
                 };
                 let arc: Arc<str> = Arc::from(text);
                 cache.put(cache_key.clone(), mtime, arc.clone());
-                // Re-fetch so the lowered mirror is cached for future searches.
                 match cache.get_with_lowered(&cache_key, mtime) {
                     Some(pair) => pair,
                     None => (arc.clone(), Arc::from(arc.to_ascii_lowercase())),
@@ -239,7 +236,6 @@ mod tests {
 
     #[test]
     fn matches_against_tags() {
-        // Neither body nor title contains "garden"; only the tag does.
         let (_dir, space, pass) =
             make_space_with_note("p", "a.md", "# Sunday\n\nThe quick brown fox.");
         crate::space::meta::set_tags(&space, &pass, "a.md", vec!["garden".into()]).unwrap();
@@ -250,7 +246,6 @@ mod tests {
 
     #[test]
     fn tag_hit_outranks_body_hit() {
-        // Both notes match "memory" — one via tag, one via body; the tag wins.
         let (_dir, space, pass) = make_space_with_note("p", "tagged.md", "# Tagged\n\nshort body");
         crate::space::meta::set_tags(&space, &pass, "tagged.md", vec!["memory".into()]).unwrap();
         crate::space::write::write_file(

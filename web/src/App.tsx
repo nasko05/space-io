@@ -46,8 +46,6 @@ export function App() {
   const [tree, setTree] = useState<TreeNode[]>([]);
   const [excerpts, setExcerpts] = useState<ExcerptMap>({});
   const [meta, setMeta] = useState<MetaMap>({});
-  // Day-stable date that flips only across midnight, so the calendar and
-  // entries list don't rebuild on a minute tick.
   const [todayDate, setTodayDate] = useState(() => startOfDay(new Date()));
   const [viewMonth, setViewMonth] = useState(() => startOfMonth(new Date()));
   const [hasPasskey, setHasPasskey] = useState(false);
@@ -58,8 +56,6 @@ export function App() {
   const [passkeyOpen, setPasskeyOpen] = useState(false);
   const [agentOpen, setAgentOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
-  // `null` shows today; a number pins the rail to that day-of-month. Clicking
-  // the same day again clears it.
   const [selectedDay, setSelectedDay] = useState<number | null>(null);
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     const stored = typeof window !== 'undefined' ? window.localStorage.getItem('hearth.theme') : null;
@@ -67,7 +63,7 @@ export function App() {
   });
 
   useEffect(() => {
-    if (typeof document === 'undefined') return;
+    if (typeof document === 'undefined') { return; }
     document.documentElement.dataset.theme = theme;
     window.localStorage.setItem('hearth.theme', theme);
   }, [theme]);
@@ -165,7 +161,7 @@ export function App() {
     (async () => {
       try {
         const status = await api.status();
-        if (cancelled) return;
+        if (cancelled) { return; }
         setHasPasskey(status.has_passkey);
         if (status.unlocked) {
           await enterReader(status.owner, status.email);
@@ -175,7 +171,7 @@ export function App() {
           setView({ kind: 'auth', anyUsers: true });
         }
       } catch (err) {
-        if (cancelled) return;
+        if (cancelled) { return; }
         setView({
           kind: 'fatal',
           message: err instanceof Error ? err.message : 'Could not reach the server.',
@@ -188,8 +184,6 @@ export function App() {
   }, [enterReader]);
 
   const onRegistered = useCallback(async () => {
-    // `/api/auth/init` already minted the session cookie; re-fetch status for
-    // the display name and drop into the reader.
     try {
       const status = await api.status();
       setHasPasskey(status.has_passkey);
@@ -207,7 +201,7 @@ export function App() {
   }, [enterReader]);
 
   const onUnlocked = useCallback(async () => {
-    if (view.kind !== 'auth') return;
+    if (view.kind !== 'auth') { return; }
     setView({ kind: 'loading' });
     try {
       const status = await api.status();
@@ -229,18 +223,16 @@ export function App() {
     setView({ kind: 'auth', anyUsers: true });
   }, []);
 
+  /** Lock the session. The server call is best-effort: local state is cleared
+   *  regardless of whether it succeeds. */
   const onLock = useCallback(async () => {
     try {
       await api.lock();
-    } catch {
-      // Locking is best-effort; clear local state regardless.
-    }
+    } catch {}
     setTree([]);
     setExcerpts({});
     setMeta({});
     previousPathRef.current = null;
-    // Reset every overlay so the next session doesn't reopen into a half-open
-    // dialog or a stale upload queue.
     setSearchOpen(false);
     setUploadOpen(false);
     setUploadInitial(undefined);
@@ -258,7 +250,7 @@ export function App() {
 
   const selectFile = useCallback(
     async (path: string) => {
-      if (view.kind !== 'unlocked') return;
+      if (view.kind !== 'unlocked') { return; }
       try {
         const file = await api.read(path);
         previousPathRef.current = path;
@@ -279,7 +271,7 @@ export function App() {
 
   const openPreview = useCallback(
     (file: TreeFile) => {
-      if (view.kind !== 'unlocked') return;
+      if (view.kind !== 'unlocked') { return; }
       const previous = previousPathRef.current;
       setView({
         kind: 'unlocked',
@@ -292,7 +284,7 @@ export function App() {
   );
 
   const openVault = useCallback(async () => {
-    if (view.kind !== 'unlocked') return;
+    if (view.kind !== 'unlocked') { return; }
     setView({
       kind: 'unlocked',
       owner: view.owner,
@@ -307,8 +299,8 @@ export function App() {
   }, [refreshExcerpts, refreshMeta, refreshTree, view]);
 
   const backFromVault = useCallback(async () => {
-    if (view.kind !== 'unlocked') return;
-    if (view.surface.kind !== 'vault') return;
+    if (view.kind !== 'unlocked') { return; }
+    if (view.surface.kind !== 'vault') { return; }
     const target = view.surface.previousPath;
     if (!target) {
       void enterReader(view.owner, view.email);
@@ -328,7 +320,7 @@ export function App() {
   }, [enterReader, view]);
 
   const newEntry = useCallback(async () => {
-    if (view.kind !== 'unlocked') return;
+    if (view.kind !== 'unlocked') { return; }
     try {
       const { path } = await api.create(DEFAULT_NEW_FOLDER);
       const file = await api.read(path);
@@ -347,8 +339,8 @@ export function App() {
     }
   }, [refreshExcerpts, refreshTree, view]);
 
-  // Patch the local title/excerpt for `path` so the Today list and wikilink
-  // autocomplete update without a full server re-walk on every keystroke.
+  /** Patch the local title/excerpt for `path` so the Today list and wikilink
+   *  autocomplete update without a full server re-walk on every keystroke. */
   const patchExcerpt = useCallback((path: string, content: string) => {
     const titleMatch = /^# (.+)$/m.exec(content);
     const title = titleMatch ? titleMatch[1].trim() : null;
@@ -364,7 +356,7 @@ export function App() {
     setExcerpts((cur) => ({ ...cur, [path]: { title, excerpt } }));
   }, []);
 
-  // Autosave: persist the draft without a history entry.
+  /** Autosave: persist the draft without a history entry. */
   const saveFile = useCallback(
     async (path: string, content: string) => {
       await api.saveDraft(path, content);
@@ -373,7 +365,7 @@ export function App() {
     [patchExcerpt],
   );
 
-  // Checkpoint: persist + record a labelled point in the version history.
+  /** Checkpoint: persist and record a labelled point in the version history. */
   const checkpointFile = useCallback(
     async (path: string, content: string, message?: string) => {
       await api.checkpoint(path, content, message);
@@ -384,10 +376,8 @@ export function App() {
 
   const rollbackFile = useCallback(
     async (path: string, commit: string) => {
-      if (view.kind !== 'unlocked') return;
+      if (view.kind !== 'unlocked') { return; }
       await api.rollback(path, commit);
-      // Re-read and refresh so the rail reflects the restored content and the
-      // editor isn't stuck on the pre-rollback text.
       const file = await api.read(path);
       void refreshTree();
       void refreshExcerpts();
@@ -421,18 +411,18 @@ export function App() {
 
   const pickDate = useCallback((value: string) => {
     const [year, month, day] = value.split('-').map(Number);
-    if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return;
+    if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) { return; }
     setViewMonth(new Date(year, month - 1, 1));
     setSelectedDay(day);
   }, []);
 
-  // Resolve a path to its `TreeFile` (for preview routing) and select it. A
-  // stable reference keeps the memoized rail from re-rendering needlessly.
+  /** Resolve a path to its `TreeFile` (for preview routing) and select it. Kept
+   *  referentially stable so the memoized rail doesn't re-render needlessly. */
   const onVaultSelectPath = useCallback(
     (path: string) => {
       const file = findInTree(tree, path);
-      if (file) onSelectVaultFile(file);
-      else void selectFile(path);
+      if (file) { onSelectVaultFile(file); }
+      else { void selectFile(path); }
     },
     [onSelectVaultFile, selectFile, tree],
   );
@@ -440,7 +430,6 @@ export function App() {
   const openSearch = useCallback(() => setSearchOpen(true), []);
   const openPasskey = useCallback(() => setPasskeyOpen(true), []);
 
-  // Refresh the vault views after the assistant applies an approved change.
   const onAgentVaultChanged = useCallback(() => {
     void refreshTree();
     void refreshExcerpts();
@@ -476,7 +465,7 @@ export function App() {
             return { from, to };
           })
           .filter((move) => move.from !== move.to);
-        if (moves.length === 0) return;
+        if (moves.length === 0) { return; }
         await api.moveBulk(moves);
         await refreshTree();
         void refreshMeta();
@@ -505,7 +494,7 @@ export function App() {
 
   const handleDeleteFiles = useCallback(
     async (paths: string[]) => {
-      if (paths.length === 0) return;
+      if (paths.length === 0) { return; }
       try {
         await api.deleteFilesBulk(paths);
         await refreshTree();
@@ -522,16 +511,14 @@ export function App() {
 
   const handleSetTags = useCallback(
     async (paths: string[], tags: string[]) => {
-      if (paths.length === 0) return;
+      if (paths.length === 0) { return; }
       try {
         await api.setTagsBulk(paths.map((path) => ({ path, tags })));
-        // Patch local state immediately so the UI doesn't blink while the
-        // server catches up.
         setMeta((cur) => {
           const next = { ...cur };
           for (const path of paths) {
-            if (tags.length === 0) delete next[path];
-            else next[path] = { tags };
+            if (tags.length === 0) { delete next[path]; }
+            else { next[path] = { tags }; }
           }
           return next;
         });
@@ -556,7 +543,7 @@ export function App() {
           setSearchOpen((open) => !open);
         }
       } else if (event.key === 'Escape') {
-        if (searchOpen) setSearchOpen(false);
+        if (searchOpen) { setSearchOpen(false); }
       }
     }
     window.addEventListener('keydown', onKey);
@@ -567,8 +554,8 @@ export function App() {
   const [dragOverlay, setDragOverlay] = useState(false);
   const handleWindowDragEnter = useCallback(
     (event: DragEvent) => {
-      if (view.kind !== 'unlocked') return;
-      if (!hasFiles(event)) return;
+      if (view.kind !== 'unlocked') { return; }
+      if (!hasFiles(event)) { return; }
       event.preventDefault();
       dragCounter.current += 1;
       setDragOverlay(true);
@@ -585,13 +572,13 @@ export function App() {
   }, []);
   const handleWindowDrop = useCallback(
     (event: DragEvent) => {
-      if (view.kind !== 'unlocked') return;
-      if (!hasFiles(event)) return;
+      if (view.kind !== 'unlocked') { return; }
+      if (!hasFiles(event)) { return; }
       event.preventDefault();
       dragCounter.current = 0;
       setDragOverlay(false);
       const files = Array.from(event.dataTransfer?.files ?? []);
-      if (files.length === 0) return;
+      if (files.length === 0) { return; }
       setUploadInitial(files);
       setUploadOpen(true);
     },
@@ -599,20 +586,16 @@ export function App() {
   );
 
   useEffect(() => {
-    if (!toast) return;
+    if (!toast) { return; }
     const timer = window.setTimeout(() => setToast(null), 3200);
     return () => window.clearTimeout(timer);
   }, [toast]);
 
-  // Memoize on `todayDate` (day-precision) so the calendar doesn't rebuild on
-  // every minute tick.
   const calendar: CalendarView = useMemo(
     () => buildCalendar(viewMonth, todayDate, tree),
     [viewMonth, todayDate, tree],
   );
   const isCurrentMonth = calendar.today > 0;
-  // Drop a pinned day if the grid slides to a month without it (e.g. a session
-  // ticks past midnight on the last of the month).
   useEffect(() => {
     if (selectedDay != null && selectedDay > calendar.daysInMonth) {
       setSelectedDay(null);
@@ -647,8 +630,8 @@ export function App() {
         : calendar.monthLabel;
   const titleToPath = useMemo(() => buildTitleMap(tree, excerpts), [tree, excerpts]);
 
-  if (view.kind === 'loading') return <LoadingScreen />;
-  if (view.kind === 'registration')
+  if (view.kind === 'loading') { return <LoadingScreen />; }
+  if (view.kind === 'registration') {
     return (
       <Registration
         showBackToLogin={view.anyUsers}
@@ -656,7 +639,8 @@ export function App() {
         onBackToLogin={showLogin}
       />
     );
-  if (view.kind === 'auth')
+  }
+  if (view.kind === 'auth') {
     return (
       <Auth
         showRegisterLink={view.anyUsers}
@@ -664,14 +648,15 @@ export function App() {
         onRegister={showRegistration}
       />
     );
-  if (view.kind === 'fatal') return <FatalScreen message={view.message} />;
+  }
+  if (view.kind === 'fatal') { return <FatalScreen message={view.message} />; }
 
   const { surface } = view;
   return (
     <div
       onDragEnter={handleWindowDragEnter}
       onDragOver={(event) => {
-        if (hasFiles(event)) event.preventDefault();
+        if (hasFiles(event)) { event.preventDefault(); }
       }}
       onDragLeave={handleWindowDragLeave}
       onDrop={handleWindowDrop}
@@ -842,9 +827,9 @@ function startOfMonth(date: Date): Date {
 
 function hasFiles(event: DragEvent): boolean {
   const types = event.dataTransfer?.types;
-  if (!types) return false;
+  if (!types) { return false; }
   for (const type of Array.from(types)) {
-    if (type === 'Files') return true;
+    if (type === 'Files') { return true; }
   }
   return false;
 }
@@ -855,7 +840,7 @@ function buildTitleMap(tree: TreeNode[], excerpts: ExcerptMap): Map<string, stri
     for (const node of nodes) {
       if (node.type === 'file' && node.kind === 'md') {
         const title = excerpts[node.path]?.title ?? node.name.replace(/\.(md|markdown)$/i, '');
-        if (title && !out.has(title)) out.set(title, node.path);
+        if (title && !out.has(title)) { out.set(title, node.path); }
       } else if (node.type === 'folder') {
         walk(node.children);
       }
@@ -868,10 +853,10 @@ function buildTitleMap(tree: TreeNode[], excerpts: ExcerptMap): Map<string, stri
 function findInTree(tree: TreeNode[], path: string): TreeFile | null {
   const walk = (nodes: TreeNode[]): TreeFile | null => {
     for (const node of nodes) {
-      if (node.type === 'file' && node.path === path) return node;
+      if (node.type === 'file' && node.path === path) { return node; }
       if (node.type === 'folder') {
         const hit = walk(node.children);
-        if (hit) return hit;
+        if (hit) { return hit; }
       }
     }
     return null;

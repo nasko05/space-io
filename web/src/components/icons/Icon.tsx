@@ -1,7 +1,5 @@
 import { CSSProperties, SVGProps } from 'react';
 
-// Stroke-based icons (1.5–1.6px, currentColor) that sit well next to serif type.
-
 export interface IconProps extends Omit<SVGProps<SVGSVGElement>, 'size'> {
   size?: number;
   style?: CSSProperties;

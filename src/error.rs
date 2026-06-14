@@ -41,11 +41,12 @@ impl AppError {
 }
 
 impl IntoResponse for AppError {
+    /// Server errors log their full chain server-side but collapse to a generic
+    /// client message, so we never leak filesystem paths, libgit2, or age
+    /// internals over the wire.
     fn into_response(self) -> Response {
         let (status, code) = self.parts();
         if status.is_server_error() {
-            // Full chain stays server-side; the client gets a generic message so
-            // we never leak filesystem paths, libgit2, or age internals.
             tracing::error!(error = %self, "request failed");
         }
         let retry_after = if let AppError::TooManyRequests { retry_after_secs } = &self {

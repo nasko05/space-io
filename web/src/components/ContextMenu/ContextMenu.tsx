@@ -26,9 +26,13 @@ export function ContextMenu({ open, x, y, items, onClose }: Props) {
   const [coords, setCoords] = useState({ left: x, top: y });
 
   useLayoutEffect(() => {
-    if (!open) return;
+    if (!open) {
+      return;
+    }
     const element = ref.current;
-    if (!element) return;
+    if (!element) {
+      return;
+    }
     const rect = element.getBoundingClientRect();
     const margin = 8;
     let left = x;
@@ -43,10 +47,16 @@ export function ContextMenu({ open, x, y, items, onClose }: Props) {
   }, [open, x, y, items.length]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      return;
+    }
     function onDocMouseDown(event: MouseEvent) {
-      if (!ref.current) return;
-      if (!ref.current.contains(event.target as Node)) onClose();
+      if (!ref.current) {
+        return;
+      }
+      if (!ref.current.contains(event.target as Node)) {
+        onClose();
+      }
     }
     function onKey(event: KeyboardEvent) {
       if (event.key === 'Escape') {
@@ -62,7 +72,9 @@ export function ContextMenu({ open, x, y, items, onClose }: Props) {
     };
   }, [open, onClose]);
 
-  if (!open) return null;
+  if (!open) {
+    return null;
+  }
 
   return (
     <div

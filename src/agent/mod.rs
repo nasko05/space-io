@@ -69,8 +69,6 @@ impl AgentConfig {
         let base_url = env_nonempty("HEARTH_OPENROUTER_BASE_URL")
             .unwrap_or_else(|| DEFAULT_BASE_URL.to_string());
 
-        // On by default; a Brave key selects the explicit tool, otherwise fall
-        // back to OpenRouter's built-in plugin so search works out of the box.
         let web_enabled = std::env::var("HEARTH_AGENT_WEB_SEARCH")
             .ok()
             .map(|v| truthy(&v))
@@ -148,6 +146,9 @@ pub struct AgentTurn {
 /// Run the model until it produces a final answer or proposes a vault change.
 /// Read-only tool calls execute inline and the loop continues; the first
 /// mutating proposal stops the loop and hands the proposals back for approval.
+///
+/// The system prompt is server-owned and is stripped from the returned
+/// messages, so it is never echoed back to the browser.
 pub async fn run_turn(
     cfg: &AgentConfig,
     space: Space,
@@ -178,9 +179,6 @@ pub async fn run_turn(
             break (content, Vec::new());
         }
 
-        // Execute read-only calls now; collect mutating ones as proposals. A
-        // mutating call with unparseable arguments gets an error tool result so
-        // the conversation stays valid and the model can correct itself.
         let mut pending = Vec::new();
         for call in &tool_calls {
             if tools::is_mutating(&call.function.name) {
@@ -208,7 +206,6 @@ pub async fn run_turn(
     };
 
     let done = pending.is_empty();
-    // The system prompt is server-owned; never echo it back to the browser.
     messages.retain(|message| message.role != Role::System);
 
     Ok(AgentTurn {
@@ -264,7 +261,6 @@ fn with_system_prompt(
 ) -> Vec<ChatMessage> {
     let mut out = Vec::with_capacity(incoming.len() + 1);
     out.push(ChatMessage::system(system_prompt(cfg, today)));
-    // Drop any client-supplied system messages — the prompt is ours.
     for message in incoming {
         if message.role != Role::System {
             out.push(message);
@@ -462,7 +458,6 @@ mod tests {
 
     #[test]
     fn current_date_utc_is_a_weekday_then_date() {
-        // Non-deterministic, so assert the shape "<Weekday>, <day> <Month> <year>".
         let today = current_date_utc();
         let parts: Vec<&str> = today.splitn(2, ", ").collect();
         assert_eq!(parts.len(), 2, "expected 'Weekday, rest': {today}");
@@ -608,7 +603,6 @@ mod tests {
                 "content":"I'll create that note.",
                 "tool_calls":[{"id":"w1","type":"function","function":{
                     "name":"write_file","arguments":"{\"path\":\"new.md\",\"content\":\"# New\"}"}}]}}]}),
-            // Unreachable: the loop stops to ask for confirmation.
             serde_json::json!({"choices":[{"message":{"role":"assistant","content":"unreachable"}}]}),
         ])
         .await;
@@ -633,9 +627,6 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn loop_handles_mutating_tool_call_without_a_provider_id() {
-        // Regression: a write_file call arriving with no `id` (common with
-        // open-weight models) used to fail to deserialise and 500. The turn must
-        // now succeed, proposing the change with a synthesised id.
         use crate::space::test_helpers::make_space_with_note;
 
         let base = spawn_mock(vec![serde_json::json!({"choices":[{"message":{

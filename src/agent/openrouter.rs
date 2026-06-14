@@ -192,7 +192,6 @@ impl OpenRouterClient {
             .post(&self.endpoint)
             .bearer_auth(&self.api_key)
             .json(&body);
-        // OpenRouter uses these for attribution / rankings; harmless elsewhere.
         if let Some(referer) = &self.referer {
             req = req.header("HTTP-Referer", referer);
         }
@@ -310,7 +309,6 @@ mod tests {
 
     #[test]
     fn deserializes_tool_call_with_missing_id() {
-        // A missing `id` must parse to an empty id, not fail the whole response.
         let raw = r#"{
             "role": "assistant",
             "content": null,

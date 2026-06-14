@@ -106,8 +106,6 @@
   font-size: 10px;
 }
 
-/* ----- GFM additions (marked) ----- */
-
 .body a {
   color: var(--accent);
   text-decoration: none;
@@ -124,8 +122,6 @@
   text-decoration-color: var(--accent);
 }
 
-/* Fenced / indented code blocks. Inline `code` already styled above; reset its
-   chip background when it sits inside a <pre> so we don't double-box it. */
 .body pre {
   margin: 0 0 18px;
   padding: 14px 16px;
@@ -143,7 +139,6 @@
   color: var(--ink-2);
 }
 
-/* GFM tables */
 .body table {
   width: 100%;
   margin: 0 0 20px;
@@ -170,8 +165,6 @@
   background: var(--margin);
 }
 
-/* GFM task lists: marked emits <ul> > <li> > <input type=checkbox disabled>.
-   Drop the bullet and align the box with the text baseline. */
 .body li:has(> input[type='checkbox']) {
   list-style: none;
   margin-left: -22px;

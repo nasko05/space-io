@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Close, FolderOpen } from '../icons/Icon';
+import { FolderOpen } from '../icons/Icon';
+import { DialogShell } from './DialogShell';
 import { TreeNode } from '../../api/client';
 import { collectFolders } from '../../lib/tree';
 import { useAsyncDialog } from '../../lib/useAsyncDialog';
@@ -39,27 +40,14 @@ export function CreateFolderDialog({ open, tree, onClose, onCreate }: Props) {
     : null;
 
   async function submit() {
-    if (!canSubmit) return;
+    if (!canSubmit) { return; }
     await run(() => onCreate(parent, trimmedName), { onSuccess: onClose });
   }
 
-  if (!open) return null;
+  if (!open) { return null; }
 
   return (
-    <div className={styles.scrim} onMouseDown={onClose}>
-      <div className={styles.panel} onMouseDown={(event) => event.stopPropagation()}>
-        <div className={styles.header}>
-          <div>
-            <h2 className={styles.title}>New folder</h2>
-            <div className={styles.subtitle}>
-              Choose where it lives, then give it a name.
-            </div>
-          </div>
-          <button type="button" className={styles.close} onClick={onClose} aria-label="Close">
-            <Close size={14} />
-          </button>
-        </div>
-
+    <DialogShell title="New folder" subtitle="Choose where it lives, then give it a name." onClose={onClose}>
         <div>
           <label className={styles.label}>Parent</label>
           <div className={styles.folderList}>
@@ -120,7 +108,6 @@ export function CreateFolderDialog({ open, tree, onClose, onCreate }: Props) {
             {busy ? 'Creating…' : 'Create folder'}
           </button>
         </div>
-      </div>
-    </div>
+    </DialogShell>
   );
 }

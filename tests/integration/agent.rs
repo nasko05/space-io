@@ -24,7 +24,6 @@ async fn status_reports_unconfigured_without_a_key() {
     assert_eq!(res.status(), StatusCode::OK);
     let body = body_json(res).await;
 
-    // No key in the test env → off, but model id and web-search mode still show.
     assert_eq!(body["configured"], false);
     assert!(
         body["model"].as_str().is_some_and(|m| !m.is_empty()),

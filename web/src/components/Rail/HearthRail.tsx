@@ -81,7 +81,9 @@ function HearthRailImpl({
               className={styles.calMonthInput}
               value={dateValue}
               onChange={(event) => {
-                if (event.target.value) onPickDate(event.target.value);
+                if (event.target.value) {
+                  onPickDate(event.target.value);
+                }
               }}
               onClick={(event) => event.currentTarget.showPicker?.()}
               aria-label="Jump to a date"
@@ -101,13 +103,13 @@ function HearthRailImpl({
             const hasNotes = calendar.filled.has(day);
             const isToday = day === calendar.today;
             const isSelected = day === selectedDay;
-            const clickable = !!onSelectDay;
+            const isClickable = !!onSelectDay;
             const className = [
               styles.calCell,
               isToday ? styles.calCellCurrent : '',
               isSelected && !isToday ? styles.calCellSelected : '',
               hasNotes && !isToday && !isSelected ? styles.calCellHas : '',
-              clickable ? styles.calCellClickable : '',
+              isClickable ? styles.calCellClickable : '',
             ]
               .filter(Boolean)
               .join(' ');
@@ -116,10 +118,10 @@ function HearthRailImpl({
                 key={day}
                 type="button"
                 className={className}
-                onClick={clickable ? () => onSelectDay?.(day) : undefined}
-                disabled={!clickable}
+                onClick={isClickable ? () => onSelectDay?.(day) : undefined}
+                disabled={!isClickable}
                 aria-label={
-                  clickable
+                  isClickable
                     ? hasNotes
                       ? `Notes from day ${day}`
                       : `No notes on day ${day}`
@@ -202,6 +204,6 @@ function HearthRailImpl({
   );
 }
 
-// Memoized so the rail doesn't re-render on every keystroke in the Reader;
-// callers must keep callback props stable for the memo to hit.
+/** Memoized so the rail doesn't re-render on every keystroke in the Reader;
+ *  callers must keep callback props referentially stable for the memo to hit. */
 export const HearthRail = memo(HearthRailImpl);

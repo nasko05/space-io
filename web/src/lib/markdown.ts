@@ -1,9 +1,3 @@
-// Markdown rendering for the Reader/preview: `marked` for full GFM, plus two
-// Hearth adaptations — `[[wikilink]]` anchors that Markdown.tsx upgrades into
-// navigation, and defence in depth (raw HTML is escaped, then the output runs
-// through `sanitizeHtml`). `extractTitle`/`stripFirstH1` work on the raw source
-// so the Reader can pull the headline before rendering.
-
 import { Marked, type Tokens, type TokenizerAndRendererExtension } from 'marked';
 import { sanitizeHtml } from './sanitizeHtml';
 
@@ -16,9 +10,11 @@ interface WikilinkToken extends Tokens.Generic {
   text: string;
 }
 
-// `[[Some Note]]` → an inert anchor the Markdown component upgrades into
-// navigation. Inline, tried before the stock link tokenizer so `[[…]]` never
-// decays into a reflink.
+/**
+ * `[[Some Note]]` becomes an inert anchor the Markdown component upgrades into
+ * navigation. Inline, tried before the stock link tokenizer so `[[…]]` never
+ * decays into a reflink.
+ */
 const wikilink: TokenizerAndRendererExtension = {
   name: 'wikilink',
   level: 'inline',
@@ -28,7 +24,7 @@ const wikilink: TokenizerAndRendererExtension = {
   },
   tokenizer(src: string) {
     const m = /^\[\[([^\]\n]+)\]\]/.exec(src);
-    if (!m) return undefined;
+    if (!m) { return undefined; }
     return { type: 'wikilink', raw: m[0], text: m[1].trim() } satisfies WikilinkToken;
   },
   renderer(token) {
@@ -40,16 +36,20 @@ const md = new Marked({ gfm: true, breaks: true });
 md.use({
   extensions: [wikilink],
   renderer: {
-    // Escape author-typed HTML so it renders as text; only marked's own output
-    // is trusted.
     html(token: Tokens.HTML | Tokens.Tag) {
       return escapeHtml(token.text);
     },
   },
 });
 
+/**
+ * Render markdown for the Reader/preview: `marked` for full GFM, plus the
+ * `[[wikilink]]` extension. Defence in depth — author-typed raw HTML is escaped
+ * so it renders as text (only marked's own output is trusted), then the result
+ * runs through `sanitizeHtml`.
+ */
 export function renderMarkdown(src: string): string {
-  if (!src) return '';
+  if (!src) { return ''; }
   const html = md.parse(src, { async: false });
   return sanitizeHtml(html).trim();
 }

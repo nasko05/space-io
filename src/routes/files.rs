@@ -28,8 +28,6 @@ pub fn router() -> Router<AppState> {
         .route("/files/excerpts", get(get_excerpts))
         .route(
             "/files/upload",
-            // Lift axum's 2 MB default body limit so our own per-file and
-            // per-request caps decide what's too big, not the multipart parser.
             post(post_upload).layer(DefaultBodyLimit::max(MAX_UPLOAD_REQUEST_BYTES)),
         )
         .route("/files/download", get(get_download))
@@ -219,6 +217,9 @@ const MAX_UPLOADS_PER_REQUEST: usize = 64;
 /// than the layer truncating into an opaque multipart parse error.
 const MAX_UPLOAD_REQUEST_BYTES: usize = 256 * 1024 * 1024;
 
+/// Store one or more uploaded files. The route lifts axum's 2 MB default body
+/// limit (see `MAX_UPLOAD_REQUEST_BYTES`) so our own per-file and per-request
+/// caps decide what's too big, not the multipart parser.
 async fn post_upload(
     State(state): State<AppState>,
     jar: CookieJar,
@@ -227,7 +228,6 @@ async fn post_upload(
     let (pass, space) = require_session(&state, &jar)?;
 
     let mut folder: Option<String> = None;
-    // Keep the ref-counted `Bytes` rather than copying into a `Vec`.
     let mut files: Vec<(String, Bytes)> = Vec::new();
     let mut total_bytes: usize = 0;
 

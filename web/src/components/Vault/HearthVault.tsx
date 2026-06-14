@@ -123,17 +123,19 @@ export function HearthVault({
   const [menu, setMenu] = useState<MenuState>(EMPTY_MENU);
   const [dialog, setDialog] = useState<DialogState>({ kind: 'none' });
 
-  // One tree walk yields the shelves (top-level folder → sorted direct files +
-  // subfolders), the total count, and the set of known paths.
   const { shelves, totalFiles, knownPaths } = useMemo(() => {
     const shelves: Shelf[] = [];
     let totalFiles = 0;
     const knownPaths = new Set<string>();
     for (const node of tree) {
-      if (node.type !== 'folder') continue;
+      if (node.type !== 'folder') {
+        continue;
+      }
       const allFiles = collectFilesUnder(node);
       totalFiles += allFiles.length;
-      for (const file of allFiles) knownPaths.add(file.path);
+      for (const file of allFiles) {
+        knownPaths.add(file.path);
+      }
       const directFiles = node.children
         .filter((child): child is TreeFile => child.type === 'file')
         .sort((a, b) => Date.parse(b.updated) - Date.parse(a.updated));
@@ -145,19 +147,27 @@ export function HearthVault({
 
   const orderedPaths = useMemo(() => {
     const list: string[] = [];
-    for (const shelf of shelves) for (const file of shelf.files) list.push(file.path);
+    for (const shelf of shelves) {
+      for (const file of shelf.files) {
+        list.push(file.path);
+      }
+    }
     return list;
   }, [shelves]);
 
-  // Drop deleted/moved files from the selection.
   useEffect(() => {
     setSelection((cur) => {
-      if (cur.size === 0) return cur;
+      if (cur.size === 0) {
+        return cur;
+      }
       let changed = false;
       const next = new Set<string>();
       for (const path of cur) {
-        if (knownPaths.has(path)) next.add(path);
-        else changed = true;
+        if (knownPaths.has(path)) {
+          next.add(path);
+        } else {
+          changed = true;
+        }
       }
       return changed ? next : cur;
     });
@@ -165,12 +175,16 @@ export function HearthVault({
 
   const knownTags = useMemo(() => {
     const set = new Set<string>();
-    for (const entry of Object.values(meta)) for (const tag of entry.tags) set.add(tag);
+    for (const entry of Object.values(meta)) {
+      for (const tag of entry.tags) {
+        set.add(tag);
+      }
+    }
     return Array.from(set).sort((a, b) => a.localeCompare(b));
   }, [meta]);
 
-  // Refs keep the card callbacks referentially stable (so React.memo on
-  // HearthCard holds) while still reading the latest values.
+  /** Refs keep the card callbacks referentially stable (so `React.memo` on
+   *  `HearthCard` holds) while still reading the latest selection/anchor/order. */
   const selectionRef = useRef(selection);
   selectionRef.current = selection;
   const anchorRef = useRef(anchor);
@@ -195,15 +209,22 @@ export function HearthVault({
         if (anchorIndex >= 0 && targetIndex >= 0) {
           const [lo, hi] =
             anchorIndex < targetIndex ? [anchorIndex, targetIndex] : [targetIndex, anchorIndex];
-          for (let i = lo; i <= hi; i += 1) next.add(paths[i]);
+          for (let i = lo; i <= hi; i += 1) {
+            next.add(paths[i]);
+          }
           setSelection(next);
           return;
         }
       }
-      if (next.has(path)) next.delete(path);
-      else next.add(path);
+      if (next.has(path)) {
+        next.delete(path);
+      } else {
+        next.add(path);
+      }
       setSelection(next);
-      if (!mods.shift) setAnchor(path);
+      if (!mods.shift) {
+        setAnchor(path);
+      }
     },
     [],
   );
@@ -220,10 +241,10 @@ export function HearthVault({
       const sel = selectionRef.current;
       const selected = sel.has(file.path);
       const targets = selected && sel.size > 1 ? Array.from(sel) : [file.path];
-      const multi = targets.length > 1;
+      const isMulti = targets.length > 1;
 
       const items: MenuItem[] = [];
-      if (!multi) {
+      if (!isMulti) {
         items.push({
           label: file.kind === 'md' ? 'Open' : 'Preview',
           icon: <FolderOpen size={13} />,
@@ -236,16 +257,16 @@ export function HearthVault({
         });
       }
       items.push({
-        label: multi ? `Move ${targets.length} items…` : 'Move to…',
+        label: isMulti ? `Move ${targets.length} items…` : 'Move to…',
         icon: <FolderOpen size={13} />,
         onClick: () => setDialog({ kind: 'move', paths: targets }),
       });
       items.push({
-        label: multi ? `Edit tags on ${targets.length} items…` : 'Edit tags…',
+        label: isMulti ? `Edit tags on ${targets.length} items…` : 'Edit tags…',
         icon: <Tag size={13} />,
         onClick: () => setDialog({ kind: 'tags', paths: targets }),
       });
-      if (!multi) {
+      if (!isMulti) {
         items.push({
           label: 'Save to disk',
           icon: <DownloadIcon size={13} />,
@@ -254,7 +275,7 @@ export function HearthVault({
       }
       items.push({ divider: true, label: '', onClick: () => {} });
       items.push({
-        label: multi ? `Delete ${targets.length} items` : 'Delete',
+        label: isMulti ? `Delete ${targets.length} items` : 'Delete',
         icon: <Close size={13} />,
         destructive: true,
         onClick: () => setDialog({ kind: 'delete', paths: targets }),
@@ -271,15 +292,20 @@ export function HearthVault({
     [buildFileMenu],
   );
 
+  /** Move dropped (or selected) paths into `folderPath`, skipping any target
+   *  already inside the destination subtree — moving it there is a no-op. */
   const onShelfDrop = useCallback(
     (folderPath: string, droppedPath: string) => {
-      if (!droppedPath) return;
+      if (!droppedPath) {
+        return;
+      }
       const sel = selectionRef.current;
       const targets = sel.has(droppedPath) ? Array.from(sel) : [droppedPath];
-      // A target already inside the destination subtree would be a no-op move.
       const prefix = `${folderPath}/`;
       const movable = targets.filter((path) => !path.startsWith(prefix));
-      if (movable.length === 0) return;
+      if (movable.length === 0) {
+        return;
+      }
       void onMoveFiles(movable, folderPath).then(clearSelection);
     },
     [clearSelection, onMoveFiles],
@@ -312,7 +338,9 @@ export function HearthVault({
   );
 
   async function handleRename(newName: string) {
-    if (dialog.kind !== 'rename') return;
+    if (dialog.kind !== 'rename') {
+      return;
+    }
     const file = dialog.file;
     const parts = file.path.split('/');
     parts[parts.length - 1] = newName;
@@ -321,12 +349,13 @@ export function HearthVault({
   }
 
   async function handleRenameFolder(newName: string) {
-    if (dialog.kind !== 'rename-folder') return;
+    if (dialog.kind !== 'rename-folder') {
+      return;
+    }
     const folder = dialog.folder;
     const parts = folder.path.split('/');
     parts[parts.length - 1] = newName;
     const newPath = parts.join('/');
-    // /api/files/move handles both files and folders.
     await onRenameFile(folder.path, newPath);
   }
 
@@ -336,39 +365,53 @@ export function HearthVault({
   }
 
   async function handleMove(destinationFolder: string) {
-    if (dialog.kind !== 'move') return;
+    if (dialog.kind !== 'move') {
+      return;
+    }
     await onMoveFiles(dialog.paths, destinationFolder);
     clearSelection();
   }
 
   async function handleSetTags(tags: string[]) {
-    if (dialog.kind !== 'tags') return;
+    if (dialog.kind !== 'tags') {
+      return;
+    }
     await onSetTags(dialog.paths, tags);
   }
 
   async function handleDelete() {
-    if (dialog.kind !== 'delete') return;
+    if (dialog.kind !== 'delete') {
+      return;
+    }
     await onDeleteFiles(dialog.paths);
     clearSelection();
   }
 
   const dialogInitialTags = useMemo(() => {
-    if (dialog.kind !== 'tags') return [];
+    if (dialog.kind !== 'tags') {
+      return [];
+    }
     return intersectionTags(dialog.paths, meta);
   }, [dialog, meta]);
 
   const dialogSampleName = useMemo(() => {
-    if (dialog.kind !== 'delete' || dialog.paths.length !== 1) return undefined;
+    if (dialog.kind !== 'delete' || dialog.paths.length !== 1) {
+      return undefined;
+    }
     return dialog.paths[0].split('/').pop();
   }, [dialog]);
 
   const renameSiblings = useMemo(() => {
-    if (dialog.kind !== 'rename') return new Set<string>();
+    if (dialog.kind !== 'rename') {
+      return new Set<string>();
+    }
     return new Set(siblingsOf(dialog.file.path, tree).map((name) => name.toLowerCase()));
   }, [dialog, tree]);
 
   const folderRenameSiblings = useMemo(() => {
-    if (dialog.kind !== 'rename-folder') return new Set<string>();
+    if (dialog.kind !== 'rename-folder') {
+      return new Set<string>();
+    }
     return new Set(siblingsOf(dialog.folder.path, tree).map((name) => name.toLowerCase()));
   }, [dialog, tree]);
 
@@ -593,26 +636,42 @@ function useFolderDropTarget(
 
   const dragProps = {
     onDragEnter(event: DragEvent<HTMLElement>) {
-      if (!hasHearthDrag(event)) return;
+      if (!hasHearthDrag(event)) {
+        return;
+      }
       event.preventDefault();
-      if (stopPropagation) event.stopPropagation();
+      if (stopPropagation) {
+        event.stopPropagation();
+      }
       dragDepth.current += 1;
-      if (dragDepth.current === 1) setIsDropTarget(true);
+      if (dragDepth.current === 1) {
+        setIsDropTarget(true);
+      }
     },
     onDragOver(event: DragEvent<HTMLElement>) {
-      if (!hasHearthDrag(event)) return;
+      if (!hasHearthDrag(event)) {
+        return;
+      }
       event.preventDefault();
-      if (stopPropagation) event.stopPropagation();
+      if (stopPropagation) {
+        event.stopPropagation();
+      }
       event.dataTransfer.dropEffect = 'move';
     },
     onDragLeave(event: DragEvent<HTMLElement>) {
-      if (stopPropagation) event.stopPropagation();
+      if (stopPropagation) {
+        event.stopPropagation();
+      }
       dragDepth.current = Math.max(0, dragDepth.current - 1);
-      if (dragDepth.current === 0) setIsDropTarget(false);
+      if (dragDepth.current === 0) {
+        setIsDropTarget(false);
+      }
     },
     onDrop(event: DragEvent<HTMLElement>) {
       event.preventDefault();
-      if (stopPropagation) event.stopPropagation();
+      if (stopPropagation) {
+        event.stopPropagation();
+      }
       dragDepth.current = 0;
       setIsDropTarget(false);
       onDropFile(folderPath, event.dataTransfer.getData(DRAG_MIME));
@@ -869,17 +928,25 @@ const NestedFolder = memo(function NestedFolder({
 
 function hasHearthDrag(event: DragEvent<HTMLElement>): boolean {
   const types = event.dataTransfer?.types;
-  if (!types) return false;
+  if (!types) {
+    return false;
+  }
   for (let i = 0; i < types.length; i += 1) {
-    if (types[i] === DRAG_MIME) return true;
+    if (types[i] === DRAG_MIME) {
+      return true;
+    }
   }
   return false;
 }
 
 function intersectionTags(paths: string[], meta: MetaMap): string[] {
-  if (paths.length === 0) return [];
+  if (paths.length === 0) {
+    return [];
+  }
   const first = meta[paths[0]]?.tags ?? [];
-  if (paths.length === 1) return first;
+  if (paths.length === 1) {
+    return first;
+  }
   return first.filter((tag) => paths.every((path) => (meta[path]?.tags ?? []).includes(tag)));
 }
 
@@ -888,7 +955,9 @@ function siblingsOf(targetPath: string, tree: TreeNode[]): string[] {
   const leaf = parts.pop() ?? '';
   const parent = parts.join('/');
   const folder = findFolder(tree, parent);
-  if (!folder) return [];
+  if (!folder) {
+    return [];
+  }
   return folder.children.map((child) => child.name).filter((name) => name !== leaf);
 }
 
@@ -899,9 +968,13 @@ function findFolder(tree: TreeNode[], path: string): TreeFolder | null {
   const walk = (nodes: TreeNode[]): TreeFolder | null => {
     for (const node of nodes) {
       if (node.type === 'folder') {
-        if (node.path === path) return node;
+        if (node.path === path) {
+          return node;
+        }
         const hit = walk(node.children);
-        if (hit) return hit;
+        if (hit) {
+          return hit;
+        }
       }
     }
     return null;
@@ -913,8 +986,11 @@ function collectFilesUnder(folder: TreeFolder): TreeFile[] {
   const out: TreeFile[] = [];
   const walk = (nodes: TreeNode[]) => {
     for (const node of nodes) {
-      if (node.type === 'file') out.push(node);
-      else walk(node.children);
+      if (node.type === 'file') {
+        out.push(node);
+      } else {
+        walk(node.children);
+      }
     }
   };
   walk(folder.children);
@@ -927,8 +1003,11 @@ function countFilesUnder(folder: TreeFolder): number {
   let count = 0;
   const walk = (nodes: TreeNode[]) => {
     for (const node of nodes) {
-      if (node.type === 'file') count += 1;
-      else walk(node.children);
+      if (node.type === 'file') {
+        count += 1;
+      } else {
+        walk(node.children);
+      }
     }
   };
   walk(folder.children);

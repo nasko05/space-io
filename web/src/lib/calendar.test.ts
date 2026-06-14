@@ -15,8 +15,8 @@ function mdFile(path: string, updated: string): TreeNode {
 
 describe('buildCalendar', () => {
   it('computes correct month metadata', () => {
-    const now = new Date(2026, 4, 27); // May 27, 2026
-    const cal = buildCalendar(now, now, []);
+    const may27_2026 = new Date(2026, 4, 27);
+    const cal = buildCalendar(may27_2026, may27_2026, []);
     expect(cal.year).toBe(2026);
     expect(cal.month).toBe(4);
     expect(cal.today).toBe(27);
@@ -29,7 +29,7 @@ describe('buildCalendar', () => {
     const tree: TreeNode[] = [
       mdFile('a.md', '2026-05-10T08:00:00Z'),
       mdFile('b.md', '2026-05-15T12:00:00Z'),
-      mdFile('c.md', '2026-04-10T08:00:00Z'), // different month
+      mdFile('c.md', '2026-04-10T08:00:00Z'),
     ];
     const cal = buildCalendar(now, now, tree);
     expect(cal.filled.has(10)).toBe(true);
@@ -80,7 +80,7 @@ describe('entriesForDate', () => {
     const date = new Date(2026, 4, 10);
     const entries = entriesForDate(date, tree, {}, null);
     expect(entries).toHaveLength(2);
-    expect(entries[0].path).toBe('b.md'); // newer first
+    expect(entries[0].path).toBe('b.md');
     expect(entries[1].path).toBe('a.md');
   });
 

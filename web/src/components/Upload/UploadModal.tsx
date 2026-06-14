@@ -31,7 +31,6 @@ export function UploadModal({ open, initialFiles, tree, onClose, onUploaded }: P
   const [dragOver, setDragOver] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
-  // Seed queue when reopened.
   useEffect(() => {
     if (open) {
       setItems(
@@ -51,7 +50,7 @@ export function UploadModal({ open, initialFiles, tree, onClose, onUploaded }: P
   const dedupedFolders = Array.from(new Set(folders));
 
   function appendFiles(list: FileList | File[] | null) {
-    if (!list) return;
+    if (!list) { return; }
     const accepted: Item[] = [];
     for (const file of Array.from(list)) {
       const id = shortId('up');
@@ -75,10 +74,8 @@ export function UploadModal({ open, initialFiles, tree, onClose, onUploaded }: P
   }
 
   async function submit() {
-    // Snapshot the queued items by id so edits during the loop can't shuffle
-    // indices under us.
     const ready = items.filter((item) => item.state === 'queued');
-    if (ready.length === 0 || submitting) return;
+    if (ready.length === 0 || submitting) { return; }
     setSubmitting(true);
     for (const { id, file } of ready) {
       setItems((cur) =>
@@ -109,7 +106,7 @@ export function UploadModal({ open, initialFiles, tree, onClose, onUploaded }: P
   function onDrop(event: DragEvent<HTMLDivElement>) {
     event.preventDefault();
     setDragOver(false);
-    if (event.dataTransfer?.files) appendFiles(event.dataTransfer.files);
+    if (event.dataTransfer?.files) { appendFiles(event.dataTransfer.files); }
   }
 
   function onFileChange(event: ChangeEvent<HTMLInputElement>) {
@@ -117,7 +114,7 @@ export function UploadModal({ open, initialFiles, tree, onClose, onUploaded }: P
     event.target.value = '';
   }
 
-  if (!open) return null;
+  if (!open) { return null; }
 
   const queuedCount = items.filter((item) => item.state === 'queued').length;
   const submitLabel = queuedCount > 0 ? `Save ${queuedCount} file${queuedCount === 1 ? '' : 's'}` : 'Done';
@@ -253,8 +250,8 @@ export function UploadModal({ open, initialFiles, tree, onClose, onUploaded }: P
 
 function kindIcon(name: string) {
   const ext = name.split('.').pop()?.toLowerCase() ?? '';
-  if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext)) return <ImageIcon size={16} />;
-  if (ext === 'pdf') return <FilePdf size={16} />;
-  if (['mp4', 'mov', 'webm'].includes(ext)) return <Video size={16} />;
+  if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext)) { return <ImageIcon size={16} />; }
+  if (ext === 'pdf') { return <FilePdf size={16} />; }
+  if (['mp4', 'mov', 'webm'].includes(ext)) { return <Video size={16} />; }
   return <ImageIcon size={16} />;
 }

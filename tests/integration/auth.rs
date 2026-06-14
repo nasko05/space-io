@@ -50,7 +50,6 @@ async fn status_with_garbage_cookie_is_not_unlocked() {
         .unwrap();
     let body = body_json(h.send(req).await).await;
     assert_eq!(body["unlocked"], false);
-    // Unparseable cookie → we can't tell whose space it pointed at.
     assert_eq!(body["owner"], "");
     assert_eq!(body["email"], "");
 }
@@ -71,7 +70,6 @@ async fn lock_drops_the_session_cookie() {
         ))
         .await;
     assert_eq!(res.status(), StatusCode::NO_CONTENT);
-    // Check the session is no longer resolvable server-side.
     let res = h.send(with_cookie(get("/api/auth/status"), &user)).await;
     assert_eq!(body_json(res).await["unlocked"], false);
 }
@@ -138,8 +136,6 @@ async fn unlock_with_wrong_email_returns_401_wrong_passphrase() {
     let h = Harness::fresh();
     let _user = h.register("ada@example.lan", "passphrase-9");
 
-    // Same status + error code as a wrong passphrase, so registered addresses
-    // can't be enumerated.
     let res = h
         .send(post_json(
             "/api/auth/unlock",

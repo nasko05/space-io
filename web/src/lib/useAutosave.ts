@@ -30,8 +30,6 @@ export function useAutosave({ delayMs = 800, onSave }: Options) {
   const onSaveRef = useRef(onSave);
 
   useEffect(() => {
-    // Flush any edit still pending for the previous target before repointing,
-    // or switching files within the debounce window would drop the last edits.
     const previousSave = onSaveRef.current;
     const pending = pendingRef.current;
     if (pending !== null) {
@@ -47,15 +45,14 @@ export function useAutosave({ delayMs = 800, onSave }: Options) {
   }, [onSave]);
 
   const runSave = useCallback(async () => {
-    if (inFlightRef.current) return;
+    if (inFlightRef.current) { return; }
     const value = pendingRef.current;
-    if (value === null) return;
+    if (value === null) { return; }
     pendingRef.current = null;
     inFlightRef.current = true;
     setStatus({ kind: 'saving' });
     try {
       await onSaveRef.current(value);
-      // If more edits arrived while we were saving, schedule another round.
       if (pendingRef.current !== null) {
         inFlightRef.current = false;
         setStatus({ kind: 'dirty' });
@@ -75,7 +72,7 @@ export function useAutosave({ delayMs = 800, onSave }: Options) {
 
   const scheduleRef = useRef<() => void>(() => {});
   scheduleRef.current = () => {
-    if (timerRef.current !== null) clearTimeout(timerRef.current);
+    if (timerRef.current !== null) { clearTimeout(timerRef.current); }
     timerRef.current = window.setTimeout(() => {
       timerRef.current = null;
       void runSave();
@@ -101,8 +98,7 @@ export function useAutosave({ delayMs = 800, onSave }: Options) {
 
   useEffect(
     () => () => {
-      if (timerRef.current !== null) clearTimeout(timerRef.current);
-      // Don't lose a pending edit if the editor unmounts mid-debounce.
+      if (timerRef.current !== null) { clearTimeout(timerRef.current); }
       if (pendingRef.current !== null) {
         void onSaveRef.current(pendingRef.current);
         pendingRef.current = null;
@@ -111,8 +107,6 @@ export function useAutosave({ delayMs = 800, onSave }: Options) {
     [],
   );
 
-  // Best-effort flush when the tab/window is closing. Browsers won't await an
-  // async handler here, so this is a last-ditch attempt, not a guarantee.
   useEffect(() => {
     const flushOnUnload = () => {
       if (pendingRef.current !== null) {

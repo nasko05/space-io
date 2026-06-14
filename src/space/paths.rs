@@ -9,7 +9,9 @@ pub const ENC_EXT: &str = ".age";
 pub const MAX_FILENAME: usize = 200;
 
 /// Resolve a relative path against `root`, rejecting `..`, absolute paths,
-/// and anything that escapes root after canonicalisation.
+/// and anything that escapes root after canonicalisation. When the target
+/// doesn't exist yet (e.g. about to be created), the first existing ancestor
+/// is validated instead so a not-yet-created path can't escape root.
 pub fn resolve_under(root: &Path, rel: &str) -> AppResult<PathBuf> {
     let mut out = root.to_path_buf();
     let candidate = Path::new(rel);
@@ -27,8 +29,6 @@ pub fn resolve_under(root: &Path, rel: &str) -> AppResult<PathBuf> {
                 }
             }
             Err(_) => {
-                // Target doesn't exist yet (e.g. about to be created): validate
-                // the first existing ancestor instead.
                 let mut walker = out.as_path();
                 let mut ancestor = loop {
                     match walker.parent() {
@@ -119,9 +119,7 @@ pub fn sanitise_title(title: &str) -> Option<String> {
     for ch in trimmed.chars() {
         if ch.is_ascii_alphanumeric() || ch == ' ' || ch == '-' || ch == '_' {
             out.push(ch);
-        } else if ch == ',' || ch == '.' || ch == '!' || ch == '?' {
-            // Sentence punctuation is dropped entirely rather than dashed.
-        } else {
+        } else if !matches!(ch, ',' | '.' | '!' | '?') {
             out.push('-');
         }
     }
@@ -216,7 +214,6 @@ mod tests {
 
     #[test]
     fn rejects_current_dir_prefix() {
-        // `./foo` is `CurDir` then `Normal("foo")`. We only allow Normal.
         let root = make_root();
         let err = resolve_under(root.path(), "./foo").unwrap_err();
         assert!(matches!(err, AppError::Forbidden));
@@ -224,9 +221,6 @@ mod tests {
 
     #[test]
     fn rejects_empty_segment_via_double_slash() {
-        // `Path::components` collapses `//`; the canonical-root guard still
-        // protects us. Pinned so a refactor re-introducing empty segments fails
-        // here rather than in production.
         let root = make_root();
         let out = resolve_under(root.path(), "Journal//2026/note.md").expect("ok");
         assert!(out.starts_with(root.path()));
@@ -241,8 +235,6 @@ mod tests {
 
     #[test]
     fn rejects_symlink_pointing_outside_root() {
-        // On platforms with symlinks, a link that points outside the space
-        // must be rejected by the canonicalize fallback.
         #[cfg(unix)]
         {
             use std::os::unix::fs::symlink;
@@ -258,8 +250,6 @@ mod tests {
 
     #[test]
     fn nonexistent_target_validated_via_first_existing_ancestor() {
-        // Deeper than anything on disk; accepted because the first existing
-        // ancestor (Journal) sits under the root.
         let root = make_root();
         let out = resolve_under(root.path(), "Journal/2026/deep/new/note.md").expect("ok");
         assert!(out.starts_with(root.path()));

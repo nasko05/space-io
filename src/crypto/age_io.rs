@@ -20,7 +20,14 @@ pub fn encrypt_bytes(plaintext: &[u8], passphrase: &SecretString) -> AppResult<V
     Ok(out)
 }
 
+/// Decrypts an age passphrase-wrapped blob.
+///
+/// The accepted scrypt work factor is capped at `MAX_DECRYPT_LOG_N`: high enough
+/// to decrypt anything we wrote (age auto-tunes the writer's factor to its own
+/// hardware), low enough to reject a pathologically expensive file as a DoS.
 pub fn decrypt_bytes(ciphertext: &[u8], passphrase: &SecretString) -> AppResult<Vec<u8>> {
+    const MAX_DECRYPT_LOG_N: u8 = 22;
+
     let decryptor = match Decryptor::new(ciphertext) {
         Ok(Decryptor::Passphrase(d)) => d,
         Ok(Decryptor::Recipients(_)) => {
@@ -31,11 +38,8 @@ pub fn decrypt_bytes(ciphertext: &[u8], passphrase: &SecretString) -> AppResult<
         Err(e) => return Err(AppError::Internal(format!("age decryptor: {e}"))),
     };
 
-    // Cap the accepted work factor at log_n=22: high enough to decrypt anything
-    // we wrote (age auto-tunes the writer's factor to its own hardware), low
-    // enough to reject a pathologically expensive file as a DoS.
     let mut reader = decryptor
-        .decrypt(passphrase, Some(22))
+        .decrypt(passphrase, Some(MAX_DECRYPT_LOG_N))
         .map_err(|e| AppError::Internal(format!("age decrypt: {e}")))?;
     let mut out = Vec::new();
     reader
@@ -84,8 +88,7 @@ mod tests {
     fn truncated_ciphertext_is_rejected() {
         let pass = secret("p");
         let ct = encrypt_bytes(b"hello", &pass).unwrap();
-        // Drop the trailing bytes so the AEAD tag fails.
-        let truncated = &ct[..ct.len().saturating_sub(8)];
-        assert!(decrypt_bytes(truncated, &pass).is_err());
+        let truncated_past_aead_tag = &ct[..ct.len().saturating_sub(8)];
+        assert!(decrypt_bytes(truncated_past_aead_tag, &pass).is_err());
     }
 }

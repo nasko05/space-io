@@ -33,14 +33,18 @@ export function PasskeyModal({ open, email, owner, hasPasskey, onClose, onChange
   const [visible, setVisible] = useState(false);
   const [phase, setPhase] = useState<Phase>({ kind: 'idle' });
 
-  if (!open) return null;
+  if (!open) { return null; }
 
+  /**
+   * Enrols a passkey. The passphrase is verified against the server before
+   * enrolling, and the freshly-wrapped passphrase is decrypted back and checked
+   * to match before it is persisted.
+   */
   async function register(event: FormEvent) {
     event.preventDefault();
-    if (!passphrase) return;
+    if (!passphrase) { return; }
     setPhase({ kind: 'verifying' });
 
-    // Confirm the passphrase is correct before enrolling.
     try {
       await api.unlock(email, passphrase);
     } catch (err) {
@@ -57,7 +61,6 @@ export function PasskeyModal({ open, email, owner, hasPasskey, onClose, onChange
     setPhase({ kind: 'registering' });
     try {
       const registered = await registerPasskey(owner, passphrase);
-      // Verify we can decrypt what we just wrote before persisting it.
       const recovered = await unlockWithPasskey({
         credentialIdB64: registered.credentialIdB64,
         prfSaltB64: registered.prfSaltB64,
@@ -84,7 +87,7 @@ export function PasskeyModal({ open, email, owner, hasPasskey, onClose, onChange
   }
 
   async function remove() {
-    if (!confirm('Remove the passkey from this space?')) return;
+    if (!confirm('Remove the passkey from this space?')) { return; }
     setPhase({ kind: 'removing' });
     try {
       await api.deletePasskey();
@@ -195,8 +198,6 @@ export function PasskeyModal({ open, email, owner, hasPasskey, onClose, onChange
         {phase.kind === 'error' && <div className={styles.error}>{phase.message}</div>}
         {phase.kind === 'done' && <div className={styles.success}>{phase.message}</div>}
 
-        {/* Diagnostic footer: the page context the WebAuthn call uses, so a
-            SecurityError can be matched to what we tried. */}
         {typeof window !== 'undefined' && (
           <div className={styles.diagnostic}>
             <span>

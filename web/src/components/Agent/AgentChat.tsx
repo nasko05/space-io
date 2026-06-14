@@ -33,19 +33,21 @@ export function AgentChat({ open, onClose, onVaultChanged }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
-  // Accumulate decisions synchronously so rapid approvals can't race on the
-  // async `decisions` state; `inFlight` guards against double-applying a card.
+  /**
+   * Decisions are accumulated synchronously here so rapid approvals can't race
+   * on the async `decisions` state; `inFlightRef` guards against double-applying
+   * the same card.
+   */
   const decisionsRef = useRef<Record<string, string>>({});
   const inFlightRef = useRef<Set<string>>(new Set());
 
-  // Fetch agent availability the first time the drawer opens.
   useEffect(() => {
-    if (!open || status) return;
+    if (!open || status) { return; }
     let cancelled = false;
     void (async () => {
       try {
         const fetched = await api.agentStatus();
-        if (!cancelled) setStatus(fetched);
+        if (!cancelled) { setStatus(fetched); }
       } catch (err) {
         if (!cancelled) {
           setStatus({ configured: false, model: '', web_search: 'off' });
@@ -58,17 +60,15 @@ export function AgentChat({ open, onClose, onVaultChanged }: Props) {
     };
   }, [open, status]);
 
-  // Keep the transcript pinned to the latest message.
   useEffect(() => {
     const container = scrollRef.current;
-    if (container) container.scrollTop = container.scrollHeight;
+    if (container) { container.scrollTop = container.scrollHeight; }
   }, [messages, pending, busy]);
 
-  // Esc closes the drawer.
   useEffect(() => {
-    if (!open) return;
+    if (!open) { return; }
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
+      if (event.key === 'Escape') { onClose(); }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -96,7 +96,7 @@ export function AgentChat({ open, onClose, onVaultChanged }: Props) {
   const send = useCallback(
     async (text: string) => {
       const trimmed = text.trim();
-      if (!trimmed || busy || pending.length > 0) return;
+      if (!trimmed || busy || pending.length > 0) { return; }
       const convo: AgentMessage[] = [...messages, { role: 'user', content: trimmed }];
       setMessages(convo);
       setInput('');
@@ -105,13 +105,15 @@ export function AgentChat({ open, onClose, onVaultChanged }: Props) {
     [busy, messages, pending.length, runChat],
   );
 
-  // Apply one approved action through the existing, audited file endpoints.
+  /**
+   * Applies one approved action through the existing, audited file endpoints.
+   * Assistant edits are recorded as checkpoints so each stays recoverable.
+   */
   const applyAction = useCallback(
     async (action: AgentPendingAction): Promise<string> => {
       const args = action.args;
       switch (action.tool) {
         case 'write_file': {
-          // Record assistant edits as checkpoints so each stays recoverable.
           const result = await api.checkpoint(
             str(args.path),
             str(args.content),
@@ -143,8 +145,10 @@ export function AgentChat({ open, onClose, onVaultChanged }: Props) {
     [],
   );
 
-  // Once every pending action has a recorded result, append the tool results
-  // (in the model's original order) and ask it to continue.
+  /**
+   * Once every pending action has a recorded result, appends the tool results
+   * (in the model's original order) and asks the model to continue.
+   */
   const continueWith = useCallback(async () => {
     const resolved = decisionsRef.current;
     const toolMsgs: AgentMessage[] = pending.map((action) => ({
@@ -162,7 +166,7 @@ export function AgentChat({ open, onClose, onVaultChanged }: Props) {
   const decide = useCallback(
     async (action: AgentPendingAction, approve: boolean) => {
       const id = action.tool_call_id;
-      if (busy || decisionsRef.current[id] !== undefined || inFlightRef.current.has(id)) return;
+      if (busy || decisionsRef.current[id] !== undefined || inFlightRef.current.has(id)) { return; }
       inFlightRef.current.add(id);
       let result: string;
       if (approve) {
@@ -187,7 +191,7 @@ export function AgentChat({ open, onClose, onVaultChanged }: Props) {
   );
 
   const rejectAll = useCallback(async () => {
-    if (busy) return;
+    if (busy) { return; }
     for (const action of pending) {
       if (decisionsRef.current[action.tool_call_id] === undefined) {
         decisionsRef.current[action.tool_call_id] = 'User declined this change.';
@@ -198,7 +202,7 @@ export function AgentChat({ open, onClose, onVaultChanged }: Props) {
   }, [busy, continueWith, pending]);
 
   const newChat = useCallback(() => {
-    if (busy) return;
+    if (busy) { return; }
     decisionsRef.current = {};
     inFlightRef.current.clear();
     setMessages([]);
@@ -218,7 +222,7 @@ export function AgentChat({ open, onClose, onVaultChanged }: Props) {
     [input, send],
   );
 
-  if (!open) return null;
+  if (!open) { return null; }
 
   const awaiting = pending.length > 0;
   const pendingIds = new Set(pending.map((action) => action.tool_call_id));
@@ -348,13 +352,13 @@ function MessageView({
   message: AgentMessage;
   suppressIds: Set<string>;
 }) {
-  if (message.role === 'tool') return null;
+  if (message.role === 'tool') { return null; }
 
   if (message.role === 'user') {
     return <div className={styles.userBubble}>{message.content}</div>;
   }
 
-  if (message.role !== 'assistant') return null;
+  if (message.role !== 'assistant') { return null; }
 
   const calls = (message.tool_calls ?? []).filter((call) => !suppressIds.has(call.id));
   return (
@@ -368,8 +372,6 @@ function MessageView({
     </>
   );
 }
-
-
 
 function ProposalCard({
   action,

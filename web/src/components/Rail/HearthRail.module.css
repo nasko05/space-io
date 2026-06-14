@@ -211,7 +211,7 @@
 .todaySection {
   display: flex;
   flex-direction: column;
-  min-height: 0; /* allow the inner list to shrink + scroll */
+  min-height: 0;
 }
 
 .todayHead {

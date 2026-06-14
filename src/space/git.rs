@@ -30,9 +30,6 @@ where
         .map(|p| p.as_ref().to_path_buf())
         .collect();
     commit_with(repo, message, |index| {
-        // `update_all` catches modifications + deletions of tracked paths;
-        // `add_path` then catches brand-new ones — together mirroring
-        // `add --all <path>`.
         let path_specs: Vec<&Path> = paths.iter().map(|p| p.as_path()).collect();
         index
             .update_all(&path_specs, None)
@@ -51,6 +48,11 @@ where
     })
 }
 
+/// Stage via `stage`, then commit on top of HEAD.
+///
+/// HEAD → commit is the parent; a missing HEAD means the root commit (no
+/// parents). A HEAD that won't peel is a real failure and must bubble up —
+/// treating it as "no parents" would orphan history.
 fn commit_with<F>(repo: &Repository, message: &str, stage: F) -> AppResult<()>
 where
     F: FnOnce(&mut git2::Index) -> AppResult<()>,
@@ -70,9 +72,6 @@ where
         .map_err(|e| AppError::Internal(format!("git find_tree: {e}")))?;
     let sig = git2::Signature::now("hearth", "hearth@local")
         .map_err(|e| AppError::Internal(format!("git signature: {e}")))?;
-    // HEAD → commit is our parent; a missing HEAD means the root commit (no
-    // parents). A HEAD that won't peel is a real failure and must bubble up —
-    // treating it as "no parents" would orphan history.
     let parents: Vec<git2::Commit> = match repo.head() {
         Ok(head) => match head.peel_to_commit() {
             Ok(c) => vec![c],

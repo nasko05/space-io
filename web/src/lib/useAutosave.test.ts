@@ -114,7 +114,6 @@ describe('useAutosave', () => {
       initialProps: { cb: saveA },
     });
 
-    // Edit file A, then switch to file B before the debounce timer fires.
     act(() => {
       result.current.markDirty('draft for A');
     });
@@ -122,13 +121,10 @@ describe('useAutosave', () => {
       rerender({ cb: saveB });
     });
 
-    // A's pending edit must be flushed, not silently dropped...
     expect(saveA).toHaveBeenCalledTimes(1);
     expect(saveA).toHaveBeenCalledWith('draft for A');
-    // ...and it must not be misrouted to B.
     expect(saveB).not.toHaveBeenCalled();
 
-    // The stale timer must not fire a second save afterwards.
     await act(async () => {
       vi.advanceTimersByTime(2000);
     });

@@ -32,14 +32,18 @@ function HearthCardImpl({
   onToggleSelect,
 }: Props) {
   function handleContextMenu(event: ReactMouseEvent<HTMLElement>) {
-    if (!onContextMenu) return;
+    if (!onContextMenu) {
+      return;
+    }
     event.preventDefault();
     onContextMenu(file, event.clientX, event.clientY);
   }
 
   function onCheckboxClick(event: ReactMouseEvent<HTMLButtonElement>) {
     event.stopPropagation();
-    if (!onToggleSelect) return;
+    if (!onToggleSelect) {
+      return;
+    }
     onToggleSelect(file, {
       shift: event.shiftKey,
       cmd: event.metaKey || event.ctrlKey,
@@ -172,8 +176,9 @@ function HearthCardImpl({
   );
 }
 
-// Memoized so a selection toggle or drag highlight re-renders only the affected
-// card, not every visible card in the vault.
+/** Memoized so a selection toggle or drag highlight re-renders only the affected
+ *  card, not every visible card in the vault. Callers must keep its callback
+ *  props referentially stable for the memo to hold. */
 export const HearthCard = memo(HearthCardImpl);
 
 interface SurfaceProps {
@@ -218,14 +223,28 @@ const HOUR = 60 * MIN;
 const DAY = 24 * HOUR;
 
 function formatWhen(iso: string): string {
-  if (!iso) return '';
+  if (!iso) {
+    return '';
+  }
   const timestamp = Date.parse(iso);
-  if (!Number.isFinite(timestamp)) return '';
+  if (!Number.isFinite(timestamp)) {
+    return '';
+  }
   const diff = Date.now() - timestamp;
-  if (diff < MIN) return 'just now';
-  if (diff < HOUR) return `${Math.round(diff / MIN)} min ago`;
-  if (diff < DAY) return `${Math.round(diff / HOUR)}h ago`;
-  if (diff < 2 * DAY) return 'yesterday';
-  if (diff < 7 * DAY) return `${Math.round(diff / DAY)}d ago`;
+  if (diff < MIN) {
+    return 'just now';
+  }
+  if (diff < HOUR) {
+    return `${Math.round(diff / MIN)} min ago`;
+  }
+  if (diff < DAY) {
+    return `${Math.round(diff / HOUR)}h ago`;
+  }
+  if (diff < 2 * DAY) {
+    return 'yesterday';
+  }
+  if (diff < 7 * DAY) {
+    return `${Math.round(diff / DAY)}d ago`;
+  }
   return new Date(timestamp).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }

@@ -16,7 +16,7 @@ export default function DocxRenderer({ data }: Props) {
     (async () => {
       try {
         const result = await mammoth.convertToHtml({ arrayBuffer: data.slice(0) });
-        if (!cancelled) setHtml(sanitizeHtml(result.value));
+        if (!cancelled) { setHtml(sanitizeHtml(result.value)); }
       } catch (err) {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : 'failed to render DOCX');
@@ -28,8 +28,8 @@ export default function DocxRenderer({ data }: Props) {
     };
   }, [data]);
 
-  if (error) return <div className={styles.error}>{error}</div>;
-  if (html === null) return <div className={styles.loading}>Rendering…</div>;
+  if (error) { return <div className={styles.error}>{error}</div>; }
+  if (html === null) { return <div className={styles.loading}>Rendering…</div>; }
   return (
     <article className={styles.page}>
       <div className={styles.body} dangerouslySetInnerHTML={{ __html: html }} />

@@ -11,8 +11,10 @@ interface Props {
   onBackToLogin?: () => void;
 }
 
-// Registration: collects email + passphrase and posts to /api/auth/init, which
-// creates the user's UUID-named folder and records the email→UUID mapping.
+/**
+ * Registration: collects email + passphrase and posts to /api/auth/init, which
+ * creates the user's UUID-named folder and records the email→UUID mapping.
+ */
 export function Registration({ showBackToLogin = false, onRegistered, onBackToLogin }: Props) {
   const [email, setEmail] = useState('');
   const [passphrase, setPassphrase] = useState('');
@@ -23,13 +25,13 @@ export function Registration({ showBackToLogin = false, onRegistered, onBackToLo
 
   function validate(): string | null {
     const trimmed = email.trim();
-    if (!trimmed) return 'Choose an email — it labels the vault on disk.';
+    if (!trimmed) { return 'Choose an email — it labels the vault on disk.'; }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
       return 'That doesn’t look like an email.';
     }
-    if (!passphrase) return 'Choose a passphrase.';
-    if (passphrase.length < 8) return 'Make the passphrase at least 8 characters.';
-    if (passphrase !== confirm) return 'Those two passphrases don’t match.';
+    if (!passphrase) { return 'Choose a passphrase.'; }
+    if (passphrase.length < 8) { return 'Make the passphrase at least 8 characters.'; }
+    if (passphrase !== confirm) { return 'Those two passphrases don’t match.'; }
     return null;
   }
 

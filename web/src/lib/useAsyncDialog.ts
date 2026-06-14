@@ -38,7 +38,6 @@ export function useAsyncDialog(open: boolean, fallbackMessage = 'Action failed')
         setError(err instanceof Error ? err.message : fallbackMessage);
         return;
       } finally {
-        // Clear busy on every path so a dialog that stays open isn't wedged.
         setBusy(false);
       }
       options?.onSuccess?.();

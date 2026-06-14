@@ -275,8 +275,6 @@
   color: var(--ink);
 }
 
-/* --- Nested folder tree nodes --- */
-
 .nestedFolder {
   position: relative;
   margin-top: 10px;

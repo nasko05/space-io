@@ -23,7 +23,7 @@ export function HistoryPanel({ open, path, reloadToken, onClose, onRollback }: P
   const [restoring, setRestoring] = useState<string | null>(null);
 
   async function restore(commit: string) {
-    if (!path || !onRollback || restoring) return;
+    if (!path || !onRollback || restoring) { return; }
     if (
       !window.confirm(
         `Restore this file to ${commit.slice(0, 7)}? A new checkpoint is added on top — nothing is lost.`,
@@ -35,7 +35,6 @@ export function HistoryPanel({ open, path, reloadToken, onClose, onRollback }: P
     setError(null);
     try {
       await onRollback(path, commit);
-      // Reload so the new "Rollback …" commit appears at the top.
       const { entries } = await api.history(path);
       setEntries(entries);
     } catch (err) {
@@ -46,14 +45,14 @@ export function HistoryPanel({ open, path, reloadToken, onClose, onRollback }: P
   }
 
   useEffect(() => {
-    if (!open || !path) return;
+    if (!open || !path) { return; }
     let cancelled = false;
     setBusy(true);
     setError(null);
     api
       .history(path)
       .then(({ entries }) => {
-        if (!cancelled) setEntries(entries);
+        if (!cancelled) { setEntries(entries); }
       })
       .catch((err) => {
         if (!cancelled) {
@@ -62,14 +61,14 @@ export function HistoryPanel({ open, path, reloadToken, onClose, onRollback }: P
         }
       })
       .finally(() => {
-        if (!cancelled) setBusy(false);
+        if (!cancelled) { setBusy(false); }
       });
     return () => {
       cancelled = true;
     };
   }, [open, path, reloadToken]);
 
-  if (!open) return null;
+  if (!open) { return null; }
 
   return (
     <aside className={styles.panel}>
@@ -127,15 +126,15 @@ export function HistoryPanel({ open, path, reloadToken, onClose, onRollback }: P
 }
 
 function formatWhen(iso: string): string {
-  if (!iso) return '';
+  if (!iso) { return ''; }
   const date = new Date(iso);
-  if (isNaN(date.getTime())) return iso;
+  if (isNaN(date.getTime())) { return iso; }
   const now = new Date();
   const diff = (now.getTime() - date.getTime()) / 1000;
-  if (diff < 60) return 'just now';
-  if (diff < 3600) return `${Math.round(diff / 60)} min ago`;
-  if (diff < 86400) return `${Math.round(diff / 3600)}h ago`;
-  if (diff < 86400 * 7) return `${Math.round(diff / 86400)}d ago`;
+  if (diff < 60) { return 'just now'; }
+  if (diff < 3600) { return `${Math.round(diff / 60)} min ago`; }
+  if (diff < 86400) { return `${Math.round(diff / 3600)}h ago`; }
+  if (diff < 86400 * 7) { return `${Math.round(diff / 86400)}d ago`; }
   return date.toLocaleString(undefined, {
     month: 'short',
     day: 'numeric',

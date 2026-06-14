@@ -11,6 +11,9 @@ use crate::space::Space;
 /// encrypted blob from that commit, decrypt it, and `write_file` a fresh commit
 /// on top of HEAD. History stays linear and reversible, and the restore goes
 /// through the normal commit cache + meta-index invalidation.
+///
+/// Restoring overwrites the working tree, which may hold an un-checkpointed
+/// autosave draft, so the current draft is snapshotted first and nothing is lost.
 pub fn rollback_to(
     space: &Space,
     passphrase: &SecretString,
@@ -37,15 +40,12 @@ pub fn rollback_to(
         let blob = object
             .as_blob()
             .ok_or_else(|| AppError::BadRequest("history entry is not a file".into()))?;
-        // Decrypt while we still hold the blob borrow.
         age_io::decrypt_bytes(blob.content(), passphrase)
     })?;
 
     let content = String::from_utf8(plaintext)
         .map_err(|_| AppError::Internal("non-utf8 content in history".into()))?;
 
-    // Restoring overwrites the working tree, which may hold an un-checkpointed
-    // autosave draft; snapshot it first so nothing is lost.
     checkpoint_uncommitted_draft(space, passphrase, rel_path)?;
 
     let short = commit_oid.get(..7).unwrap_or(commit_oid);
@@ -67,7 +67,6 @@ fn checkpoint_uncommitted_draft(
         Err(e) => return Err(e),
     };
     if head_content(space, passphrase, rel_path)?.as_deref() == Some(current.as_str()) {
-        // Working tree already matches the last checkpoint.
         return Ok(());
     }
     let message = format!("Checkpoint {rel_path} before restore");
@@ -163,7 +162,6 @@ mod tests {
         assert!(after[0].message.starts_with("Rollback n.md to "));
         assert!(after[1].message.contains("before restore"));
 
-        // The preserved draft is recoverable from its checkpoint.
         let draft_oid = after[1].commit.clone();
         rollback_to(&space, &pass, "n.md", &draft_oid).unwrap();
         assert_eq!(
@@ -177,7 +175,6 @@ mod tests {
         let (_dir, space, pass) = make_space("p");
         write::write_file(&space, &pass, "n.md", "v1", Some("v1")).unwrap();
         write::write_file(&space, &pass, "n.md", "v2", Some("v2")).unwrap();
-        // Working tree == HEAD, so rolling back adds only the rollback commit.
         let history = file_history(&space, "n.md").unwrap();
         let v1_oid = history[1].commit.clone();
         rollback_to(&space, &pass, "n.md", &v1_oid).unwrap();

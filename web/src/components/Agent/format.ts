@@ -1,10 +1,7 @@
-// Pure helpers for rendering the assistant transcript, kept out of the
-// component so they can be unit-tested without React.
-
 /** Coerce an unknown tool-argument value to a display string. */
 export function str(value: unknown): string {
-  if (typeof value === 'string') return value;
-  if (value == null) return '';
+  if (typeof value === 'string') { return value; }
+  if (value == null) { return ''; }
   return String(value);
 }
 

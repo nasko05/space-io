@@ -13,6 +13,8 @@
 
 const HKDF_INFO = 'hearth-passkey-wrap';
 const IV_LENGTH = 12;
+const ES256_ALGORITHM = -7;
+const RS256_ALGORITHM = -257;
 
 /**
  * WebAuthn rejects IP-addressed origins (`rp.id` must be a registrable domain
@@ -71,7 +73,6 @@ function isInsideCrossOriginFrame(): boolean {
   try {
     return window.top !== null && window.top !== window;
   } catch {
-    // Accessing window.top across origins throws — that's the definition.
     return true;
   }
 }
@@ -132,7 +133,7 @@ export function webauthnStatus(): WebAuthnStatus {
 /** Throw a single Error explaining why WebAuthn can't run, if it can't. */
 function ensureWebAuthnUsable(): void {
   const status = webauthnStatus();
-  if (!status.ok) throw new Error(status.message);
+  if (!status.ok) { throw new Error(status.message); }
 }
 
 /** Turn the browser's overloaded WebAuthn errors (NotAllowedError covers
@@ -200,8 +201,8 @@ export async function registerPasskey(
           displayName: owner,
         },
         pubKeyCredParams: [
-          { type: 'public-key', alg: -7 }, // ES256
-          { type: 'public-key', alg: -257 }, // RS256
+          { type: 'public-key', alg: ES256_ALGORITHM },
+          { type: 'public-key', alg: RS256_ALGORITHM },
         ],
         authenticatorSelection: {
           userVerification: 'preferred',
@@ -215,7 +216,7 @@ export async function registerPasskey(
   } catch (err) {
     throw wrapWebAuthnError('create', err);
   }
-  if (!cred) throw new Error('passkey creation was cancelled');
+  if (!cred) { throw new Error('passkey creation was cancelled'); }
 
   const extensions = (cred.getClientExtensionResults() as PrfExtensionResults).prf;
   const prfOutput = extensions?.results?.first;
@@ -259,7 +260,7 @@ export async function unlockWithPasskey(input: AuthenticateInput): Promise<strin
   } catch (err) {
     throw wrapWebAuthnError('get', err);
   }
-  if (!assertion) throw new Error('passkey assertion was cancelled');
+  if (!assertion) { throw new Error('passkey assertion was cancelled'); }
 
   const extensions = (assertion.getClientExtensionResults() as PrfExtensionResults).prf;
   const prfOutput = extensions?.results?.first;
@@ -316,7 +317,7 @@ async function sha256(data: Uint8Array): Promise<Uint8Array> {
 
 function bytesToB64Url(bytes: Uint8Array): string {
   let binary = '';
-  for (const byte of bytes) binary += String.fromCharCode(byte);
+  for (const byte of bytes) { binary += String.fromCharCode(byte); }
   return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
@@ -325,7 +326,7 @@ function b64UrlToBytes(encoded: string): Uint8Array {
   const normalised = encoded.replace(/-/g, '+').replace(/_/g, '/') + pad;
   const binary = atob(normalised);
   const out = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i += 1) out[i] = binary.charCodeAt(i);
+  for (let i = 0; i < binary.length; i += 1) { out[i] = binary.charCodeAt(i); }
   return out;
 }
 
