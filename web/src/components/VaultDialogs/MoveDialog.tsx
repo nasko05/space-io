@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Close, FolderOpen, Plus } from '../icons/Icon';
+import { FolderOpen, Plus } from '../icons/Icon';
+import { DialogShell } from './DialogShell';
 import { TreeNode } from '../../api/client';
 import { collectFolders } from '../../lib/tree';
 import { useAsyncDialog } from '../../lib/useAsyncDialog';
@@ -62,20 +63,11 @@ export function MoveDialog({
   if (!open) { return null; }
 
   return (
-    <div className={styles.scrim} onMouseDown={onClose}>
-      <div className={styles.panel} onMouseDown={(event) => event.stopPropagation()}>
-        <div className={styles.header}>
-          <div>
-            <h2 className={styles.title}>
-              Move {movingPaths.length === 1 ? '1 item' : `${movingPaths.length} items`}
-            </h2>
-            <div className={styles.subtitle}>Choose a destination folder.</div>
-          </div>
-          <button type="button" className={styles.close} onClick={onClose} aria-label="Close">
-            <Close size={14} />
-          </button>
-        </div>
-
+    <DialogShell
+      title={<>Move {movingPaths.length === 1 ? '1 item' : `${movingPaths.length} items`}</>}
+      subtitle="Choose a destination folder."
+      onClose={onClose}
+    >
         <div className={styles.folderList}>
           {folders.map((folder) => {
             const disabled = isLoopTarget(folder.path);
@@ -143,8 +135,7 @@ export function MoveDialog({
             {busy ? 'Moving…' : `Move here`}
           </button>
         </div>
-      </div>
-    </div>
+    </DialogShell>
   );
 }
 

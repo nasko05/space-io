@@ -1,4 +1,4 @@
-import { Close } from '../icons/Icon';
+import { DialogShell } from './DialogShell';
 import { useAsyncDialog } from '../../lib/useAsyncDialog';
 import styles from './dialog.module.css';
 
@@ -27,20 +27,11 @@ export function DeleteConfirmDialog({
   }
 
   return (
-    <div className={styles.scrim} onMouseDown={onClose}>
-      <div className={styles.panel} onMouseDown={(event) => event.stopPropagation()}>
-        <div className={styles.header}>
-          <div>
-            <h2 className={styles.title}>Delete?</h2>
-            <div className={styles.subtitle}>
-              Soft delete — recoverable from <em>.trash/</em> in the space.
-            </div>
-          </div>
-          <button type="button" className={styles.close} onClick={onClose} aria-label="Close">
-            <Close size={14} />
-          </button>
-        </div>
-
+    <DialogShell
+      title="Delete?"
+      subtitle={<>Soft delete — recoverable from <em>.trash/</em> in the space.</>}
+      onClose={onClose}
+    >
         <div className={styles.body}>
           {count === 1 && sampleName ? (
             <>
@@ -65,7 +56,6 @@ export function DeleteConfirmDialog({
             {busy ? 'Deleting…' : 'Move to trash'}
           </button>
         </div>
-      </div>
-    </div>
+    </DialogShell>
   );
 }

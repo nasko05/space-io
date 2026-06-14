@@ -1,5 +1,5 @@
 import { KeyboardEvent, useEffect, useRef, useState } from 'react';
-import { Close } from '../icons/Icon';
+import { DialogShell } from './DialogShell';
 import { useAsyncDialog } from '../../lib/useAsyncDialog';
 import styles from './dialog.module.css';
 
@@ -80,22 +80,15 @@ export function TagsDialog({
   );
 
   return (
-    <div className={styles.scrim} onMouseDown={onClose}>
-      <div className={styles.panel} onMouseDown={(event) => event.stopPropagation()}>
-        <div className={styles.header}>
-          <div>
-            <h2 className={styles.title}>Tags</h2>
-            <div className={styles.subtitle}>
-              {fileCount === 1
-                ? 'Add or remove tags for this file.'
-                : `Will replace tags on ${fileCount} files.`}
-            </div>
-          </div>
-          <button type="button" className={styles.close} onClick={onClose} aria-label="Close">
-            <Close size={14} />
-          </button>
-        </div>
-
+    <DialogShell
+      title="Tags"
+      subtitle={
+        fileCount === 1
+          ? 'Add or remove tags for this file.'
+          : `Will replace tags on ${fileCount} files.`
+      }
+      onClose={onClose}
+    >
         <div className={styles.chipRow}>
           {tags.map((tag, i) => (
             <span key={`${tag}-${i}`} className={styles.chip}>
@@ -150,7 +143,6 @@ export function TagsDialog({
             {busy ? 'Saving…' : 'Save tags'}
           </button>
         </div>
-      </div>
-    </div>
+    </DialogShell>
   );
 }
