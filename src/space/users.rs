@@ -63,6 +63,8 @@ impl UsersRegistry {
         }
     }
 
+    /// Persist the registry. The write is atomic because a torn `.users.toml`
+    /// would lose the email→UUID map and make every space unreachable.
     pub fn save(&self, root: &Path) -> AppResult<()> {
         let path = Self::registry_path(root);
         let on_disk = OnDisk {
@@ -70,8 +72,6 @@ impl UsersRegistry {
         };
         let text = toml::to_string_pretty(&on_disk)
             .map_err(|e| AppError::Internal(format!("serialise {REGISTRY_FILENAME}: {e}")))?;
-        // Atomic: a torn `.users.toml` would lose the email→UUID map and make
-        // every space unreachable.
         crate::fs_atomic::write_atomic(&path, text.as_bytes())?;
         Ok(())
     }
@@ -93,6 +93,9 @@ impl UsersRegistry {
 
     /// Register a new user: mint a UUID, append, and return the entry. The
     /// caller creates the per-user subdirectory and runs `init_space` in it.
+    ///
+    /// v4 UUID collisions are astronomically unlikely, but a broken RNG or
+    /// corrupted file could surface one, so the UUID is regenerated defensively.
     pub fn add(&mut self, root: &Path, email: &str) -> AppResult<UserEntry> {
         let normalised = normalise_email(email)?;
         if self.find_by_email(&normalised).is_some() {
@@ -100,8 +103,6 @@ impl UsersRegistry {
                 "an account for {normalised} already exists"
             )));
         }
-        // v4 collisions are astronomically unlikely, but a broken RNG or
-        // corrupted file could surface one; regenerate defensively.
         let mut uuid = Uuid::new_v4();
         for _ in 0..16 {
             if !self.users.iter().any(|user| user.uuid == uuid)

@@ -63,6 +63,9 @@ struct ChatResponseBody {
     done: bool,
 }
 
+/// Run one agent turn. The request shape is validated before the provider-key
+/// check so a malformed call is rejected identically whether or not a provider
+/// key is configured.
 async fn chat(
     State(state): State<AppState>,
     jar: CookieJar,
@@ -70,8 +73,6 @@ async fn chat(
 ) -> AppResult<Json<ChatResponseBody>> {
     let (passphrase, space) = require_session(&state, &jar)?;
 
-    // Validate first so a malformed call is rejected identically whether or not
-    // a provider key is configured.
     if body.messages.is_empty() {
         return Err(AppError::BadRequest("messages must not be empty".into()));
     }
@@ -90,8 +91,6 @@ async fn chat(
             "conversation is too large; start a new chat".into(),
         ));
     }
-    // The last message must be actionable: a user turn or browser-produced tool
-    // results.
     let last_ok = matches!(
         body.messages.last().map(|m| m.role),
         Some(Role::User) | Some(Role::Tool)

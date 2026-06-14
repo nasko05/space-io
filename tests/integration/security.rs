@@ -21,10 +21,11 @@ async fn five_hundred_responses_carry_a_generic_message() {
         &serde_json::json!({ "folder": "x", "title": "n" }),
     )
     .await;
-    // A 0xFF blob the decryptor accepts but `from_utf8` rejects — the exact path
-    // that yields an Internal error, so we can assert it stays opaque.
     let blob = age::secrecy::SecretString::from("passphrase-9".to_string());
-    let cipher = hearth::crypto::age_io::encrypt_bytes(&[0xff], &blob).unwrap();
+    let non_utf8_byte_that_yields_internal_error = [0xff];
+    let cipher =
+        hearth::crypto::age_io::encrypt_bytes(&non_utf8_byte_that_yields_internal_error, &blob)
+            .unwrap();
     std::fs::write(u.user_dir.join("space/x/n.md.age"), cipher).unwrap();
 
     let res = get_authed(&h, &u, "/api/files/read?path=x/n.md").await;
@@ -135,7 +136,6 @@ async fn brute_force_unlock_eventually_returns_429() {
     let h = Harness::fresh();
     let _user = h.register("ada@example.lan", "passphrase-9");
 
-    // Drive failed unlocks from one IP until the limiter trips.
     let mut got_429 = false;
     for _ in 0..50 {
         let req = post_json(
@@ -177,7 +177,6 @@ async fn rate_limit_is_per_ip_not_global() {
     }
     assert!(tripped, "limiter should engage for the first IP");
 
-    // A different source IP must still be served.
     let req = post_json(
         "/api/auth/unlock",
         &serde_json::json!({ "email": "ada@example.lan", "passphrase": "x" }),
@@ -194,7 +193,6 @@ async fn rate_limit_is_per_ip_not_global() {
 async fn enumeration_of_passkey_info_is_throttled() {
     let h = Harness::fresh();
 
-    // Shares the unlock throttle so lookups can't harvest registered emails.
     let mut tripped = false;
     for i in 0..40 {
         let req = Request::builder()
@@ -229,7 +227,6 @@ async fn passkey_for_user_a_isnt_accepted_for_user_b() {
     )
     .await;
 
-    // Bob's delete clears his own (absent) passkey, never Ada's.
     let res = h
         .send(with_cookie(
             Request::builder()
@@ -278,10 +275,10 @@ async fn duplicate_registration_email_is_rejected() {
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
 }
 
+/// Smoke-tests that a batch of small files succeeds; the negative case would
+/// need ~250 MB on the wire, so it is not exercised here.
 #[tokio::test]
 async fn upload_total_bytes_cap_is_enforced() {
-    // Smoke test that a batch of small files succeeds; the negative case would
-    // need ~250 MB on the wire, so we don't exercise it here.
     let h = Harness::fresh();
     let u = h.register("ada@example.lan", "passphrase-9");
     let mut parts = vec![MultipartPart::Text {
@@ -314,9 +311,10 @@ async fn upload_total_bytes_cap_is_enforced() {
     assert_eq!(res.status(), StatusCode::OK);
 }
 
+/// `attachment` stops the browser from rendering an uploaded HTML file inline,
+/// which would otherwise let a stored `<script>` payload run.
 #[tokio::test]
 async fn download_serves_content_disposition_attachment() {
-    // `attachment` stops the browser rendering an uploaded HTML file inline.
     let h = Harness::fresh();
     let u = h.register("ada@example.lan", "passphrase-9");
 

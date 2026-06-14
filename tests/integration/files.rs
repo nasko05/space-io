@@ -313,7 +313,6 @@ async fn delete_bulk_moves_many_files_under_same_timestamp() {
     let results = body["results"].as_array().unwrap();
     assert_eq!(results.len(), 3);
 
-    // Reduce each `.trash/<stamp>/x/a.md` to its `.trash/<stamp>` prefix.
     let prefixes: std::collections::HashSet<&str> = results
         .iter()
         .map(|result| {
@@ -419,13 +418,14 @@ async fn set_tags_then_meta_round_trips() {
     )
     .await;
 
+    let blank_tag_to_be_dropped = "  ";
     let res = put_authed(
         &h,
         &u,
         "/api/files/meta",
         &serde_json::json!({
             "path": "Notes/tagged.md",
-            "tags": ["one", "two", "  "]   // the blank tag must be dropped
+            "tags": ["one", "two", blank_tag_to_be_dropped]
         }),
     )
     .await;
@@ -519,7 +519,6 @@ async fn drafts_do_not_create_history_but_checkpoints_do() {
     )
     .await;
 
-    // Autosave drafts persist but must not add history entries.
     put_authed(
         &h,
         &u,
@@ -546,7 +545,6 @@ async fn drafts_do_not_create_history_but_checkpoints_do() {
     let read = body_json(get_authed(&h, &u, "/api/files/read?path=N/n.md").await).await;
     assert_eq!(read["content"], "draft v3", "reads see the latest draft");
 
-    // An explicit checkpoint mints exactly one history entry.
     let res = post_authed(
         &h,
         &u,
@@ -627,16 +625,18 @@ async fn rollback_restores_an_earlier_version() {
     )
     .await;
 
-    // History is newest-first, so the "first" checkpoint is entries[1].
     let history = body_json(get_authed(&h, &u, "/api/files/history?path=N/n.md").await).await;
-    let entries = history["entries"].as_array().unwrap();
-    let first_commit = entries[1]["commit"].as_str().unwrap().to_string();
+    let entries_newest_first = history["entries"].as_array().unwrap();
+    let first_checkpoint_commit = entries_newest_first[1]["commit"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
     let res = post_authed(
         &h,
         &u,
         "/api/files/rollback",
-        &serde_json::json!({ "path": "N/n.md", "commit": first_commit }),
+        &serde_json::json!({ "path": "N/n.md", "commit": first_checkpoint_commit }),
     )
     .await;
     assert_eq!(res.status(), StatusCode::OK);
@@ -664,12 +664,12 @@ async fn rollback_preserves_an_uncheckpointed_draft() {
         &serde_json::json!({ "path": "N/n.md", "content": "v1", "message": "v1" }),
     )
     .await;
-    // An autosave draft the user never checkpointed.
+    let uncheckpointed_draft = "unsaved draft";
     put_authed(
         &h,
         &u,
         "/api/files/write",
-        &serde_json::json!({ "path": "N/n.md", "content": "unsaved draft" }),
+        &serde_json::json!({ "path": "N/n.md", "content": uncheckpointed_draft }),
     )
     .await;
 
@@ -677,7 +677,6 @@ async fn rollback_preserves_an_uncheckpointed_draft() {
     let entries = history["entries"].as_array().unwrap();
     let v1_commit = entries[0]["commit"].as_str().unwrap().to_string();
 
-    // The draft must be snapshotted on rollback, not silently dropped.
     let res = post_authed(
         &h,
         &u,
@@ -689,7 +688,6 @@ async fn rollback_preserves_an_uncheckpointed_draft() {
     let read = body_json(get_authed(&h, &u, "/api/files/read?path=N/n.md").await).await;
     assert_eq!(read["content"], "v1");
 
-    // The draft is recoverable from the "before restore" checkpoint.
     let history = body_json(get_authed(&h, &u, "/api/files/history?path=N/n.md").await).await;
     let entries = history["entries"].as_array().unwrap();
     let before_restore = entries
@@ -710,7 +708,7 @@ async fn rollback_preserves_an_uncheckpointed_draft() {
     )
     .await;
     let read = body_json(get_authed(&h, &u, "/api/files/read?path=N/n.md").await).await;
-    assert_eq!(read["content"], "unsaved draft");
+    assert_eq!(read["content"], uncheckpointed_draft);
 }
 
 #[tokio::test]
@@ -766,7 +764,6 @@ async fn upload_stores_an_encrypted_blob_and_download_round_trips() {
     let res = h.send(req).await;
     assert_eq!(res.status(), StatusCode::OK);
 
-    // And download decrypts back to the original bytes.
     let download = get_authed(
         &h,
         &u,
@@ -780,12 +777,10 @@ async fn upload_stores_an_encrypted_blob_and_download_round_trips() {
 
 #[tokio::test]
 async fn upload_accepts_a_file_larger_than_the_default_body_limit() {
-    // Regression: axum's 2 MB per-route default once made the multipart parser
-    // reject larger uploads before the handler's own checks ran.
     let h = Harness::fresh();
     let u = h.register("ada@example.lan", "passphrase-9");
 
-    let payload = vec![0xABu8; 3 * 1024 * 1024]; // over the old 2 MB cap
+    let payload_over_legacy_2mb_body_limit = vec![0xABu8; 3 * 1024 * 1024];
     let (boundary, body) = build_multipart(&[
         MultipartPart::Text {
             name: "folder",
@@ -795,7 +790,7 @@ async fn upload_accepts_a_file_larger_than_the_default_body_limit() {
             name: "file",
             filename: "big.bin",
             content_type: "application/octet-stream",
-            bytes: &payload,
+            bytes: &payload_over_legacy_2mb_body_limit,
         },
     ]);
     let req = with_cookie(
@@ -813,7 +808,10 @@ async fn upload_accepts_a_file_larger_than_the_default_body_limit() {
     let res = h.send(req).await;
     assert_eq!(res.status(), StatusCode::OK);
     let json = body_json(res).await;
-    assert_eq!(json["files"][0]["size"], payload.len());
+    assert_eq!(
+        json["files"][0]["size"],
+        payload_over_legacy_2mb_body_limit.len()
+    );
 
     let download = get_authed(
         &h,
@@ -823,7 +821,7 @@ async fn upload_accepts_a_file_larger_than_the_default_body_limit() {
     .await;
     assert_eq!(download.status(), StatusCode::OK);
     let bytes = body_bytes(download).await;
-    assert_eq!(bytes, payload);
+    assert_eq!(bytes, payload_over_legacy_2mb_body_limit);
 }
 
 #[tokio::test]
@@ -853,12 +851,14 @@ async fn upload_too_many_files_in_one_request_is_rejected() {
     let h = Harness::fresh();
     let u = h.register("ada@example.lan", "passphrase-9");
 
-    // More parts than MAX_UPLOADS_PER_REQUEST (64).
+    let file_count_over_max_uploads_per_request = 70;
     let mut parts: Vec<MultipartPart> = vec![MultipartPart::Text {
         name: "folder",
         value: "Up",
     }];
-    let names: Vec<String> = (0..70).map(|i| format!("f{i}.bin")).collect();
+    let names: Vec<String> = (0..file_count_over_max_uploads_per_request)
+        .map(|i| format!("f{i}.bin"))
+        .collect();
     for name in &names {
         parts.push(MultipartPart::File {
             name: "file",
@@ -964,7 +964,6 @@ async fn one_users_session_cannot_read_anothers_files() {
         "Bob saw Ada's folder: {names:?}",
     );
 
-    // Ada's file lives in her directory, so Bob's read 404s.
     let res = get_authed(&h, &bob, "/api/files/read?path=Secrets/passwords.md").await;
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
 }

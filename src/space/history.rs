@@ -13,9 +13,10 @@ pub struct HistoryEntry {
 const MAX_HISTORY: usize = 50;
 
 /// Walk the git log restricted to commits touching `<path>.age`.
+///
+/// Rejects path traversal up-front so the error model matches read/write/delete
+/// (`Forbidden`, not an empty 200).
 pub fn file_history(space: &Space, rel_path: &str) -> AppResult<Vec<HistoryEntry>> {
-    // Reject traversal up-front so the error model matches read/write/delete
-    // (`Forbidden`, not an empty 200).
     resolve_under(&space.root(), rel_path)?;
     let target = format!("{rel_path}{ENC_EXT}");
     space.with_repo(|repo| {

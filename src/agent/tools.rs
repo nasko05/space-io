@@ -393,7 +393,6 @@ mod tests {
 
     #[test]
     fn build_pending_tolerates_empty_args() {
-        // Some models send an empty string for no-arg calls.
         let p = build_pending(&call("create_folder", "")).unwrap();
         assert_eq!(p.tool, "create_folder");
     }

@@ -144,7 +144,6 @@ mod tests {
     fn idle_expired_session_is_evicted_on_get() {
         let store = SessionStore::new();
         let id = store.create(secret("stale"), Uuid::new_v4());
-        // Backdate last_seen so the next get() trips the idle window.
         store.inner.get_mut(&id).expect("present").last_seen =
             Instant::now() - SESSION_IDLE_TTL - Duration::from_secs(1);
         assert!(store.get(&id).is_none());
@@ -159,8 +158,6 @@ mod tests {
         let store = SessionStore::new();
         let id = store.create(secret("old"), Uuid::new_v4());
         {
-            // Active now but minted long ago: the absolute cap must override the
-            // still-fresh idle window.
             let mut entry = store.inner.get_mut(&id).expect("present");
             entry.last_seen = Instant::now();
             entry.created_at = Instant::now() - SESSION_ABSOLUTE_TTL - Duration::from_secs(1);
@@ -175,10 +172,8 @@ mod tests {
         let fresh = store.create(secret("fresh"), Uuid::new_v4());
         let idle = store.create(secret("idle"), Uuid::new_v4());
         let capped = store.create(secret("capped"), Uuid::new_v4());
-        // Idle past the sliding window.
         store.inner.get_mut(&idle).expect("present").last_seen =
             Instant::now() - SESSION_IDLE_TTL - Duration::from_secs(1);
-        // Recently seen, but past the absolute cap.
         {
             let mut entry = store.inner.get_mut(&capped).expect("present");
             entry.last_seen = Instant::now();

@@ -160,6 +160,11 @@ struct InitResponse {
 
 /// Registration: mints a UUID, creates `<root>/<uuid>/.space.toml` + git-backed
 /// `space/`, records the `email -> uuid` mapping, then mints a session cookie.
+///
+/// Registers the `email -> uuid` mapping before touching disk so an email
+/// collision surfaces as a `400` early. If space initialisation then fails
+/// mid-way, the registry entry (and any partial directory) is rolled back so the
+/// email isn't permanently locked out.
 async fn init(
     State(state): State<AppState>,
     ConnectInfo(remote): ConnectInfo<SocketAddr>,
@@ -197,11 +202,9 @@ async fn init(
         .filter(|o| !o.is_empty())
         .unwrap_or_else(|| email.clone());
 
-    // Register first so an email collision surfaces as 400 before we touch disk.
     let entry = state.register_user(&email)?;
     let space_dir = UsersRegistry::space_dir_for(&state.root, &entry.uuid);
 
-    // init_space is CPU-heavy (scrypt + git2); offload off the reactor.
     let space_dir_for_init = space_dir.clone();
     let owner_for_init = owner.clone();
     let passphrase_for_init = passphrase.clone();
@@ -214,8 +217,6 @@ async fn init(
     })
     .await;
 
-    // If init failed mid-way, roll back the registry entry (and any partial
-    // directory) so the email isn't permanently locked out.
     if let Err(e) = init_result {
         state.unregister_user(&entry.uuid);
         let _ = std::fs::remove_dir_all(&space_dir);
@@ -245,6 +246,13 @@ struct UnlockRequest {
     passphrase: String,
 }
 
+/// Verify a passphrase against a registered space and mint a session cookie.
+///
+/// Throttles before the scrypt work so a flood can't pin the worker pool;
+/// scrypt is CPU-bound (~150 ms) and runs off the async worker. An unknown
+/// email, an oversized field, and a broken space all collapse to
+/// `WrongPassphrase` so the response never reveals which addresses are
+/// registered.
 async fn unlock(
     State(state): State<AppState>,
     ConnectInfo(remote): ConnectInfo<SocketAddr>,
@@ -252,7 +260,6 @@ async fn unlock(
     jar: CookieJar,
     Json(req): Json<UnlockRequest>,
 ) -> AppResult<impl IntoResponse> {
-    // Throttle before the scrypt work so a flood can't pin the worker pool.
     enforce_throttle(&state, remote)?;
 
     if req.email.len() > MAX_EMAIL_LEN {
@@ -262,8 +269,6 @@ async fn unlock(
         return Err(AppError::WrongPassphrase);
     }
 
-    // Unknown email and a broken space both collapse to WrongPassphrase so we
-    // never reveal which addresses are registered.
     let normalised = normalise_email(&req.email).map_err(|_| AppError::WrongPassphrase)?;
     let entry = state
         .find_user_by_email(&normalised)
@@ -281,7 +286,6 @@ async fn unlock(
         return Err(AppError::Internal("verifier length mismatch".into()));
     }
 
-    // scrypt is CPU-bound (~150 ms); offload it off the async worker.
     let passphrase_for_kdf = req.passphrase.clone();
     let log_n = cfg.kdf_log_n;
     let r = cfg.kdf_r;
@@ -305,6 +309,9 @@ async fn unlock(
     Ok((StatusCode::NO_CONTENT, resp_headers))
 }
 
+/// Drop the session and clear its cookie. The cleared cookie is built through
+/// the same helper as the one we set, so its attributes match and the browser
+/// actually removes it.
 async fn lock(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -315,7 +322,6 @@ async fn lock(
             state.sessions.drop(&id);
         }
     }
-    // Built through the same helper so the cleared cookie matches the one we set.
     let cookie = session_cookie(&state, &headers, "");
     let jar = jar.remove(cookie);
     let resp_headers = headers_from_jar(&jar);

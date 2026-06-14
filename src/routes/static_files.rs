@@ -8,6 +8,8 @@ use rust_embed::RustEmbed;
 #[folder = "$CARGO_MANIFEST_DIR/web/dist"]
 struct Assets;
 
+/// Serve an embedded static asset, falling back to `index.html` for unknown
+/// routes so the SPA client can handle deep links.
 pub async fn handler(uri: Uri) -> Response {
     let path = uri.path().trim_start_matches('/');
     let path = if path.is_empty() { "index.html" } else { path };
@@ -15,8 +17,6 @@ pub async fn handler(uri: Uri) -> Response {
     if let Some(asset) = Assets::get(path) {
         return serve(path, asset);
     }
-    // SPA fallback: unknown routes return index.html so the client handles deep
-    // links.
     if let Some(index) = Assets::get("index.html") {
         return serve("index.html", index);
     }

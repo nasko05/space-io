@@ -53,11 +53,12 @@ impl SpaceConfig {
         toml::from_str(&text).map_err(|e| AppError::Internal(format!("parse .space.toml: {e}")))
     }
 
+    /// Persists `.space.toml` via an atomic write so a crash can't tear the file
+    /// and lock the user out of their space.
     pub fn save(&self, space_dir: &Path) -> AppResult<()> {
         let path = Self::config_path(space_dir);
         let text =
             toml::to_string_pretty(self).map_err(|e| AppError::Internal(format!("toml: {e}")))?;
-        // Atomic so a crash can't tear `.space.toml` and lock the user out.
         crate::fs_atomic::write_atomic(&path, text.as_bytes())?;
         Ok(())
     }

@@ -49,8 +49,6 @@ fn main() -> anyhow::Result<()> {
 
 #[tokio::main(flavor = "multi_thread")]
 async fn cmd_serve(space_dir: PathBuf, listen: SocketAddr) -> anyhow::Result<()> {
-    // Ensure the data root exists so the init handler can write into it; an
-    // empty root is fine, registration brings it to life.
     std::fs::create_dir_all(&space_dir).context("create space-dir")?;
 
     let sessions = SessionStore::new();
@@ -69,12 +67,11 @@ async fn cmd_serve(space_dir: PathBuf, listen: SocketAddr) -> anyhow::Result<()>
         tracing::info!("No users registered yet; serving the registration page only.");
     }
 
-    // Sweep expired sessions and rate-limit windows so the in-memory tables
-    // don't grow unbounded on a long-lived host.
     let sweep_sessions = sessions.clone();
     let sweep_limiter = unlock_limiter.clone();
     tokio::spawn(async move {
-        let mut tick = tokio::time::interval(Duration::from_secs(5 * 60));
+        const SWEEP_INTERVAL: Duration = Duration::from_secs(5 * 60);
+        let mut tick = tokio::time::interval(SWEEP_INTERVAL);
         loop {
             tick.tick().await;
             sweep_sessions.sweep_expired();
