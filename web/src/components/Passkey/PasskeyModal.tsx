@@ -33,7 +33,7 @@ export function PasskeyModal({ open, email, owner, hasPasskey, onClose, onChange
   const [visible, setVisible] = useState(false);
   const [phase, setPhase] = useState<Phase>({ kind: 'idle' });
 
-  if (!open) return null;
+  if (!open) { return null; }
 
   /**
    * Enrols a passkey. The passphrase is verified against the server before
@@ -42,7 +42,7 @@ export function PasskeyModal({ open, email, owner, hasPasskey, onClose, onChange
    */
   async function register(event: FormEvent) {
     event.preventDefault();
-    if (!passphrase) return;
+    if (!passphrase) { return; }
     setPhase({ kind: 'verifying' });
 
     try {
@@ -87,7 +87,7 @@ export function PasskeyModal({ open, email, owner, hasPasskey, onClose, onChange
   }
 
   async function remove() {
-    if (!confirm('Remove the passkey from this space?')) return;
+    if (!confirm('Remove the passkey from this space?')) { return; }
     setPhase({ kind: 'removing' });
     try {
       await api.deletePasskey();

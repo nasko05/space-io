@@ -69,9 +69,9 @@ export function Preview({
         const res = await fetch(api.downloadUrl(file.path), {
           credentials: 'same-origin',
         });
-        if (!res.ok) throw new Error(`fetch failed (${res.status})`);
+        if (!res.ok) { throw new Error(`fetch failed (${res.status})`); }
         const data = await res.arrayBuffer();
-        if (!cancelled) setState({ kind: 'ready', data });
+        if (!cancelled) { setState({ kind: 'ready', data }); }
       } catch (err) {
         if (!cancelled) {
           setState({
@@ -166,8 +166,8 @@ export function Preview({
 }
 
 function Renderer({ file, data }: { file: TreeFile; data: ArrayBuffer }) {
-  if (file.kind === 'pdf') return <PdfRenderer data={data} />;
-  if (file.kind === 'docx') return <DocxRenderer data={data} />;
+  if (file.kind === 'pdf') { return <PdfRenderer data={data} />; }
+  if (file.kind === 'docx') { return <DocxRenderer data={data} />; }
   if (file.kind === 'image') {
     return (
       <div className={styles.mediaCenter}>
@@ -195,10 +195,10 @@ function Renderer({ file, data }: { file: TreeFile; data: ArrayBuffer }) {
 }
 
 function kindLabel(kind: string): string {
-  if (kind === 'pdf') return 'reading PDF';
-  if (kind === 'docx') return 'reading DOC';
-  if (kind === 'image') return 'viewing';
-  if (kind === 'video') return 'watching';
+  if (kind === 'pdf') { return 'reading PDF'; }
+  if (kind === 'docx') { return 'reading DOC'; }
+  if (kind === 'image') { return 'viewing'; }
+  if (kind === 'video') { return 'watching'; }
   return 'previewing';
 }
 

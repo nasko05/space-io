@@ -41,7 +41,7 @@ export function TagsDialog({
 
   function commitDraft() {
     const trimmed = draft.trim();
-    if (!trimmed) return;
+    if (!trimmed) { return; }
     if (tags.some((existing) => existing.toLowerCase() === trimmed.toLowerCase())) {
       setDraft('');
       return;
@@ -66,14 +66,14 @@ export function TagsDialog({
   async function save() {
     const finalTags = (() => {
       const trimmed = draft.trim();
-      if (!trimmed) return tags;
-      if (tags.some((existing) => existing.toLowerCase() === trimmed.toLowerCase())) return tags;
+      if (!trimmed) { return tags; }
+      if (tags.some((existing) => existing.toLowerCase() === trimmed.toLowerCase())) { return tags; }
       return [...tags, trimmed];
     })();
     await run(() => onSave(finalTags), { onSuccess: onClose });
   }
 
-  if (!open) return null;
+  if (!open) { return null; }
 
   const suggestions = knownTags.filter(
     (candidate) => !tags.some((tag) => tag.toLowerCase() === candidate.toLowerCase()),

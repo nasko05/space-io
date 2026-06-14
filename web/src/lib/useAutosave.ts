@@ -45,9 +45,9 @@ export function useAutosave({ delayMs = 800, onSave }: Options) {
   }, [onSave]);
 
   const runSave = useCallback(async () => {
-    if (inFlightRef.current) return;
+    if (inFlightRef.current) { return; }
     const value = pendingRef.current;
-    if (value === null) return;
+    if (value === null) { return; }
     pendingRef.current = null;
     inFlightRef.current = true;
     setStatus({ kind: 'saving' });
@@ -72,7 +72,7 @@ export function useAutosave({ delayMs = 800, onSave }: Options) {
 
   const scheduleRef = useRef<() => void>(() => {});
   scheduleRef.current = () => {
-    if (timerRef.current !== null) clearTimeout(timerRef.current);
+    if (timerRef.current !== null) { clearTimeout(timerRef.current); }
     timerRef.current = window.setTimeout(() => {
       timerRef.current = null;
       void runSave();
@@ -98,7 +98,7 @@ export function useAutosave({ delayMs = 800, onSave }: Options) {
 
   useEffect(
     () => () => {
-      if (timerRef.current !== null) clearTimeout(timerRef.current);
+      if (timerRef.current !== null) { clearTimeout(timerRef.current); }
       if (pendingRef.current !== null) {
         void onSaveRef.current(pendingRef.current);
         pendingRef.current = null;

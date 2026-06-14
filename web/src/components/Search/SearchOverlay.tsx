@@ -28,7 +28,7 @@ export function SearchOverlay({ open, onClose, onSelect }: Props) {
   }, [open]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) { return; }
     const trimmed = query.trim();
     if (!trimmed) {
       setHits([]);
@@ -49,7 +49,7 @@ export function SearchOverlay({ open, onClose, onSelect }: Props) {
           setHits([]);
         }
       } finally {
-        if (!cancelled) setBusy(false);
+        if (!cancelled) { setBusy(false); }
       }
     }, 180);
     return () => {
@@ -64,7 +64,7 @@ export function SearchOverlay({ open, onClose, onSelect }: Props) {
       onClose();
       return;
     }
-    if (hits.length === 0) return;
+    if (hits.length === 0) { return; }
     if (event.key === 'ArrowDown') {
       event.preventDefault();
       setActiveIndex((index) => Math.min(hits.length - 1, index + 1));
@@ -85,11 +85,11 @@ export function SearchOverlay({ open, onClose, onSelect }: Props) {
       .trim()
       .split(/\s+/)
       .filter((token) => token.length > 0);
-    if (tokens.length === 0) return null;
+    if (tokens.length === 0) { return null; }
     return new RegExp(`(${tokens.map(escapeRegex).join('|')})`, 'gi');
   }, [query]);
 
-  if (!open) return null;
+  if (!open) { return null; }
 
   return (
     <div className={styles.scrim} onMouseDown={onClose}>
@@ -155,7 +155,7 @@ export function SearchOverlay({ open, onClose, onSelect }: Props) {
  * `String.split` interleave matches and non-matches, so odd-indexed pieces are
  * the matches to wrap in `<mark>`. */
 function highlight(text: string, pattern: RegExp | null): React.ReactNode {
-  if (!pattern) return text;
+  if (!pattern) { return text; }
   const pieces = text.split(pattern);
   return pieces.map((piece, i) =>
     i % 2 === 1 ? (

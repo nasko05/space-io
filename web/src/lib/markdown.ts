@@ -24,7 +24,7 @@ const wikilink: TokenizerAndRendererExtension = {
   },
   tokenizer(src: string) {
     const m = /^\[\[([^\]\n]+)\]\]/.exec(src);
-    if (!m) return undefined;
+    if (!m) { return undefined; }
     return { type: 'wikilink', raw: m[0], text: m[1].trim() } satisfies WikilinkToken;
   },
   renderer(token) {
@@ -49,7 +49,7 @@ md.use({
  * runs through `sanitizeHtml`.
  */
 export function renderMarkdown(src: string): string {
-  if (!src) return '';
+  if (!src) { return ''; }
   const html = md.parse(src, { async: false });
   return sanitizeHtml(html).trim();
 }

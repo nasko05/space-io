@@ -29,10 +29,10 @@ export function DownloadModal({ open, file, onClose }: Props) {
     }
   }, [open]);
 
-  if (!open || !file) return null;
+  if (!open || !file) { return null; }
 
   async function save() {
-    if (!file) return;
+    if (!file) { return; }
     setPhase({ kind: 'fetching', progress: 0 });
     try {
       const url = api.downloadUrl(file.path);
@@ -187,7 +187,7 @@ function fetchWithProgress(
     xhr.withCredentials = true;
     xhr.responseType = 'blob';
     xhr.onprogress = (event) => {
-      if (event.lengthComputable) onProgress(event.loaded, event.total);
+      if (event.lengthComputable) { onProgress(event.loaded, event.total); }
     };
     xhr.onload = () => {
       if (xhr.status >= 200 && xhr.status < 300) {

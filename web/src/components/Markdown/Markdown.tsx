@@ -16,9 +16,9 @@ export function Markdown({ source, onWikilinkClick }: Props) {
   const html = useMemo(() => renderMarkdown(source), [source]);
 
   function onClick(event: MouseEvent<HTMLDivElement>) {
-    if (!onWikilinkClick) return;
+    if (!onWikilinkClick) { return; }
     const target = event.target as HTMLElement | null;
-    if (!target) return;
+    if (!target) { return; }
     let node: HTMLElement | null = target;
     for (let i = 0; i < 4 && node; i += 1) {
       if (node.classList?.contains('wikilink')) {

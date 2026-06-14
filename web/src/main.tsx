@@ -4,7 +4,7 @@ import { App } from './App';
 import './styles/global.css';
 
 const root = document.getElementById('root');
-if (!root) throw new Error('#root missing');
+if (!root) { throw new Error('#root missing'); }
 
 createRoot(root).render(
   <StrictMode>

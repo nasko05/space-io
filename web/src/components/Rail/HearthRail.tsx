@@ -81,7 +81,9 @@ function HearthRailImpl({
               className={styles.calMonthInput}
               value={dateValue}
               onChange={(event) => {
-                if (event.target.value) onPickDate(event.target.value);
+                if (event.target.value) {
+                  onPickDate(event.target.value);
+                }
               }}
               onClick={(event) => event.currentTarget.showPicker?.()}
               aria-label="Jump to a date"

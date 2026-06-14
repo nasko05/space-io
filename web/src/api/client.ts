@@ -130,7 +130,7 @@ export class ApiError extends Error {
 const JSON_HEADERS = { 'Content-Type': 'application/json' };
 
 async function readJson<T>(res: Response): Promise<T> {
-  if (res.status === 204) return undefined as T;
+  if (res.status === 204) { return undefined as T; }
   const text = await res.text();
   if (!res.ok) {
     let code = 'unknown';
@@ -223,7 +223,7 @@ export const api = {
     const res = await fetch(`/api/auth/passkey/info?email=${encodeURIComponent(email)}`, {
       credentials: 'same-origin',
     });
-    if (res.status === 404) return null;
+    if (res.status === 404) { return null; }
     return readJson(res);
   },
   async registerPasskey(payload: PasskeyInfo): Promise<void> {
@@ -276,7 +276,7 @@ function uploadWithProgress(
     xhr.open('POST', '/api/files/upload', true);
     xhr.withCredentials = true;
     xhr.upload.onprogress = (event) => {
-      if (event.lengthComputable) onProgress(event.loaded, event.total);
+      if (event.lengthComputable) { onProgress(event.loaded, event.total); }
     };
     xhr.onload = () => {
       if (xhr.status >= 200 && xhr.status < 300) {
@@ -313,10 +313,10 @@ export type MetaMap = Record<string, MetaItem>;
 
 export function firstMarkdownLeaf(tree: TreeNode[]): TreeFile | null {
   for (const node of tree) {
-    if (node.type === 'file' && node.kind === 'md') return node;
+    if (node.type === 'file' && node.kind === 'md') { return node; }
     if (node.type === 'folder') {
       const hit = firstMarkdownLeaf(node.children);
-      if (hit) return hit;
+      if (hit) { return hit; }
     }
   }
   return null;
@@ -326,8 +326,8 @@ export function flattenFiles(tree: TreeNode[]): TreeFile[] {
   const out: TreeFile[] = [];
   const walk = (nodes: TreeNode[]) => {
     for (const node of nodes) {
-      if (node.type === 'file') out.push(node);
-      else walk(node.children);
+      if (node.type === 'file') { out.push(node); }
+      else { walk(node.children); }
     }
   };
   walk(tree);

@@ -45,9 +45,9 @@ function isAllowedCheckbox(el: Element): boolean {
  */
 function isSafeUrl(raw: string): boolean {
   const trimmed = raw.trim();
-  if (trimmed === '') return true;
-  if (/[\x00-\x1f\x7f]/.test(trimmed)) return false;
-  if (/^\s*(javascript|data|vbscript|file)\s*:/i.test(trimmed)) return false;
+  if (trimmed === '') { return true; }
+  if (/[\x00-\x1f\x7f]/.test(trimmed)) { return false; }
+  if (/^\s*(javascript|data|vbscript|file)\s*:/i.test(trimmed)) { return false; }
   return true;
 }
 
@@ -58,7 +58,7 @@ function isSafeUrl(raw: string): boolean {
  * replacement for adversarial settings.
  */
 export function sanitizeHtml(html: string): string {
-  if (!html) return '';
+  if (!html) { return ''; }
   const doc = new DOMParser().parseFromString(html, 'text/html');
   walk(doc.body);
   return doc.body.innerHTML;

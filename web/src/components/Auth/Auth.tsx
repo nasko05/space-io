@@ -26,7 +26,7 @@ export function Auth({ showRegisterLink = false, onUnlocked, onRegister }: Props
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (!email.trim() || !passphrase) return;
+    if (!email.trim() || !passphrase) { return; }
     await runUnlock(email.trim(), passphrase);
   }
 
@@ -49,7 +49,7 @@ export function Auth({ showRegisterLink = false, onUnlocked, onRegister }: Props
   }
 
   async function tryPasskey() {
-    if (passkeyBusy) return;
+    if (passkeyBusy) { return; }
     if (!email.trim()) {
       setError('Type your email first — that’s how we find the right passkey.');
       return;

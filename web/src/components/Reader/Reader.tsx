@@ -149,7 +149,7 @@ export function Reader({
   );
 
   const doCheckpoint = useCallback(async () => {
-    if (!onCheckpoint || checkpointing) return;
+    if (!onCheckpoint || checkpointing) { return; }
     setCheckpointing(true);
     setCheckpointError(null);
     try {
@@ -166,7 +166,7 @@ export function Reader({
   }, [checkpointLabel, checkpointing, content, onCheckpoint, path]);
 
   useEffect(() => {
-    if (!checkpointOpen) return;
+    if (!checkpointOpen) { return; }
     function onPointerDown(event: PointerEvent) {
       if (!checkpointWrapRef.current?.contains(event.target as Node)) {
         setCheckpointOpen(false);
@@ -193,7 +193,7 @@ export function Reader({
   const applyToSelection = useCallback(
     (transform: (value: string, start: number, end: number) => { text: string; selStart: number; selEnd: number }) => {
       const textarea = textareaRef.current;
-      if (!textarea) return;
+      if (!textarea) { return; }
       const { selectionStart, selectionEnd, value } = textarea;
       const { text, selStart, selEnd } = transform(value, selectionStart, selectionEnd);
       setContent(text);
@@ -226,7 +226,7 @@ export function Reader({
     (prefix: string) =>
       applyToSelection((value, start, end) => {
         let lineStart = start;
-        while (lineStart > 0 && value[lineStart - 1] !== '\n') lineStart -= 1;
+        while (lineStart > 0 && value[lineStart - 1] !== '\n') { lineStart -= 1; }
         const before = value.slice(0, lineStart);
         const rest = value.slice(lineStart);
         const text = `${before}${prefix}${rest}`;
@@ -252,7 +252,7 @@ export function Reader({
   );
 
   useEffect(() => {
-    if (mode === 'edit' || mode === 'split') textareaRef.current?.focus();
+    if (mode === 'edit' || mode === 'split') { textareaRef.current?.focus(); }
   }, [mode]);
 
   /** Pre-lowered titles so the autocomplete filter doesn't lowercase the whole
@@ -287,7 +287,7 @@ export function Reader({
         for (const entry of titleIndex) {
           if (entry.lower.includes(query)) {
             hits.push(entry.title);
-            if (hits.length >= WIKILINK_MAX_SUGGESTIONS) break;
+            if (hits.length >= WIKILINK_MAX_SUGGESTIONS) { break; }
           }
         }
         if (hits.length === 0) {
@@ -311,9 +311,9 @@ export function Reader({
 
   function insertSuggestion(title: string) {
     const textarea = textareaRef.current;
-    if (!textarea) return;
+    if (!textarea) { return; }
     const start = ac.start;
-    if (start < 0) return;
+    if (start < 0) { return; }
     const before = content.slice(0, start);
     const after = content.slice(start + ac.query.length);
     const insertText = `${title}]]`;
@@ -342,7 +342,7 @@ export function Reader({
         return;
       }
     }
-    if (!ac.open) return;
+    if (!ac.open) { return; }
     if (event.key === 'ArrowDown') {
       event.preventDefault();
       setAc((state) => ({ ...state, activeIdx: Math.min(state.hits.length - 1, state.activeIdx + 1) }));
@@ -352,7 +352,7 @@ export function Reader({
     } else if (event.key === 'Enter' || event.key === 'Tab') {
       event.preventDefault();
       const title = ac.hits[ac.activeIdx];
-      if (title) insertSuggestion(title);
+      if (title) { insertSuggestion(title); }
     } else if (event.key === 'Escape') {
       event.preventDefault();
       setAc(EMPTY_AC);
@@ -861,8 +861,8 @@ function backlinkableTitles(
   let match: RegExpExecArray | null;
   while ((match = pattern.exec(content)) !== null) {
     const title = match[1].trim();
-    if (currentTitle && title === currentTitle) continue;
-    if (titleToPath.has(title)) found.add(title);
+    if (currentTitle && title === currentTitle) { continue; }
+    if (titleToPath.has(title)) { found.add(title); }
   }
   return Array.from(found);
 }

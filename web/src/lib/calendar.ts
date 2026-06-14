@@ -49,9 +49,9 @@ function forEachMarkdown(
   const walk = (nodes: TreeNode[]) => {
     for (const n of nodes) {
       if (n.type === 'file') {
-        if (n.kind !== 'md' || !n.updated) continue;
+        if (n.kind !== 'md' || !n.updated) { continue; }
         const ts = Date.parse(n.updated);
-        if (!Number.isFinite(ts)) continue;
+        if (!Number.isFinite(ts)) { continue; }
         visit(n, ts);
       } else {
         walk(n.children);
@@ -129,7 +129,7 @@ export function findFileForDay(
 ): TreeFile | null {
   let hit: TreeFile | null = null;
   forEachMarkdown(tree, (file, ts) => {
-    if (hit) return;
+    if (hit) { return; }
     const d = new Date(ts);
     if (d.getFullYear() === year && d.getMonth() === month && d.getDate() === day) {
       hit = file;

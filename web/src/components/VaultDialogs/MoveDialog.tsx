@@ -44,13 +44,13 @@ export function MoveDialog({
   }
 
   async function submit() {
-    if (busy) return;
+    if (busy) { return; }
     await run(() => onMove(picked), { onSuccess: onClose });
   }
 
   async function createFolderInside() {
     const name = newFolderName.trim();
-    if (!name) return;
+    if (!name) { return; }
     await run(async () => {
       const created = await onCreateFolder(picked, name);
       setPicked(created);
@@ -59,7 +59,7 @@ export function MoveDialog({
     });
   }
 
-  if (!open) return null;
+  if (!open) { return null; }
 
   return (
     <div className={styles.scrim} onMouseDown={onClose}>
@@ -149,6 +149,6 @@ export function MoveDialog({
 }
 
 function labelFor(path: string): string {
-  if (!path) return '/';
+  if (!path) { return '/'; }
   return path.split('/').pop() ?? path;
 }

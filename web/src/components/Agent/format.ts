@@ -1,7 +1,7 @@
 /** Coerce an unknown tool-argument value to a display string. */
 export function str(value: unknown): string {
-  if (typeof value === 'string') return value;
-  if (value == null) return '';
+  if (typeof value === 'string') { return value; }
+  if (value == null) { return ''; }
   return String(value);
 }
 

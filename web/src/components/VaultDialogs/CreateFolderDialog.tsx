@@ -39,11 +39,11 @@ export function CreateFolderDialog({ open, tree, onClose, onCreate }: Props) {
     : null;
 
   async function submit() {
-    if (!canSubmit) return;
+    if (!canSubmit) { return; }
     await run(() => onCreate(parent, trimmedName), { onSuccess: onClose });
   }
 
-  if (!open) return null;
+  if (!open) { return null; }
 
   return (
     <div className={styles.scrim} onMouseDown={onClose}>

@@ -42,12 +42,12 @@ export function AgentChat({ open, onClose, onVaultChanged }: Props) {
   const inFlightRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
-    if (!open || status) return;
+    if (!open || status) { return; }
     let cancelled = false;
     void (async () => {
       try {
         const fetched = await api.agentStatus();
-        if (!cancelled) setStatus(fetched);
+        if (!cancelled) { setStatus(fetched); }
       } catch (err) {
         if (!cancelled) {
           setStatus({ configured: false, model: '', web_search: 'off' });
@@ -62,13 +62,13 @@ export function AgentChat({ open, onClose, onVaultChanged }: Props) {
 
   useEffect(() => {
     const container = scrollRef.current;
-    if (container) container.scrollTop = container.scrollHeight;
+    if (container) { container.scrollTop = container.scrollHeight; }
   }, [messages, pending, busy]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) { return; }
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
+      if (event.key === 'Escape') { onClose(); }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -96,7 +96,7 @@ export function AgentChat({ open, onClose, onVaultChanged }: Props) {
   const send = useCallback(
     async (text: string) => {
       const trimmed = text.trim();
-      if (!trimmed || busy || pending.length > 0) return;
+      if (!trimmed || busy || pending.length > 0) { return; }
       const convo: AgentMessage[] = [...messages, { role: 'user', content: trimmed }];
       setMessages(convo);
       setInput('');
@@ -166,7 +166,7 @@ export function AgentChat({ open, onClose, onVaultChanged }: Props) {
   const decide = useCallback(
     async (action: AgentPendingAction, approve: boolean) => {
       const id = action.tool_call_id;
-      if (busy || decisionsRef.current[id] !== undefined || inFlightRef.current.has(id)) return;
+      if (busy || decisionsRef.current[id] !== undefined || inFlightRef.current.has(id)) { return; }
       inFlightRef.current.add(id);
       let result: string;
       if (approve) {
@@ -191,7 +191,7 @@ export function AgentChat({ open, onClose, onVaultChanged }: Props) {
   );
 
   const rejectAll = useCallback(async () => {
-    if (busy) return;
+    if (busy) { return; }
     for (const action of pending) {
       if (decisionsRef.current[action.tool_call_id] === undefined) {
         decisionsRef.current[action.tool_call_id] = 'User declined this change.';
@@ -202,7 +202,7 @@ export function AgentChat({ open, onClose, onVaultChanged }: Props) {
   }, [busy, continueWith, pending]);
 
   const newChat = useCallback(() => {
-    if (busy) return;
+    if (busy) { return; }
     decisionsRef.current = {};
     inFlightRef.current.clear();
     setMessages([]);
@@ -222,7 +222,7 @@ export function AgentChat({ open, onClose, onVaultChanged }: Props) {
     [input, send],
   );
 
-  if (!open) return null;
+  if (!open) { return null; }
 
   const awaiting = pending.length > 0;
   const pendingIds = new Set(pending.map((action) => action.tool_call_id));
@@ -352,13 +352,13 @@ function MessageView({
   message: AgentMessage;
   suppressIds: Set<string>;
 }) {
-  if (message.role === 'tool') return null;
+  if (message.role === 'tool') { return null; }
 
   if (message.role === 'user') {
     return <div className={styles.userBubble}>{message.content}</div>;
   }
 
-  if (message.role !== 'assistant') return null;
+  if (message.role !== 'assistant') { return null; }
 
   const calls = (message.tool_calls ?? []).filter((call) => !suppressIds.has(call.id));
   return (

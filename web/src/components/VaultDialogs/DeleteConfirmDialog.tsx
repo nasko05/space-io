@@ -20,7 +20,7 @@ export function DeleteConfirmDialog({
 }: Props) {
   const { busy, error, run } = useAsyncDialog(open, 'delete failed');
 
-  if (!open) return null;
+  if (!open) { return null; }
 
   async function confirmDelete() {
     await run(onConfirm, { onSuccess: onClose });

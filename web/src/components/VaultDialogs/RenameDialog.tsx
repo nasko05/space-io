@@ -18,18 +18,18 @@ export function RenameDialog({ open, currentName, siblingNames, onClose, onRenam
   const { busy, error, run, setError, clearError } = useAsyncDialog(open, 'rename failed');
 
   useEffect(() => {
-    if (open) setName(currentName);
+    if (open) { setName(currentName); }
   }, [open, currentName]);
 
-  if (!open) return null;
+  if (!open) { return null; }
 
   function validate(value: string): string | null {
     const trimmed = value.trim();
-    if (!trimmed) return 'Name cannot be empty.';
-    if (trimmed.includes('/') || trimmed.includes('\\')) return 'Slashes are not allowed.';
-    if (trimmed.startsWith('.')) return 'Names cannot start with a dot.';
-    if (trimmed === currentName) return null;
-    if (siblingNames.has(trimmed.toLowerCase())) return 'Something here already has that name.';
+    if (!trimmed) { return 'Name cannot be empty.'; }
+    if (trimmed.includes('/') || trimmed.includes('\\')) { return 'Slashes are not allowed.'; }
+    if (trimmed.startsWith('.')) { return 'Names cannot start with a dot.'; }
+    if (trimmed === currentName) { return null; }
+    if (siblingNames.has(trimmed.toLowerCase())) { return 'Something here already has that name.'; }
     return null;
   }
 
