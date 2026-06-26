@@ -7,13 +7,19 @@
 
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::body::{to_bytes, Body};
 use axum::extract::ConnectInfo;
 use axum::http::{header, Method, Request, Response, StatusCode};
 use axum::Router;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine;
+use hmac::{Hmac, Mac};
 use rand::RngCore;
 use serde_json::Value;
+use sha2::Sha256;
 use tempfile::TempDir;
 use tower::ServiceExt;
 
@@ -23,6 +29,7 @@ use space_io::routes;
 use space_io::space::rate_limit::RateLimiter;
 use space_io::space::session::SessionStore;
 use space_io::space::Space;
+use space_io::sso::SsoConfig;
 use space_io::state::{AppConfig, AppState};
 
 /// Cheap KDF params for tests (matches `space::test_helpers`).
@@ -58,6 +65,34 @@ impl Harness {
             AppConfig { cookie_secure },
         )
         .expect("AppState::new");
+        let router = routes::build_router(state.clone());
+        Self {
+            tempdir,
+            state,
+            router,
+        }
+    }
+
+    /// Like [`fresh`](Self::fresh) but with cloud-drive SSO enabled under a known
+    /// shared secret, so a test can mint a token with [`mint_sso_token`] and
+    /// drive the `/api/auth/sso/*` endpoints. The SSO config is injected before
+    /// the router is built so the router's `AppState` clone sees it.
+    pub fn with_sso(secret: &str) -> Self {
+        let tempdir = TempDir::new().expect("tempdir");
+        std::fs::create_dir_all(tempdir.path()).expect("mkdir root");
+        let mut state = AppState::new(
+            tempdir.path().to_path_buf(),
+            SessionStore::new(),
+            RateLimiter::new(),
+            AppConfig {
+                cookie_secure: false,
+            },
+        )
+        .expect("AppState::new");
+        state.sso = Arc::new(SsoConfig::new(
+            Some(secret.as_bytes().to_vec()),
+            "drive_sso".to_string(),
+        ));
         let router = routes::build_router(state.clone());
         Self {
             tempdir,
@@ -261,6 +296,39 @@ pub fn with_cookie(mut req: Request<Body>, user: &RegisteredUser) -> Request<Bod
     req.headers_mut().insert(
         header::COOKIE,
         user.cookie_header().parse().expect("valid cookie header"),
+    );
+    req
+}
+
+/// Mint an HS256 SSO token exactly as the cloud drive (PyJWT) would, so the SSO
+/// endpoints accept it under a [`Harness::with_sso`] secret.
+pub fn mint_sso_token(secret: &str, sub: &str, email: &str, exp: i64) -> String {
+    let header = URL_SAFE_NO_PAD.encode(br#"{"alg":"HS256","typ":"JWT"}"#);
+    let payload = URL_SAFE_NO_PAD
+        .encode(format!(r#"{{"sub":"{sub}","email":"{email}","exp":{exp}}}"#).as_bytes());
+    let signing_input = format!("{header}.{payload}");
+    let mut mac = Hmac::<Sha256>::new_from_slice(secret.as_bytes()).expect("hmac key");
+    mac.update(signing_input.as_bytes());
+    let sig = URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes());
+    format!("{signing_input}.{sig}")
+}
+
+/// A unix timestamp one hour in the future, for non-expired SSO tokens.
+pub fn future_exp() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock")
+        .as_secs() as i64
+        + 3600
+}
+
+/// Attach a cloud-drive SSO cookie (`drive_sso=<token>`) to a request.
+pub fn with_sso_cookie(mut req: Request<Body>, token: &str) -> Request<Body> {
+    req.headers_mut().insert(
+        header::COOKIE,
+        format!("drive_sso={token}")
+            .parse()
+            .expect("valid cookie header"),
     );
     req
 }

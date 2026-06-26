@@ -50,6 +50,15 @@ pub struct SsoConfig {
 }
 
 impl SsoConfig {
+    /// Construct directly from a secret and cookie name. `from_env` is the
+    /// production path; this is for tests and any future non-env config source.
+    pub fn new(secret: Option<Vec<u8>>, cookie_name: String) -> Self {
+        Self {
+            secret,
+            cookie_name,
+        }
+    }
+
     pub fn from_env() -> Self {
         let secret = std::env::var("SPACEIO_SSO_JWT_SECRET")
             .ok()
@@ -123,10 +132,7 @@ mod tests {
     }
 
     fn cfg(secret: &str) -> SsoConfig {
-        SsoConfig {
-            secret: Some(secret.as_bytes().to_vec()),
-            cookie_name: "drive_sso".into(),
-        }
+        SsoConfig::new(Some(secret.as_bytes().to_vec()), "drive_sso".into())
     }
 
     fn future() -> i64 {
@@ -183,10 +189,7 @@ mod tests {
     #[test]
     fn rejects_garbage_and_disabled() {
         assert!(cfg("s").verify_token("not-a-jwt").is_none());
-        let disabled = SsoConfig {
-            secret: None,
-            cookie_name: "drive_sso".into(),
-        };
+        let disabled = SsoConfig::new(None, "drive_sso".into());
         let token = mint(
             b"s",
             r#"{"alg":"HS256"}"#,

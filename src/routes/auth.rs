@@ -35,6 +35,9 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/auth/status", get(status))
         .route("/auth/sso", get(sso))
+        .route("/auth/sso/space", get(sso_space))
+        .route("/auth/sso/provision", post(sso_provision))
+        .route("/auth/sso/unlock", post(sso_unlock))
         .route("/auth/init", post(init))
         .route("/auth/unlock", post(unlock))
         .route("/auth/lock", post(lock))
@@ -185,6 +188,176 @@ async fn sso(State(state): State<AppState>, jar: CookieJar) -> Json<SsoResponse>
     Json(SsoResponse::from_claims(claims))
 }
 
+/// Resolve a valid cloud-drive SSO cookie into its claims, or `Unauthorized`.
+/// The SSO endpoints below are gated on this rather than the editor's own
+/// session cookie: identity comes from the drive, the space is unlocked here.
+fn require_sso(state: &AppState, jar: &CookieJar) -> AppResult<SsoClaims> {
+    jar.get(&state.sso.cookie_name)
+        .and_then(|c| state.sso.verify_token(c.value()))
+        .ok_or(AppError::Unauthorized)
+}
+
+/// The drive's user id (`sub`) doubles as the editor's space id, so no
+/// email→uuid mapping is needed for SSO users. The drive mints `sub` with
+/// `str(uuid4())`, which parses straight into a `Uuid`.
+fn sso_user_uuid(claims: &SsoClaims) -> AppResult<Uuid> {
+    Uuid::parse_str(&claims.sub).map_err(|_| AppError::BadRequest("invalid sso subject".into()))
+}
+
+#[derive(Serialize)]
+struct SsoSpaceResponse {
+    /// A space already exists for this drive user.
+    exists: bool,
+    /// Passkey-unlock material for the existing space (absent until provisioned).
+    passkey: Option<PasskeyInfoResponse>,
+}
+
+/// Report whether the signed-in drive user already has an editor space, and if
+/// so return its passkey-wrap material so the browser can derive the key and
+/// unlock. Drives the editor's choice between the provision and unlock flows.
+async fn sso_space(
+    State(state): State<AppState>,
+    jar: CookieJar,
+) -> AppResult<Json<SsoSpaceResponse>> {
+    let claims = require_sso(&state, &jar)?;
+    let uuid = sso_user_uuid(&claims)?;
+    match state.space_for(&uuid) {
+        Ok(space) => {
+            let passkey = space.config().passkey.map(|pk| PasskeyInfoResponse {
+                credential_id_b64: pk.credential_id_b64,
+                prf_salt_b64: pk.prf_salt_b64,
+                wrapped_passphrase_b64: pk.wrapped_passphrase_b64,
+            });
+            Ok(Json(SsoSpaceResponse {
+                exists: true,
+                passkey,
+            }))
+        }
+        Err(AppError::NotFound) => Ok(Json(SsoSpaceResponse {
+            exists: false,
+            passkey: None,
+        })),
+        Err(e) => Err(e),
+    }
+}
+
+#[derive(Deserialize)]
+struct SsoProvisionRequest {
+    /// Random passphrase the browser generated and wrapped under the passkey PRF;
+    /// it never leaves the user's devices in plaintext except over this TLS call,
+    /// and the server holds it only in the in-memory session (as today's unlock).
+    passphrase: String,
+    credential_id_b64: String,
+    prf_salt_b64: String,
+    wrapped_passphrase_b64: String,
+}
+
+/// First-entry provisioning for a signed-in drive user with no space yet:
+/// initialise an encrypted space keyed by their `sub`, persist the passkey-wrap
+/// material, and mint a session. Authenticated solely by the SSO cookie — no
+/// throttle, since an attacker can't reach it without a drive-issued token.
+async fn sso_provision(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    jar: CookieJar,
+    Json(req): Json<SsoProvisionRequest>,
+) -> AppResult<impl IntoResponse> {
+    let claims = require_sso(&state, &jar)?;
+    let uuid = sso_user_uuid(&claims)?;
+
+    if req.passphrase.len() > MAX_PASSPHRASE_LEN {
+        return Err(AppError::BadRequest("passphrase is too long".into()));
+    }
+    if req.passphrase.chars().count() < MIN_PASSPHRASE_LEN {
+        return Err(AppError::BadRequest("passphrase is too short".into()));
+    }
+    if req.credential_id_b64.len() > MAX_PASSKEY_CREDENTIAL_LEN {
+        return Err(AppError::BadRequest("credential id too long".into()));
+    }
+    if req.prf_salt_b64.len() > MAX_PASSKEY_SALT_LEN {
+        return Err(AppError::BadRequest("prf salt too long".into()));
+    }
+    if req.wrapped_passphrase_b64.len() > MAX_PASSKEY_WRAPPED_LEN {
+        return Err(AppError::BadRequest("wrapped passphrase too long".into()));
+    }
+
+    // Provisioning is one-shot; a second call should unlock instead.
+    match state.space_for(&uuid) {
+        Ok(_) => return Err(AppError::BadRequest("space already provisioned".into())),
+        Err(AppError::NotFound) => {}
+        Err(e) => return Err(e),
+    }
+
+    let owner = claims.email.clone().unwrap_or_else(|| claims.sub.clone());
+    let space_dir = UsersRegistry::space_dir_for(&state.root, &uuid);
+    let space_dir_for_init = space_dir.clone();
+    let owner_for_init = owner.clone();
+    let passphrase_for_init = req.passphrase.clone();
+    let init_result = run_blocking(move || {
+        crate::space::init::init_space(crate::space::init::InitOptions {
+            space_dir: space_dir_for_init,
+            passphrase: age::secrecy::SecretString::from(passphrase_for_init),
+            owner: owner_for_init,
+        })
+    })
+    .await;
+    if let Err(e) = init_result {
+        let _ = std::fs::remove_dir_all(&space_dir);
+        return Err(e);
+    }
+
+    let space = Space::open(space_dir)?;
+    space.set_passkey(Some(PasskeyConfig {
+        credential_id_b64: req.credential_id_b64,
+        prf_salt_b64: req.prf_salt_b64,
+        wrapped_passphrase_b64: req.wrapped_passphrase_b64,
+    }))?;
+    state.cache_space(uuid, space);
+
+    let id = state
+        .sessions
+        .create(age::secrecy::SecretString::from(req.passphrase), uuid);
+    let jar = jar.add(session_cookie(&state, &headers, id.to_string()));
+    let resp_headers = headers_from_jar(&jar);
+    Ok((StatusCode::CREATED, resp_headers))
+}
+
+#[derive(Deserialize)]
+struct SsoUnlockRequest {
+    /// Passphrase the browser recovered by unwrapping the stored ciphertext with
+    /// the passkey PRF output.
+    passphrase: String,
+}
+
+/// Return-visit unlock for a signed-in drive user: verify the PRF-recovered
+/// passphrase against the existing space and mint a session.
+async fn sso_unlock(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    jar: CookieJar,
+    Json(req): Json<SsoUnlockRequest>,
+) -> AppResult<impl IntoResponse> {
+    let claims = require_sso(&state, &jar)?;
+    let uuid = sso_user_uuid(&claims)?;
+
+    if req.passphrase.len() > MAX_PASSPHRASE_LEN {
+        return Err(AppError::WrongPassphrase);
+    }
+    let space = state.space_for(&uuid).map_err(|e| match e {
+        // No space yet — the browser should provision instead of unlocking.
+        AppError::NotFound => AppError::WrongPassphrase,
+        other => other,
+    })?;
+    verify_passphrase(&space, &req.passphrase).await?;
+
+    let id = state
+        .sessions
+        .create(age::secrecy::SecretString::from(req.passphrase), uuid);
+    let jar = jar.add(session_cookie(&state, &headers, id.to_string()));
+    let resp_headers = headers_from_jar(&jar);
+    Ok((StatusCode::NO_CONTENT, resp_headers))
+}
+
 #[derive(Deserialize)]
 struct InitRequest {
     email: String,
@@ -318,6 +491,23 @@ async fn unlock(
         AppError::NotFound => AppError::WrongPassphrase,
         other => other,
     })?;
+    verify_passphrase(&space, &req.passphrase).await?;
+
+    state.unlock_limiter.clear(remote.ip());
+
+    let id = state
+        .sessions
+        .create(age::secrecy::SecretString::from(req.passphrase), entry.uuid);
+    let jar = jar.add(session_cookie(&state, &headers, id.to_string()));
+    let resp_headers = headers_from_jar(&jar);
+    Ok((StatusCode::NO_CONTENT, resp_headers))
+}
+
+/// Verify a passphrase against a space's stored scrypt verifier. CPU-bound, so
+/// the KDF runs on the blocking pool. Returns `WrongPassphrase` on mismatch and
+/// `Internal` only if the stored config is corrupt. Shared by the email/password
+/// `unlock` and the SSO `sso_unlock` paths.
+async fn verify_passphrase(space: &Space, passphrase: &str) -> AppResult<()> {
     let cfg = space.config();
     let salt = hex::decode(&cfg.salt_verify_hex)
         .map_err(|_| AppError::Internal("bad salt hex in config".into()))?;
@@ -327,7 +517,7 @@ async fn unlock(
         return Err(AppError::Internal("verifier length mismatch".into()));
     }
 
-    let passphrase_for_kdf = req.passphrase.clone();
+    let passphrase_for_kdf = passphrase.to_string();
     let log_n = cfg.kdf_log_n;
     let r = cfg.kdf_r;
     let p = cfg.kdf_p;
@@ -339,15 +529,7 @@ async fn unlock(
     if !kdf::verify(&derived, &expected_arr) {
         return Err(AppError::WrongPassphrase);
     }
-
-    state.unlock_limiter.clear(remote.ip());
-
-    let id = state
-        .sessions
-        .create(age::secrecy::SecretString::from(req.passphrase), entry.uuid);
-    let jar = jar.add(session_cookie(&state, &headers, id.to_string()));
-    let resp_headers = headers_from_jar(&jar);
-    Ok((StatusCode::NO_CONTENT, resp_headers))
+    Ok(())
 }
 
 /// Drop the session and clear its cookie. The cleared cookie is built through

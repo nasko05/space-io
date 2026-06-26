@@ -24,6 +24,20 @@ export interface SsoStatus {
   sub: string | null;
 }
 
+export interface SsoSpaceStatus {
+  /** A space already exists for the signed-in drive user. */
+  exists: boolean;
+  /** Passkey-wrap material for that space (null until provisioned). */
+  passkey: PasskeyInfo | null;
+}
+
+export interface SsoProvisionPayload {
+  passphrase: string;
+  credential_id_b64: string;
+  prf_salt_b64: string;
+  wrapped_passphrase_b64: string;
+}
+
 export interface PasskeyInfo {
   credential_id_b64: string;
   prf_salt_b64: string;
@@ -174,6 +188,20 @@ export const api = {
    *  they are. Used to surface "signed in via Drive" and prefill the email. */
   async sso(): Promise<SsoStatus> {
     return requestJson('/api/auth/sso');
+  },
+  /** Whether the signed-in drive user already has a space, and (if so) its
+   *  passkey-unlock material. Drives the provision-vs-unlock choice. */
+  async ssoSpace(): Promise<SsoSpaceStatus> {
+    return requestJson('/api/auth/sso/space');
+  },
+  /** First-entry: create the encrypted space for the signed-in drive user and
+   *  store the passkey-wrap material. Establishes the editor session. */
+  async ssoProvision(payload: SsoProvisionPayload): Promise<void> {
+    await sendJson('POST', '/api/auth/sso/provision', payload);
+  },
+  /** Return visit: unlock the existing space with the PRF-recovered passphrase. */
+  async ssoUnlock(passphrase: string): Promise<void> {
+    await sendJson('POST', '/api/auth/sso/unlock', { passphrase });
   },
   async unlock(email: string, passphrase: string): Promise<void> {
     await sendJson('POST', '/api/auth/unlock', { email, passphrase });
