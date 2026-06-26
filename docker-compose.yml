@@ -1,25 +1,63 @@
-# Recommended CI/CD deploy path for Hearth.
+# Production compose for SpaceIO · Hearth — co-hosted on the same VPS as the
+# sibling cloud-storage app behind ONE shared Caddy that already owns 80/443.
 #
 #   docker compose up -d --build
 #
-# This rebuilds the image from the current source and (re)creates the
-# container, while the named volume 'hearth-data' keeps every user's files,
-# notes, and bookmarks. Data lives under /data inside the container and
-# survives image rebuilds and container recreation; the app never overwrites
-# existing data on startup (init_space only creates what's missing).
+# This rebuilds the image and (re)creates the container while the named volume
+# 'hearth-data' keeps every user's notes, documents, and uploads. Data lives at
+# /data inside the container and survives image rebuilds and container
+# recreation; the app never overwrites existing data on startup.
+#
+# Collision-avoidance with the sibling app on this host is deliberate:
+#   - unique project name (`name: hearth`) and a unique volume (`hearth-data`),
+#   - the app binds ONLY to loopback (127.0.0.1:8001) — the sibling uses 8000 —
+#     and NEVER publishes 80/443; the shared Caddy reaches it over the external
+#     `web` network by container name (`hearth:7777`),
+#   - so nothing here touches the sibling's ports, volumes, or the TLS listener.
+#
+# Runtime config comes from ~/space-io/.env, which the deploy workflow renders
+# entirely from GitHub Secrets + Variables (compose auto-loads it for the
+# ${VAR:-default} interpolation below). Do NOT hand-edit it on the server.
+name: hearth
+
 services:
   hearth:
     build: .
     image: hearth
     container_name: hearth
-    ports:
-      - "7777:7777"
+    restart: unless-stopped
+    # Per-container resolvers so the AI agent's outbound HTTPS (OpenRouter/Brave)
+    # resolves even if a host stub resolver leaks into the container. Mirrors the
+    # sibling app and the documented /etc/docker/daemon.json fix.
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+    environment:
+      # All optional. With no key set, the in-app AI assistant stays hidden and
+      # nothing leaves the machine. No HEARTH_INSECURE_COOKIES: behind the TLS
+      # proxy the app must mark cookies Secure (it keys off X-Forwarded-Proto).
+      HEARTH_OPENROUTER_API_KEY: ${HEARTH_OPENROUTER_API_KEY:-}
+      HEARTH_BRAVE_API_KEY: ${HEARTH_BRAVE_API_KEY:-}
+      HEARTH_AGENT_MODEL: ${HEARTH_AGENT_MODEL:-qwen/qwen3.6-27b}
+      HEARTH_AGENT_WEB_SEARCH: ${HEARTH_AGENT_WEB_SEARCH:-1}
+      HEARTH_AGENT_MAX_STEPS: ${HEARTH_AGENT_MAX_STEPS:-8}
     volumes:
       - hearth-data:/data
-    restart: unless-stopped
-    # For local HTTP testing (no TLS), allow non-secure cookies:
-    # environment:
-    #   - HEARTH_INSECURE_COOKIES=1
+    # Loopback only: lets the deploy poll http://127.0.0.1:8001/healthz over SSH
+    # without exposing the app publicly. Public traffic arrives via the proxy.
+    ports:
+      - "127.0.0.1:${HEARTH_PORT:-8001}:7777"
+    networks:
+      - web
+
+# Shared, externally-managed network that the existing Caddy also joins, so the
+# proxy can reach `hearth:7777` by name. Created once on the host:
+#   docker network create web
+# (and the sibling app's `caddy` service must be attached to it — see
+# DEPLOYMENT.md). Marked external so this stack never tries to own/delete it.
+networks:
+  web:
+    external: true
 
 volumes:
   hearth-data: {}
