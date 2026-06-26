@@ -68,3 +68,41 @@ jobs:
 
       - name: cargo test (integration)
         run: cargo test --test integration
+
+  # Build the production image and prove the container actually boots and serves
+  # /healthz through the same compose file that ships to the VPS. Catches
+  # Dockerfile/compose regressions (bad base tag, non-root perms on /data, a
+  # broken probe) that the cargo/npm jobs above can't see.
+  docker-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create the shared external network
+        # In production this is created once on the host and the sibling app's
+        # Caddy joins it; CI just needs it to exist so the external network
+        # reference resolves. Idempotent so a re-run can't fail here.
+        run: docker network create web 2>/dev/null || true
+
+      - name: Build and start the stack
+        run: docker compose up -d --build
+
+      - name: Wait for the app to report healthy
+        run: |
+          set -euo pipefail
+          ok=""
+          for _ in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8001/healthz >/dev/null 2>&1; then ok=1; break; fi
+            sleep 5
+          done
+          if [ -z "$ok" ]; then
+            echo "::error::Container did not become healthy"
+            docker compose ps
+            docker compose logs --tail=120
+            exit 1
+          fi
+          echo "Health check passed."
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v

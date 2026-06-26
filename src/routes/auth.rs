@@ -17,7 +17,7 @@ use crate::space::users::{normalise_email, UsersRegistry};
 use crate::space::Space;
 use crate::state::AppState;
 
-pub const SESSION_COOKIE: &str = "hearth_session";
+pub const SESSION_COOKIE: &str = "spaceio_session";
 
 /// Smallest passphrase accepted on `/auth/init`, re-checked server-side so a
 /// CLI bypass can't register a trivially crackable space. New registrations

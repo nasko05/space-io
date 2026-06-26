@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
-import { HearthShell } from '../Shell/HearthShell';
-import { HearthRail } from '../Rail/HearthRail';
+import { SpaceShell } from '../Shell/SpaceShell';
+import { SpaceRail } from '../Rail/SpaceRail';
 import { Chevron, Download as DownloadIcon, Folder } from '../icons/Icon';
 import { api, TreeFile } from '../../api/client';
 import { CalendarView, TodayEntry } from '../../lib/calendar';
@@ -91,14 +91,14 @@ export function Preview({
   const folderSegments = segments.slice(0, -1);
 
   return (
-    <HearthShell
+    <SpaceShell
       mode={kindLabel(file.kind)}
       onLock={onLock}
       theme={theme}
       onToggleTheme={onToggleTheme}
     >
       <div className={styles.layout}>
-        <HearthRail
+        <SpaceRail
           calendar={calendar}
           entries={entries}
           entriesLabel={entriesLabel}
@@ -161,7 +161,7 @@ export function Preview({
           </div>
         </main>
       </div>
-    </HearthShell>
+    </SpaceShell>
   );
 }
 

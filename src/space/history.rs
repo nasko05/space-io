@@ -137,7 +137,7 @@ mod tests {
         let (_dir, space, pass) = make_space("p");
         write::write_file(&space, &pass, "n.md", "x", None).unwrap();
         let history = file_history(&space, "n.md").unwrap();
-        assert_eq!(history[0].author, "hearth");
+        assert_eq!(history[0].author, "space-io");
         assert!(history[0].when.contains('T'));
         assert_eq!(history[0].commit.len(), 40, "git oid is 40 hex chars");
     }

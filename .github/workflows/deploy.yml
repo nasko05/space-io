@@ -1,0 +1,127 @@
+name: Deploy
+
+# Fully automated continuous deployment to the shared Contabo VPS. Mirrors the
+# sibling cloud-storage app's deploy so day-2 ops are identical across both.
+#
+# Trigger: runs ONLY after the CI workflow finishes successfully on `main`, so a
+# red build never reaches the server. The job then, with zero manual steps:
+#   1. packs runtime config from GitHub Secrets + Variables (the single source of
+#      truth) into one base64 line — there is NO server-side .env file,
+#   2. SSHes in, syncs `main`, and pipes that config over the encrypted SSH stdin
+#      (never written to disk, never in argv) to scripts/remote-deploy.sh,
+#   3. which exports it into the `docker compose up` shell — anything unset falls
+#      back to the ${VAR:-default} defaults baked into docker-compose.yml —
+#      rebuilds the container, and
+#   4. verifies /healthz before declaring success — a bad deploy fails loudly
+#      and the previous container keeps serving.
+# All persistent state lives on the `space-io-data` named volume, so redeploys
+# never touch user notes, documents, or uploads.
+#
+# ---- Configuration lives entirely in GitHub (Settings -> Secrets and
+#      variables -> Actions). No manual editing of files on the server. ----
+#
+# Required SECRETS (deploy access; SHARED with the sibling app — same VPS, same
+# `deploy` user, same keypair):
+#   DEPLOY_HOST     - VPS IPv4 address (GitHub runners have NO IPv6 route, so an
+#                     IPv6 here will hang/fail — use the IPv4)
+#   DEPLOY_USER     - the deploy user on the VPS (e.g. deploy)
+#   DEPLOY_SSH_KEY  - PRIVATE key whose public half is in the deploy user's
+#                     ~/.ssh/authorized_keys on the VPS
+#
+# Optional SECRETS (sensitive; leave unset to keep the AI assistant off and
+# nothing leaving the box):
+#   SPACEIO_OPENROUTER_API_KEY - turns the in-app AI assistant on
+#   SPACEIO_BRAVE_API_KEY      - direct Brave web search (else OpenRouter's plugin)
+#
+# Optional VARIABLES (non-sensitive; edit in the UI, then re-run). Set one to
+# override; the default for each lives in docker-compose.yml (${VAR:-default}),
+# the single source of truth:
+#   SPACEIO_AGENT_MODEL       (compose default: qwen/qwen3.6-27b)
+#   SPACEIO_AGENT_WEB_SEARCH  (compose default: 1)
+#   SPACEIO_AGENT_MAX_STEPS   (compose default: 8)
+#
+# The public domain is NOT an app setting — it lives in the sibling Caddy's site
+# block (see DEPLOYMENT.md). See DEPLOYMENT.md for the one-time server setup.
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+
+# Never run two deploys at once; let an in-flight deploy finish.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    # Only deploy when the CI run we are chaining off actually passed.
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy over SSH
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          # --- Runtime config injected over SSH at deploy time (no server .env) ---
+          # Secrets (sensitive; optional — empty means the agent stays off):
+          SPACEIO_OPENROUTER_API_KEY: ${{ secrets.SPACEIO_OPENROUTER_API_KEY }}
+          SPACEIO_BRAVE_API_KEY: ${{ secrets.SPACEIO_BRAVE_API_KEY }}
+          # Variables (non-sensitive). Deliberately NO `|| default` here: an unset
+          # Variable is passed through empty, and docker-compose.yml's
+          # ${VAR:-default} supplies the value — one source of truth for defaults
+          # (also what a plain local `docker compose up` uses). Set a Variable to
+          # override. (The public domain isn't an app setting — it lives in the
+          # sibling Caddy's site block; see DEPLOYMENT.md.)
+          SPACEIO_AGENT_MODEL: ${{ vars.SPACEIO_AGENT_MODEL }}
+          SPACEIO_AGENT_WEB_SEARCH: ${{ vars.SPACEIO_AGENT_WEB_SEARCH }}
+          SPACEIO_AGENT_MAX_STEPS: ${{ vars.SPACEIO_AGENT_MAX_STEPS }}
+        run: |
+          set -euo pipefail
+
+          # Guard: abort BEFORE connecting if deploy access is missing.
+          if [ -z "${DEPLOY_HOST}" ] || [ -z "${DEPLOY_USER}" ] || [ -z "${DEPLOY_SSH_KEY}" ]; then
+            echo "::error::Set DEPLOY_HOST, DEPLOY_USER, and DEPLOY_SSH_KEY as repository secrets."
+            exit 1
+          fi
+
+          mkdir -p ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          # Trust the host on first contact (TOFU). For stronger security, pin the
+          # VPS host key in a secret and write it to known_hosts instead.
+          ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+
+          # Pack the runtime config (Secrets + Variables above) into ONE base64
+          # line. There is NO server-side .env: this is sent over the encrypted
+          # SSH stdin (never argv, never disk) and exported only into the shell
+          # that runs `docker compose up`, which interpolates it. Anything not set
+          # here falls back to the ${VAR:-default} defaults in docker-compose.yml.
+          # No SPACEIO_INSECURE_COOKIES: production must keep cookies Secure.
+          env_b64="$(
+            {
+              printf 'SPACEIO_OPENROUTER_API_KEY=%s\n' "$SPACEIO_OPENROUTER_API_KEY"
+              printf 'SPACEIO_BRAVE_API_KEY=%s\n'      "$SPACEIO_BRAVE_API_KEY"
+              printf 'SPACEIO_AGENT_MODEL=%s\n'        "$SPACEIO_AGENT_MODEL"
+              printf 'SPACEIO_AGENT_WEB_SEARCH=%s\n'   "$SPACEIO_AGENT_WEB_SEARCH"
+              printf 'SPACEIO_AGENT_MAX_STEPS=%s\n'    "$SPACEIO_AGENT_MAX_STEPS"
+            } | base64 -w0
+          )"
+
+          # One SSH: sync the repo to origin/main (which brings the latest
+          # scripts/remote-deploy.sh), purge any legacy .env, ensure the shared
+          # proxy network exists, then hand off to the committed deploy script
+          # with the packed config on its stdin. The inline command carries no
+          # secrets, so it is safe in argv; the secrets ride stdin only.
+          printf '%s\n' "$env_b64" | ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes \
+            "$DEPLOY_USER@$DEPLOY_HOST" '
+              set -euo pipefail
+              cd ~/space-io
+              rm -f .env .env.new
+              docker network create web 2>/dev/null || true
+              git fetch origin main
+              git reset --hard origin/main
+              exec bash scripts/remote-deploy.sh
+            '

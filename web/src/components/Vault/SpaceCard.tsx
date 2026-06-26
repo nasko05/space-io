@@ -8,7 +8,7 @@ import {
 import { FileText, FilePdf, FileDocx, Image as ImageIcon, Video, Play } from '../icons/Icon';
 import { ExcerptItem, TreeFile } from '../../api/client';
 import { formatSize } from '../../lib/format';
-import styles from './HearthCard.module.css';
+import styles from './SpaceCard.module.css';
 
 interface Props {
   file: TreeFile;
@@ -20,9 +20,9 @@ interface Props {
   onToggleSelect?: (file: TreeFile, mods: { shift?: boolean; cmd?: boolean }) => void;
 }
 
-const DRAG_MIME = 'application/x-hearth-path';
+const DRAG_MIME = 'application/x-space-io-path';
 
-function HearthCardImpl({
+function SpaceCardImpl({
   file,
   excerpt,
   tags,
@@ -179,7 +179,7 @@ function HearthCardImpl({
 /** Memoized so a selection toggle or drag highlight re-renders only the affected
  *  card, not every visible card in the vault. Callers must keep its callback
  *  props referentially stable for the memo to hold. */
-export const HearthCard = memo(HearthCardImpl);
+export const SpaceCard = memo(SpaceCardImpl);
 
 interface SurfaceProps {
   className: string;

@@ -264,7 +264,7 @@
   width: 2px;
   height: 0.9em;
   background: var(--accent);
-  animation: hearthBlink 1s steps(2) infinite;
+  animation: spaceBlink 1s steps(2) infinite;
 }
 
 .prompts {

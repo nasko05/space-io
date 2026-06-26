@@ -24,7 +24,7 @@ async fn five_hundred_responses_carry_a_generic_message() {
     let blob = age::secrecy::SecretString::from("passphrase-9".to_string());
     let non_utf8_byte_that_yields_internal_error = [0xff];
     let cipher =
-        hearth::crypto::age_io::encrypt_bytes(&non_utf8_byte_that_yields_internal_error, &blob)
+        space_io::crypto::age_io::encrypt_bytes(&non_utf8_byte_that_yields_internal_error, &blob)
             .unwrap();
     std::fs::write(u.user_dir.join("space/x/n.md.age"), cipher).unwrap();
 

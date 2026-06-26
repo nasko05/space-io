@@ -70,7 +70,7 @@ where
     let tree = repo
         .find_tree(tree_oid)
         .map_err(|e| AppError::Internal(format!("git find_tree: {e}")))?;
-    let sig = git2::Signature::now("hearth", "hearth@local")
+    let sig = git2::Signature::now("space-io", "space-io@local")
         .map_err(|e| AppError::Internal(format!("git signature: {e}")))?;
     let parents: Vec<git2::Commit> = match repo.head() {
         Ok(head) => match head.peel_to_commit() {
@@ -150,8 +150,8 @@ mod tests {
         std::fs::write(dir.path().join("x"), b"x").unwrap();
         commit_all(&repo, "msg").unwrap();
         let head = repo.head().unwrap().peel_to_commit().unwrap();
-        assert_eq!(head.author().name(), Some("hearth"));
-        assert_eq!(head.author().email(), Some("hearth@local"));
+        assert_eq!(head.author().name(), Some("space-io"));
+        assert_eq!(head.author().email(), Some("space-io@local"));
         assert_eq!(head.message().unwrap().trim(), "msg");
     }
 

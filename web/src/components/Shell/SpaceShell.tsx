@@ -1,7 +1,7 @@
 import { ReactNode } from 'react';
 import { WindowChrome } from '../WindowChrome/WindowChrome';
 import { Moon, Sun } from '../icons/Icon';
-import styles from './HearthShell.module.css';
+import styles from './SpaceShell.module.css';
 
 interface Props {
   children: ReactNode;
@@ -11,7 +11,7 @@ interface Props {
   onToggleTheme?: () => void;
 }
 
-export function HearthShell({
+export function SpaceShell({
   children,
   mode = 'reading',
   theme = 'light',

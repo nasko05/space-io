@@ -12,5 +12,7 @@ mod auth;
 mod common;
 #[path = "integration/files.rs"]
 mod files;
+#[path = "integration/health.rs"]
+mod health;
 #[path = "integration/security.rs"]
 mod security;

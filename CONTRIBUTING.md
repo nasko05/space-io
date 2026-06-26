@@ -1,6 +1,6 @@
-# Contributing to SpaceIO Hearth
+# Contributing to SpaceIO SpaceIO
 
-Thanks for opening the project. Hearth is meant to be self-hosted — the
+Thanks for opening the project. SpaceIO is meant to be self-hosted — the
 expectation is that the person running it is also the person modifying
 it. This file is short because most contributing patterns flow out of
 that.
@@ -41,7 +41,7 @@ cargo run -- serve --space-dir ./data --listen 127.0.0.1:7777
 ## Running locally
 
 ```sh
-./target/release/hearth serve --space-dir ./data       # open http://127.0.0.1:7777
+./target/release/space-io serve --space-dir ./data       # open http://127.0.0.1:7777
 ```
 
 The first visit shows a "Make your space" registration page; pick an

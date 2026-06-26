@@ -1,6 +1,7 @@
 pub mod agent;
 pub mod auth;
 pub mod files;
+pub mod health;
 pub mod search;
 pub mod static_files;
 
@@ -31,6 +32,7 @@ pub fn build_router(state: AppState) -> Router {
         .with_state(state);
 
     Router::new()
+        .merge(health::router())
         .nest("/api", api)
         .fallback(static_files::handler)
 }

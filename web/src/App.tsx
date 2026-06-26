@@ -2,7 +2,7 @@ import { DragEvent, useCallback, useEffect, useMemo, useRef, useState } from 're
 import { Auth } from './components/Auth/Auth';
 import { Registration } from './components/Registration/Registration';
 import { Reader } from './components/Reader/Reader';
-import { HearthVault } from './components/Vault/HearthVault';
+import { SpaceVault } from './components/Vault/SpaceVault';
 import { Preview } from './components/Preview/Preview';
 import { SearchOverlay } from './components/Search/SearchOverlay';
 import { UploadModal } from './components/Upload/UploadModal';
@@ -58,14 +58,14 @@ export function App() {
   const [toast, setToast] = useState<string | null>(null);
   const [selectedDay, setSelectedDay] = useState<number | null>(null);
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
-    const stored = typeof window !== 'undefined' ? window.localStorage.getItem('hearth.theme') : null;
+    const stored = typeof window !== 'undefined' ? window.localStorage.getItem('space-io.theme') : null;
     return stored === 'dark' ? 'dark' : 'light';
   });
 
   useEffect(() => {
     if (typeof document === 'undefined') { return; }
     document.documentElement.dataset.theme = theme;
-    window.localStorage.setItem('hearth.theme', theme);
+    window.localStorage.setItem('space-io.theme', theme);
   }, [theme]);
 
   const toggleTheme = useCallback(() => {
@@ -692,7 +692,7 @@ export function App() {
         />
       )}
       {surface.kind === 'vault' && (
-        <HearthVault
+        <SpaceVault
           tree={tree}
           excerpts={excerpts}
           meta={meta}
@@ -779,17 +779,17 @@ export function App() {
       />
 
       {dragOverlay && (
-        <div className="hearthDragOverlay">
-          <div className="hearthDragOverlayInner">
-            <div className="hearthDragOverlayIcon">↓</div>
-            <div className="hearthDragOverlayTitle">Drop files anywhere</div>
-            <div className="hearthDragOverlaySub">They'll be encrypted before they hit disk.</div>
+        <div className="spaceDragOverlay">
+          <div className="spaceDragOverlayInner">
+            <div className="spaceDragOverlayIcon">↓</div>
+            <div className="spaceDragOverlayTitle">Drop files anywhere</div>
+            <div className="spaceDragOverlaySub">They'll be encrypted before they hit disk.</div>
           </div>
         </div>
       )}
 
       {toast && (
-        <div className="hearthToast" role="status">
+        <div className="spaceToast" role="status">
           {toast}
         </div>
       )}
@@ -797,7 +797,7 @@ export function App() {
       {!agentOpen && (
         <button
           type="button"
-          className="hearthAgentFab"
+          className="spaceAgentFab"
           onClick={() => setAgentOpen(true)}
           title="Assistant"
           aria-label="Open the assistant"

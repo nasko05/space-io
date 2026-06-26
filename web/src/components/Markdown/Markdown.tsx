@@ -8,7 +8,7 @@ interface Props {
 }
 
 /**
- * Renders markdown with the Hearth typography. Wikilink clicks walk up a few
+ * Renders markdown with the SpaceIO typography. Wikilink clicks walk up a few
  * ancestors so a click landing on a child of the `.wikilink` anchor still
  * resolves to the link.
  */

@@ -15,7 +15,7 @@ use crate::space::Space;
 #[derive(Clone, Debug)]
 pub struct AppConfig {
     /// Operator-level gate for marking the session cookie `Secure`. Defaults to
-    /// `true`; opt out with `HEARTH_INSECURE_COOKIES=1` for plain-HTTP dev. The
+    /// `true`; opt out with `SPACEIO_INSECURE_COOKIES=1` for plain-HTTP dev. The
     /// cookie is only actually `Secure` when this is set *and* the request
     /// arrived over HTTPS — browsers drop a `Secure` cookie over plain HTTP.
     pub cookie_secure: bool,
@@ -23,7 +23,7 @@ pub struct AppConfig {
 
 impl AppConfig {
     pub fn from_env() -> Self {
-        let insecure = std::env::var("HEARTH_INSECURE_COOKIES")
+        let insecure = std::env::var("SPACEIO_INSECURE_COOKIES")
             .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
             .unwrap_or(false);
         Self {

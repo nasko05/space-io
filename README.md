@@ -1,28 +1,39 @@
-# SpaceIO · Hearth
+# SpaceIO
 
 A self-hosted personal repository — a private corner of the internet for notes,
-documents, photos, and small videos. Hearth is the calm literary direction:
+documents, photos, and small videos. SpaceIO is the calm literary direction:
 single-column journal, warm paper tones, big Fraunces serif.
 
 ## Status
 
 **Phase 1: vertical slice.** Boot the binary → enter passphrase → see one real
-encrypted note rendered in Hearth typography. Phase 2+ adds the rest of the
+encrypted note rendered in SpaceIO typography. Phase 2+ adds the rest of the
 six screens, search, upload/download, version history, and WebAuthn.
 
 ## Deploy (anywhere)
 
 ### Recommended: Docker Compose (CI/CD)
 
-The simplest durable deploy is [`docker-compose.yml`](./docker-compose.yml):
+[`docker-compose.yml`](./docker-compose.yml) is the **production** path: SpaceIO
+is co-hosted behind a shared, containerized Caddy that already owns 80/443, so
+the app publishes **no** public port — Caddy reaches it over an external `web`
+network by name. Full setup (DNS, GitHub Secrets/Variables, the shared-proxy
+wiring, backups) is in [`DEPLOYMENT.md`](./DEPLOYMENT.md); deploys are automated
+via GitHub Actions on merge to `main`.
 
 ```sh
+docker network create web        # once: the shared proxy network
 docker compose up -d --build
 ```
 
 This rebuilds the image from the current source and recreates the container,
-while the named volume `hearth-data` keeps every user's notes, documents, and
-uploads. Re-run the same command to ship new code — your data is reused.
+while the named volume `space-io-data` keeps every user's notes, documents, and
+uploads. The app binds only `127.0.0.1:8001` (for health checks); public traffic
+arrives through the shared Caddy. Re-run the same command to ship new code — your
+data is reused.
+
+For a quick **local** run with no proxy, prefer [`./deploy.sh`](#one-script-deploysh)
+below — it uses `docker run` directly and needs no `web` network.
 
 ### One script: `deploy.sh`
 
@@ -38,7 +49,7 @@ and runs a container; otherwise it builds natively (needs Rust + Node). Force
 a path with `--docker` or `--native`. Useful flags:
 
 ```sh
-./deploy.sh --data /srv/hearth     # persist to a host directory (bind mount)
+./deploy.sh --data /srv/space-io     # persist to a host directory (bind mount)
 ./deploy.sh --port 8080            # custom port
 ./deploy.sh --docker --detach      # background container
 ./deploy.sh --build-only           # build, don't run
@@ -46,7 +57,7 @@ a path with `--docker` or `--native`. Useful flags:
 ```
 
 For anything reachable off-localhost, front it with TLS (Caddy, nginx, or a
-Cloudflare Tunnel) and pass `--secure-cookies` — Hearth itself speaks plain
+Cloudflare Tunnel) and pass `--secure-cookies` — SpaceIO itself speaks plain
 HTTP and is single-tenant by design.
 
 ### Data persistence
@@ -54,7 +65,7 @@ HTTP and is single-tenant by design.
 User data is **never lost on redeploy**:
 
 - **It lives in a persistent volume.** By default that's the Docker named volume
-  `hearth-data` (used by both `docker compose` and `./deploy.sh`). Pass
+  `space-io-data` (used by both `docker compose` and `./deploy.sh`). Pass
   `./deploy.sh --data /abs/path` to use a host directory (bind mount) instead.
   Either way it's mounted at `/data` inside the container.
 - **It survives image rebuilds and container recreation.** Redeploying
@@ -76,7 +87,7 @@ cd web && npm install && npm run build && cd ..
 cargo build --release
 
 # Start the server. The data dir is created on demand; no init step needed.
-./target/release/hearth serve --space-dir ./data --listen 127.0.0.1:7777
+./target/release/space-io serve --space-dir ./data --listen 127.0.0.1:7777
 ```
 
 Open `http://127.0.0.1:7777/` and the first visit lands on a
@@ -88,7 +99,7 @@ link.
 
 ## AI assistant
 
-Hearth ships an optional in-app AI assistant (the spark button, bottom-right).
+SpaceIO ships an optional in-app AI assistant (the spark button, bottom-right).
 It can **read, search, write, move, reorganise, and tag** your notes, and —
 when enabled — **search the web**. It runs as a server-side tool-using agent
 against an [OpenRouter](https://openrouter.ai)-compatible chat model.
@@ -108,24 +119,24 @@ Two things are deliberate:
 Enable it by setting an API key in the server's environment, then restart:
 
 ```sh
-export HEARTH_OPENROUTER_API_KEY=sk-or-...     # required to turn the agent on
-./target/release/hearth serve --space-dir ./data
+export SPACEIO_OPENROUTER_API_KEY=sk-or-...     # required to turn the agent on
+./target/release/space-io serve --space-dir ./data
 ```
 
 All agent settings (server-side environment variables):
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `HEARTH_OPENROUTER_API_KEY` | _(unset → agent off)_ | OpenRouter API key. |
-| `HEARTH_AGENT_MODEL` | `qwen/qwen3.6-27b` | Any tool-calling model id on OpenRouter. |
-| `HEARTH_OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` | Point at any OpenAI-compatible endpoint. |
-| `HEARTH_BRAVE_API_KEY` | _(unset)_ | If set, web search uses Brave; otherwise OpenRouter's built-in web plugin. |
-| `HEARTH_AGENT_WEB_SEARCH` | `1` | Set to `0` to disable web search entirely. |
-| `HEARTH_AGENT_MAX_STEPS` | `8` | Max tool rounds the agent runs per message. |
+| `SPACEIO_OPENROUTER_API_KEY` | _(unset → agent off)_ | OpenRouter API key. |
+| `SPACEIO_AGENT_MODEL` | `qwen/qwen3.6-27b` | Any tool-calling model id on OpenRouter. |
+| `SPACEIO_OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` | Point at any OpenAI-compatible endpoint. |
+| `SPACEIO_BRAVE_API_KEY` | _(unset)_ | If set, web search uses Brave; otherwise OpenRouter's built-in web plugin. |
+| `SPACEIO_AGENT_WEB_SEARCH` | `1` | Set to `0` to disable web search entirely. |
+| `SPACEIO_AGENT_MAX_STEPS` | `8` | Max tool rounds the agent runs per message. |
 
 About web search: the Qwen model itself doesn't browse, but OpenRouter adds web
 search to *any* model via its built-in `web` plugin — so search works out of
-the box with just the OpenRouter key. Set `HEARTH_BRAVE_API_KEY` if you'd
+the box with just the OpenRouter key. Set `SPACEIO_BRAVE_API_KEY` if you'd
 rather the agent call Brave directly with your own key.
 
 ### Using a `.env` file
@@ -140,11 +151,11 @@ cp .env.example .env        # then edit .env and fill in your key
 ./deploy.sh                 # auto-loads ./.env
 ```
 
-Point elsewhere with `./deploy.sh --env-file /etc/hearth.env`, or ignore the
+Point elsewhere with `./deploy.sh --env-file /etc/space-io.env`, or ignore the
 file with `--no-env`. Running `docker run` yourself? Use the same file:
 
 ```sh
-docker run --env-file .env -p 7777:7777 -v hearth-data:/data hearth
+docker run --env-file .env -p 7777:7777 -v space-io-data:/data space-io
 ```
 
 Write plain `KEY=value` lines with **no quotes** (Docker's `--env-file` keeps
