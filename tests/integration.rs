@@ -14,5 +14,7 @@ mod common;
 mod files;
 #[path = "integration/health.rs"]
 mod health;
+#[path = "integration/persistence.rs"]
+mod persistence;
 #[path = "integration/security.rs"]
 mod security;
