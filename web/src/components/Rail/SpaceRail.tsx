@@ -3,6 +3,11 @@ import { Close, FolderOpen, HardDrive, Pencil } from '../icons/Icon';
 import { CalendarView, TodayEntry } from '../../lib/calendar';
 import styles from './SpaceRail.module.css';
 
+/** Full URL of the co-hosted cloud drive. When set, a "Cloud drive" link
+ *  appears in the rail; the shared SSO cookie keeps the session across the jump.
+ *  Empty (the default) hides it, so the editor still works standalone. */
+const DRIVE_URL = (import.meta.env.VITE_DRIVE_URL as string | undefined) ?? '';
+
 interface Props {
   calendar: CalendarView;
   entries: TodayEntry[];
@@ -70,6 +75,11 @@ function SpaceRailImpl({
         >
           <FolderOpen size={13} /> My space
         </button>
+        {DRIVE_URL && (
+          <a className={styles.driveLink} href={DRIVE_URL} title="Open the cloud drive">
+            <HardDrive size={13} /> Cloud drive
+          </a>
+        )}
       </div>
 
       <div>

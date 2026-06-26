@@ -10,6 +10,7 @@ use crate::space::rate_limit::RateLimiter;
 use crate::space::session::SessionStore;
 use crate::space::users::UsersRegistry;
 use crate::space::Space;
+use crate::sso::SsoConfig;
 
 /// Runtime configuration sourced from the environment, shared by every handler.
 #[derive(Clone, Debug)]
@@ -49,6 +50,10 @@ pub struct AppState {
     /// Holds provider API keys, so it lives behind an `Arc` and never derives
     /// `Debug`.
     pub agent: Arc<AgentConfig>,
+    /// Verifier for the cloud-drive single sign-on cookie. Holds the shared
+    /// secret, so — like `agent` — it lives behind an `Arc` and never derives
+    /// `Debug`.
+    pub sso: Arc<SsoConfig>,
 }
 
 impl AppState {
@@ -67,6 +72,7 @@ impl AppState {
             unlock_limiter,
             config,
             agent: Arc::new(AgentConfig::from_env()),
+            sso: Arc::new(SsoConfig::from_env()),
         })
     }
 

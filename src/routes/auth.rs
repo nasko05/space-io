@@ -33,6 +33,7 @@ const MAX_OWNER_LEN: usize = 200;
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/auth/status", get(status))
+        .route("/auth/sso", get(sso))
         .route("/auth/init", post(init))
         .route("/auth/unlock", post(unlock))
         .route("/auth/lock", post(lock))
@@ -142,6 +143,38 @@ async fn status(State(state): State<AppState>, jar: CookieJar) -> Json<StatusRes
         email,
         has_passkey: cfg.passkey.is_some(),
     })
+}
+
+#[derive(Serialize)]
+struct SsoResponse {
+    /// A valid cloud-drive SSO cookie is present.
+    signed_in: bool,
+    /// Email carried by the SSO token (informational; the drive includes it).
+    email: Option<String>,
+    /// The drive's stable user id, used later to bind a space to this account.
+    sub: Option<String>,
+}
+
+/// Report whether the visitor arrived with a valid cloud-drive SSO cookie, and
+/// who they are. Drives the editor's "signed in via Drive" affordance and, in a
+/// later phase, the passkey-derived unlock. Unauthenticated by design — it only
+/// reflects the token the browser already holds.
+async fn sso(State(state): State<AppState>, jar: CookieJar) -> Json<SsoResponse> {
+    match jar
+        .get(&state.sso.cookie_name)
+        .and_then(|c| state.sso.verify_token(c.value()))
+    {
+        Some(claims) => Json(SsoResponse {
+            signed_in: true,
+            email: claims.email,
+            sub: Some(claims.sub),
+        }),
+        None => Json(SsoResponse {
+            signed_in: false,
+            email: None,
+            sub: None,
+        }),
+    }
 }
 
 #[derive(Deserialize)]

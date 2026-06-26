@@ -216,6 +216,25 @@
   color: var(--ink);
 }
 
+.driveBack {
+  display: block;
+  width: 100%;
+  margin-top: 10px;
+  text-align: center;
+  text-decoration: none;
+  background: transparent;
+  color: var(--mute);
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: 13px;
+  padding: 6px;
+  transition: color 0.12s;
+}
+
+.driveBack:hover {
+  color: var(--accent);
+}
+
 .passWrap {
   display: flex;
   align-items: center;
