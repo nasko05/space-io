@@ -62,7 +62,13 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt, clippy
+          # llvm-tools-preview backs the coverage instrumentation below.
+          components: rustfmt, clippy, llvm-tools-preview
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
 
       - name: Cache cargo
         uses: actions/cache@v4
@@ -81,77 +87,23 @@ jobs:
       - name: cargo clippy
         run: cargo clippy --all-targets -- -D warnings
 
-      # Split unit tests (in-module `#[cfg(test)]`) from HTTP integration
-      # tests so a failure in `tests/integration.rs` is immediately distinct
-      # from a regression inside `src/`. Both targets must pass for CI to
-      # go green.
-      - name: cargo test (unit, lib + bin)
-        run: cargo test --lib --bins
-
-      - name: cargo test (integration)
-        run: cargo test --test integration
-
-  # Enforce a hard floor on test coverage, measured across BOTH the in-module
-  # unit tests and the HTTP integration suite (`--lib --bins --tests`) in a
-  # single instrumented run. Falls below 95% line coverage and the job — and so
-  # the whole CI run, and so the deploy that chains off it — fails.
-  #
-  # src/main.rs (the clap shim + serve loop that binds the socket) is excluded:
-  # it can't be exercised by an in-process test, and is instead covered
-  # end-to-end by the docker-smoke job, which boots the real binary and probes
-  # /healthz.
-  coverage:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-          cache: npm
-          cache-dependency-path: web/package-lock.json
-
-      - name: Install web dependencies
-        working-directory: web
-        run: npm ci
-
-      # rust-embed needs web/dist/ to exist before the crate (and its tests)
-      # will compile.
-      - name: Build web bundle
-        working-directory: web
-        run: npm run build
-
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: llvm-tools-preview
-
-      - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-llvm-cov
-
-      - name: Cache cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-cov-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-cov-
-            ${{ runner.os }}-cargo-
-
-      - name: Enforce 95% line coverage (unit + integration)
+      # One instrumented compile runs the WHOLE suite — in-module unit tests,
+      # the bins, and the HTTP integration tests (`--lib --bins --tests`) — AND
+      # enforces the coverage floor. Coverage needs its own instrumentation
+      # flags, so a separate coverage job could never reuse this build's objects
+      # anyway; folding the two together means the test suite is compiled and run
+      # exactly once instead of twice (plain test + instrumented coverage).
+      #
+      # Drops below 95% line coverage and the job — and so the whole CI run, and
+      # so the deploy that chains off it — fails. src/main.rs (the clap shim +
+      # serve loop that binds the socket) is excluded: it can't be exercised by
+      # an in-process test, and is covered end-to-end by the docker-smoke job,
+      # which boots the real binary and probes /healthz.
+      - name: cargo test + enforce 95% line coverage (unit + integration)
         run: |
           cargo llvm-cov --lib --bins --tests \
             --ignore-filename-regex 'src/main\.rs' \
-            --fail-under-lines 95 \
-            --summary-only
+            --fail-under-lines 95
 
   # Supply-chain / vulnerability gate. Independent of the build so a freshly
   # disclosed advisory surfaces even when the code itself is unchanged.
