@@ -65,6 +65,72 @@ impl Harness {
         self.tempdir.path()
     }
 
+    /// Simulate a process restart (a redeploy) over the *same* data dir: drop
+    /// the in-process `AppState` — including its in-memory session store and
+    /// space cache — and boot a brand-new one rooted at the same `TempDir`,
+    /// just as `docker compose up -d --build` recreates the container while the
+    /// named volume is reused. The persisted `.users.toml` and each user's
+    /// on-disk space are all the new process has to go on.
+    pub fn reopen(self) -> Self {
+        let state = AppState::new(
+            self.tempdir.path().to_path_buf(),
+            SessionStore::new(),
+            RateLimiter::new(),
+            AppConfig {
+                cookie_secure: false,
+            },
+        )
+        .expect("AppState::new on reopen");
+        let router = routes::build_router(state.clone());
+        Self {
+            tempdir: self.tempdir,
+            state,
+            router,
+        }
+    }
+
+    /// Re-authenticate over HTTP after a `reopen`, since the in-memory session
+    /// (and its cookie) doesn't survive a restart. Drives the real
+    /// `/api/auth/unlock` flow — which re-derives the verifier from the
+    /// persisted `.space.toml` — and returns a `RegisteredUser` carrying the
+    /// freshly minted cookie.
+    pub async fn reunlock(&self, email: &str, passphrase: &str) -> RegisteredUser {
+        let res = self
+            .send(post_json(
+                "/api/auth/unlock",
+                &serde_json::json!({ "email": email, "passphrase": passphrase }),
+            ))
+            .await;
+        assert_eq!(
+            res.status(),
+            StatusCode::NO_CONTENT,
+            "reunlock should succeed after a restart"
+        );
+        let set_cookie = res
+            .headers()
+            .get(header::SET_COOKIE)
+            .and_then(|v| v.to_str().ok())
+            .expect("Set-Cookie on unlock");
+        // `name=value; HttpOnly; …` — take the value of the first pair.
+        let cookie = set_cookie
+            .split(';')
+            .next()
+            .and_then(|pair| pair.split_once('='))
+            .expect("Set-Cookie has a name=value pair")
+            .1
+            .to_string();
+        let entry = self
+            .state
+            .find_user_by_email(email)
+            .expect("user persisted across restart");
+        let user_dir = self.root().join(entry.uuid.to_string());
+        RegisteredUser {
+            email: entry.email,
+            cookie,
+            user_dir,
+        }
+    }
+
     /// Drive a single request through the router, injecting a fake
     /// `ConnectInfo<SocketAddr>` that `oneshot` would otherwise omit (auth
     /// handlers extract it for rate limiting).

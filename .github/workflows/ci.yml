@@ -103,6 +103,59 @@ jobs:
           fi
           echo "Health check passed."
 
+      # Prove the deploy promise the docs make: user data survives container
+      # recreation. Register a user, recreate the container WITHOUT removing the
+      # named volume (exactly what a redeploy does), then confirm the user is
+      # still there. The cargo persistence tests (tests/integration/persistence.rs)
+      # cover the same invariant at the AppState layer; this guards the
+      # volume/compose wiring those tests can't see.
+      - name: Data survives container recreation
+        run: |
+          set -euo pipefail
+          base=http://127.0.0.1:8001
+
+          wait_healthy() {
+            for _ in $(seq 1 30); do
+              if curl -fsS "$base/healthz" >/dev/null 2>&1; then return 0; fi
+              sleep 5
+            done
+            echo "::error::Container did not become healthy"
+            docker compose ps; docker compose logs --tail=120
+            return 1
+          }
+
+          echo ">> registering a user before the redeploy"
+          curl -fsS -X POST "$base/api/auth/init" \
+            -H 'Content-Type: application/json' \
+            -d '{"email":"smoke@example.lan","passphrase":"persistence-probe"}' \
+            >/dev/null
+
+          # Recreate the container from a fresh build. `up` never removes the
+          # named volume, and --force-recreate guarantees a genuinely new
+          # container rather than a no-op "up-to-date".
+          echo ">> redeploying (force-recreate, volume retained)"
+          docker compose up -d --build --force-recreate
+          wait_healthy
+
+          echo ">> verifying the user persisted"
+          status="$(curl -fsS "$base/api/auth/status")"
+          echo "status: $status"
+          case "$status" in
+            *'"any_users":true'*) ;;
+            *) echo "::error::registry did not survive recreation: $status"; exit 1 ;;
+          esac
+
+          # The mapping itself survived, not just the count: re-registering the
+          # same email must be refused (400), not silently shadow the old space.
+          code="$(curl -s -o /dev/null -w '%{http_code}' -X POST "$base/api/auth/init" \
+            -H 'Content-Type: application/json' \
+            -d '{"email":"smoke@example.lan","passphrase":"persistence-probe"}')"
+          if [ "$code" != "400" ]; then
+            echo "::error::expected 400 re-registering a persisted email, got $code"
+            exit 1
+          fi
+          echo "Persistence check passed: user survived container recreation."
+
       - name: Tear down
         if: always()
         run: docker compose down -v
