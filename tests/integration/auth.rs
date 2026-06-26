@@ -10,8 +10,13 @@ use axum::http::Request;
 use axum::http::StatusCode;
 
 use super::common::{
-    body_json, expect_status, get, post_json, urlencode, with_cookie, Harness, SESSION_COOKIE,
+    body_json, expect_status, future_exp, get, mint_sso_token, post_json, urlencode, with_cookie,
+    with_sso_cookie, Harness, SESSION_COOKIE,
 };
+
+const SSO_SECRET: &str = "integration-sso-shared-secret";
+const SSO_SUB: &str = "11111111-1111-4111-8111-111111111111";
+const SSO_EMAIL: &str = "ada@drive.example";
 
 /// A POST with a JSON body and an extra `X-Forwarded-Proto: https` header, the
 /// way the production reverse proxy presents a TLS request to the app.
@@ -126,6 +131,142 @@ async fn sso_reports_signed_out_without_a_trusted_cookie() {
     assert_eq!(res.status(), StatusCode::OK);
     let body = body_json(res).await;
     assert_eq!(body["signed_in"], serde_json::json!(false));
+}
+
+#[tokio::test]
+async fn sso_space_provision_then_unlock_round_trip() {
+    let h = Harness::with_sso(SSO_SECRET);
+    let token = mint_sso_token(SSO_SECRET, SSO_SUB, SSO_EMAIL, future_exp());
+
+    // No space yet for this drive user.
+    let res = h
+        .send(with_sso_cookie(get("/api/auth/sso/space"), &token))
+        .await;
+    let body = body_json(expect_status(res, StatusCode::OK)).await;
+    assert_eq!(body["exists"], serde_json::json!(false));
+    assert!(body["passkey"].is_null());
+
+    // Provision the encrypted space with a random passphrase + passkey material.
+    let provision = serde_json::json!({
+        "passphrase": "provisioned-random-passphrase",
+        "credential_id_b64": "Y3JlZGVudGlhbA",
+        "prf_salt_b64": "c2FsdHk",
+        "wrapped_passphrase_b64": "d3JhcHBlZA",
+    });
+    let res = h
+        .send(with_sso_cookie(
+            post_json("/api/auth/sso/provision", &provision),
+            &token,
+        ))
+        .await;
+    let res = expect_status(res, StatusCode::CREATED);
+    assert!(
+        res.headers().get(header::SET_COOKIE).is_some(),
+        "provision should mint a session cookie"
+    );
+
+    // The space now exists and returns its passkey-unlock material.
+    let res = h
+        .send(with_sso_cookie(get("/api/auth/sso/space"), &token))
+        .await;
+    let body = body_json(expect_status(res, StatusCode::OK)).await;
+    assert_eq!(body["exists"], serde_json::json!(true));
+    assert_eq!(body["passkey"]["credential_id_b64"], "Y3JlZGVudGlhbA");
+
+    // A second provision is refused — the client should unlock instead.
+    let res = h
+        .send(with_sso_cookie(
+            post_json("/api/auth/sso/provision", &provision),
+            &token,
+        ))
+        .await;
+    expect_status(res, StatusCode::BAD_REQUEST);
+
+    // Unlock with the correct passphrase succeeds.
+    let res = h
+        .send(with_sso_cookie(
+            post_json(
+                "/api/auth/sso/unlock",
+                &serde_json::json!({ "passphrase": "provisioned-random-passphrase" }),
+            ),
+            &token,
+        ))
+        .await;
+    expect_status(res, StatusCode::NO_CONTENT);
+
+    // A wrong passphrase, and an oversize one, are both rejected.
+    let oversize = "x".repeat(2000);
+    for bad in ["the-wrong-passphrase", oversize.as_str()] {
+        let res = h
+            .send(with_sso_cookie(
+                post_json(
+                    "/api/auth/sso/unlock",
+                    &serde_json::json!({ "passphrase": bad }),
+                ),
+                &token,
+            ))
+            .await;
+        expect_status(res, StatusCode::UNAUTHORIZED);
+    }
+}
+
+#[tokio::test]
+async fn sso_endpoints_reject_a_missing_or_bad_token() {
+    let h = Harness::with_sso(SSO_SECRET);
+
+    // No SSO cookie at all -> unauthorized.
+    let res = h.send(get("/api/auth/sso/space")).await;
+    expect_status(res, StatusCode::UNAUTHORIZED);
+
+    // A token whose subject isn't a UUID can't map to a space -> bad request.
+    let bad_sub = mint_sso_token(SSO_SECRET, "not-a-uuid", SSO_EMAIL, future_exp());
+    let res = h
+        .send(with_sso_cookie(get("/api/auth/sso/space"), &bad_sub))
+        .await;
+    expect_status(res, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn sso_unlock_without_a_space_is_unauthorized() {
+    let h = Harness::with_sso(SSO_SECRET);
+    let token = mint_sso_token(SSO_SECRET, SSO_SUB, SSO_EMAIL, future_exp());
+    let res = h
+        .send(with_sso_cookie(
+            post_json(
+                "/api/auth/sso/unlock",
+                &serde_json::json!({ "passphrase": "anything-at-all-here" }),
+            ),
+            &token,
+        ))
+        .await;
+    expect_status(res, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn sso_provision_validates_field_bounds() {
+    let h = Harness::with_sso(SSO_SECRET);
+    let token = mint_sso_token(SSO_SECRET, SSO_SUB, SSO_EMAIL, future_exp());
+    let cases = [
+        // passphrase too short (< 12 chars)
+        serde_json::json!({ "passphrase": "short", "credential_id_b64": "a", "prf_salt_b64": "a", "wrapped_passphrase_b64": "a" }),
+        // passphrase too long
+        serde_json::json!({ "passphrase": "x".repeat(2000), "credential_id_b64": "a", "prf_salt_b64": "a", "wrapped_passphrase_b64": "a" }),
+        // credential id too long
+        serde_json::json!({ "passphrase": "a-fine-passphrase", "credential_id_b64": "x".repeat(5000), "prf_salt_b64": "a", "wrapped_passphrase_b64": "a" }),
+        // prf salt too long
+        serde_json::json!({ "passphrase": "a-fine-passphrase", "credential_id_b64": "a", "prf_salt_b64": "x".repeat(2000), "wrapped_passphrase_b64": "a" }),
+        // wrapped passphrase too long
+        serde_json::json!({ "passphrase": "a-fine-passphrase", "credential_id_b64": "a", "prf_salt_b64": "a", "wrapped_passphrase_b64": "x".repeat(20000) }),
+    ];
+    for body in cases {
+        let res = h
+            .send(with_sso_cookie(
+                post_json("/api/auth/sso/provision", &body),
+                &token,
+            ))
+            .await;
+        expect_status(res, StatusCode::BAD_REQUEST);
+    }
 }
 
 #[tokio::test]

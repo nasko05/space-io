@@ -26,11 +26,17 @@ import {
   shortDayLabel,
   TodayEntry,
 } from './lib/calendar';
+import { ssoProvision, unlockWithPasskey } from './lib/passkey';
+
+/** Full URL of the co-hosted cloud drive; when set, the editor runs in plug-in
+ *  mode and prefers the drive for sign-in. Empty = standalone editor. */
+const DRIVE_URL = (import.meta.env.VITE_DRIVE_URL as string | undefined) ?? '';
 
 type View =
   | { kind: 'loading' }
   | { kind: 'registration'; anyUsers: boolean }
   | { kind: 'auth'; anyUsers: boolean }
+  | { kind: 'sso'; email: string | null }
   | { kind: 'unlocked'; owner: string; email: string; surface: Surface }
   | { kind: 'fatal'; message: string };
 
@@ -156,20 +162,39 @@ export function App() {
     [refreshExcerpts, refreshMeta, refreshTree],
   );
 
+  /** Decide which screen to show when no editor session is active yet: an
+   *  already-unlocked session enters the reader; a drive-authenticated visitor
+   *  (plug-in mode) goes to the one-tap passkey unlock; otherwise the editor's
+   *  own login/registration. Shared by initial load and post-lock. */
+  const decideEntry = useCallback(async () => {
+    const status = await api.status();
+    setHasPasskey(status.has_passkey);
+    if (status.unlocked) {
+      await enterReader(status.owner, status.email);
+      return;
+    }
+    let sso: { signed_in: boolean; email: string | null } | null = null;
+    try {
+      sso = await api.sso();
+    } catch {
+      sso = null;
+    }
+    if (sso?.signed_in) {
+      setView({ kind: 'sso', email: sso.email });
+      return;
+    }
+    if (!status.any_users && !DRIVE_URL) {
+      setView({ kind: 'registration', anyUsers: false });
+    } else {
+      setView({ kind: 'auth', anyUsers: status.any_users });
+    }
+  }, [enterReader]);
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const status = await api.status();
-        if (cancelled) { return; }
-        setHasPasskey(status.has_passkey);
-        if (status.unlocked) {
-          await enterReader(status.owner, status.email);
-        } else if (!status.any_users) {
-          setView({ kind: 'registration', anyUsers: false });
-        } else {
-          setView({ kind: 'auth', anyUsers: true });
-        }
+        await decideEntry();
       } catch (err) {
         if (cancelled) { return; }
         setView({
@@ -181,7 +206,7 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [enterReader]);
+  }, [decideEntry]);
 
   const onRegistered = useCallback(async () => {
     try {
@@ -215,6 +240,22 @@ export function App() {
     }
   }, [enterReader, view]);
 
+  /** After a passkey provision/unlock established the editor session, enter the
+   *  reader. The space owner is the drive email (set at provisioning). */
+  const onSsoUnlocked = useCallback(async () => {
+    setView({ kind: 'loading' });
+    try {
+      const status = await api.status();
+      setHasPasskey(true);
+      await enterReader(status.owner || 'My Space', status.email);
+    } catch (err) {
+      setView({
+        kind: 'fatal',
+        message: err instanceof Error ? err.message : 'Unlock succeeded but the next step failed.',
+      });
+    }
+  }, [enterReader]);
+
   const showRegistration = useCallback(() => {
     setView({ kind: 'registration', anyUsers: true });
   }, []);
@@ -241,12 +282,12 @@ export function App() {
     setAgentOpen(false);
     setSelectedDay(null);
     setToast(null);
-    const status = await refreshStatus();
-    setView({
-      kind: 'auth',
-      anyUsers: status?.any_users ?? true,
-    });
-  }, [refreshStatus]);
+    try {
+      await decideEntry();
+    } catch {
+      setView({ kind: 'auth', anyUsers: true });
+    }
+  }, [decideEntry]);
 
   const selectFile = useCallback(
     async (path: string) => {
@@ -649,6 +690,9 @@ export function App() {
       />
     );
   }
+  if (view.kind === 'sso') {
+    return <SsoScreen email={view.email} onUnlocked={onSsoUnlocked} />;
+  }
   if (view.kind === 'fatal') { return <FatalScreen message={view.message} />; }
 
   const { surface } = view;
@@ -881,6 +925,120 @@ function LoadingScreen() {
       }}
     >
       Opening the door…
+    </div>
+  );
+}
+
+/** Plug-in entry screen: the visitor is signed into the drive but the editor
+ *  session is locked. One tap provisions (first time) or unlocks the encrypted
+ *  space via the passkey's PRF secret — the user never types a passphrase. */
+function SsoScreen({ email, onUnlocked }: { email: string | null; onUnlocked: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const open = useCallback(async () => {
+    if (busy) { return; }
+    setBusy(true);
+    setError(null);
+    try {
+      const space = await api.ssoSpace();
+      if (space.exists && space.passkey) {
+        const passphrase = await unlockWithPasskey({
+          credentialIdB64: space.passkey.credential_id_b64,
+          prfSaltB64: space.passkey.prf_salt_b64,
+          wrappedPassphraseB64: space.passkey.wrapped_passphrase_b64,
+        });
+        await api.ssoUnlock(passphrase);
+      } else {
+        const provisioned = await ssoProvision();
+        await api.ssoProvision({
+          passphrase: provisioned.passphrase,
+          credential_id_b64: provisioned.credentialIdB64,
+          prf_salt_b64: provisioned.prfSaltB64,
+          wrapped_passphrase_b64: provisioned.wrappedPassphraseB64,
+        });
+      }
+      onUnlocked();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not open your space.');
+      setBusy(false);
+    }
+  }, [busy, onUnlocked]);
+
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        inset: 0,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: 'var(--paper)',
+        color: 'var(--ink)',
+        fontFamily: 'var(--font-serif)',
+        padding: 32,
+      }}
+    >
+      <div style={{ maxWidth: 420, textAlign: 'center' }}>
+        <div
+          style={{
+            fontSize: 11,
+            letterSpacing: '0.18em',
+            textTransform: 'uppercase',
+            color: 'var(--accent)',
+            marginBottom: 14,
+            fontWeight: 600,
+          }}
+        >
+          My Space
+        </div>
+        <div style={{ fontSize: 24, fontWeight: 500, letterSpacing: '-0.015em', marginBottom: 8 }}>
+          {email ? `Welcome, ${email}.` : 'Welcome back.'}
+        </div>
+        <div style={{ fontSize: 14, color: 'var(--mute)', marginBottom: 24 }}>
+          Unlock your encrypted space with your passkey.
+        </div>
+        <button
+          type="button"
+          onClick={open}
+          disabled={busy}
+          style={{
+            height: 44,
+            padding: '0 24px',
+            borderRadius: 999,
+            border: 'none',
+            background: 'var(--ink)',
+            color: 'var(--paper)',
+            fontFamily: 'var(--font-sans)',
+            fontSize: 14,
+            fontWeight: 500,
+            cursor: busy ? 'default' : 'pointer',
+            opacity: busy ? 0.7 : 1,
+          }}
+        >
+          {busy ? 'Waiting for your passkey…' : 'Open My Space'}
+        </button>
+        {error && (
+          <div style={{ marginTop: 16, fontSize: 13, color: 'var(--accent)' }} role="alert">
+            {error}
+          </div>
+        )}
+        {DRIVE_URL && (
+          <div style={{ marginTop: 20 }}>
+            <a
+              href={DRIVE_URL}
+              style={{
+                fontSize: 13,
+                fontStyle: 'italic',
+                color: 'var(--mute)',
+                textDecoration: 'none',
+              }}
+            >
+              ← Back to the cloud drive
+            </a>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

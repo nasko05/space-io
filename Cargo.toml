@@ -66,3 +66,8 @@ tempfile = "3"
 tower = "0.5"
 http-body-util = "0.1"
 mime = "0.3"
+# Mint cloud-drive SSO tokens (HS256) so the auth integration tests can drive the
+# SSO endpoints the way the real drive would.
+hmac = "0.12"
+sha2 = "0.10"
+base64 = "0.22"

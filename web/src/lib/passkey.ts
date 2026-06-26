@@ -30,8 +30,16 @@ function ensureLocalhostOrigin(): void {
   }
 }
 
+/**
+ * RP ID for the ceremony. Defaults to the current hostname (standalone editor).
+ * In a co-hosted "plug-in" deployment, set VITE_WEBAUTHN_RP_ID to the
+ * registrable parent domain (e.g. `example.com`) so the single passkey
+ * registered on the drive works from the editor's sibling subdomain too — a
+ * passkey scoped to the parent domain is usable from any subdomain under it.
+ */
 function getEffectiveRpId(): string {
-  return window.location.hostname;
+  const configured = (import.meta.env.VITE_WEBAUTHN_RP_ID as string | undefined)?.trim();
+  return configured || window.location.hostname;
 }
 
 export interface RegisterResult {
@@ -268,6 +276,71 @@ export async function unlockWithPasskey(input: AuthenticateInput): Promise<strin
     throw new Error('This authenticator did not return a PRF secret.');
   }
   return await unwrapPassphrase(prfOutput, wrapped);
+}
+
+export interface SsoProvisionResult {
+  credentialIdB64: string;
+  prfSaltB64: string;
+  wrappedPassphraseB64: string;
+  /** The freshly generated space passphrase, to initialise the encrypted space.
+   *  The user never sees or types it — the passkey unlocks it from here on. */
+  passphrase: string;
+}
+
+/**
+ * First-entry provisioning for a drive-authenticated user: use their existing
+ * (drive-registered, discoverable) passkey to derive a PRF secret, generate a
+ * fresh random space passphrase, and wrap it under that secret. `allowCredentials`
+ * is empty so the browser lets the user pick their passkey; the chosen
+ * credential id is captured so later unlocks target the same one.
+ */
+export async function ssoProvision(): Promise<SsoProvisionResult> {
+  ensureLocalhostOrigin();
+  if (!isPasskeySupported()) {
+    throw new Error('Passkeys are not available in this browser.');
+  }
+  ensureWebAuthnUsable();
+  const prfSalt = crypto.getRandomValues(new Uint8Array(32));
+  const challenge = crypto.getRandomValues(new Uint8Array(32));
+  const passphrase = randomPassphrase();
+
+  let assertion: PublicKeyCredential | null;
+  try {
+    assertion = (await navigator.credentials.get({
+      publicKey: {
+        challenge,
+        rpId: getEffectiveRpId(),
+        allowCredentials: [],
+        userVerification: 'preferred' as const,
+        timeout: 60_000,
+        extensions: { prf: { eval: { first: prfSalt } } },
+      },
+    } as CredentialRequestOptions)) as PublicKeyCredential | null;
+  } catch (err) {
+    throw wrapWebAuthnError('get', err);
+  }
+  if (!assertion) { throw new Error('passkey selection was cancelled'); }
+
+  const extensions = (assertion.getClientExtensionResults() as PrfExtensionResults).prf;
+  const prfOutput = extensions?.results?.first;
+  if (!prfOutput) {
+    throw new Error(
+      'This passkey did not return a PRF secret. Register a passkey on the drive that supports PRF (hmac-secret), then try again.',
+    );
+  }
+  const wrapped = await wrapPassphrase(prfOutput, passphrase);
+  return {
+    credentialIdB64: bytesToB64Url(new Uint8Array(assertion.rawId)),
+    prfSaltB64: bytesToB64Url(prfSalt),
+    wrappedPassphraseB64: bytesToB64Url(wrapped),
+    passphrase,
+  };
+}
+
+/** 32 bytes of entropy as base64url (~43 chars) — well past the server's
+ *  12-char floor, and never shown to the user. */
+function randomPassphrase(): string {
+  return bytesToB64Url(crypto.getRandomValues(new Uint8Array(32)));
 }
 
 async function wrapPassphrase(prfOutput: ArrayBuffer, passphrase: string): Promise<Uint8Array> {
