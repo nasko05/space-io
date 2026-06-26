@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SpaceIO · Hearth — one-command build & deploy.
+# SpaceIO — one-command build & deploy.
 #
 # Runs anywhere: your laptop, a $5 VPS, a Raspberry Pi, or inside Docker.
 # No cloud provider, no account, no IAM, no CloudFormation. Two ways to run:
@@ -12,22 +12,22 @@
 # build order (web → cargo) is handled for you in both paths.
 #
 # Server-side variables — cookie mode and the AI-assistant keys
-# (HEARTH_OPENROUTER_API_KEY, …) — can live in a .env file next to this
+# (SPACEIO_OPENROUTER_API_KEY, …) — can live in a .env file next to this
 # script instead of being exported by hand. A ./.env is picked up
 # automatically (Docker: --env-file, native: sourced). See .env.example.
 #
 # Common flags:
 #   --port N         port to serve on            (default 7777)
 #   --host ADDR      listen address              (default 0.0.0.0)
-#   --data TARGET    where the vault lives        (default named volume hearth-data)
-#                      A plain name (e.g. hearth-data) is a cwd-independent Docker
+#   --data TARGET    where the vault lives        (default named volume space-io-data)
+#                      A plain name (e.g. space-io-data) is a cwd-independent Docker
 #                      named volume that survives container recreation + rebuilds.
 #                      A path (starts with / ./ ../ ~ or contains /) is a host
 #                      bind mount; an absolute path is recommended. (Native mode
 #                      always treats --data as a host directory.)
 #   --build-only     build, don't run
 #   --detach         (docker) run in the background
-#   --name NAME      (docker) container name      (default hearth)
+#   --name NAME      (docker) container name      (default space-io)
 #   --secure-cookies require HTTPS for cookies (set when behind a TLS proxy)
 #   --env-file PATH  load server env vars from a file (default: ./.env if any)
 #   --no-env         ignore a ./.env file even if present
@@ -38,7 +38,7 @@
 # the app's init_space only creates what's missing (it never clobbers data).
 #
 # Put TLS in front (Caddy, nginx, Cloudflare Tunnel) for anything reachable
-# off-localhost — Hearth speaks plain HTTP and is single-tenant by design.
+# off-localhost — SpaceIO speaks plain HTTP and is single-tenant by design.
 
 set -euo pipefail
 
@@ -46,15 +46,15 @@ cd "$(dirname "$0")"
 
 # ---- defaults -------------------------------------------------------------
 MODE="auto"          # auto | native | docker
-PORT="${HEARTH_PORT:-7777}"
-HOST="${HEARTH_HOST:-0.0.0.0}"
-DATA_DIR="${HEARTH_DATA:-hearth-data}"   # docker: named volume by default; native: a dir
-IMAGE="${HEARTH_IMAGE:-hearth}"
-CONTAINER="${HEARTH_CONTAINER:-hearth}"
+PORT="${SPACEIO_PORT:-7777}"
+HOST="${SPACEIO_HOST:-0.0.0.0}"
+DATA_DIR="${SPACEIO_DATA:-space-io-data}"   # docker: named volume by default; native: a dir
+IMAGE="${SPACEIO_IMAGE:-space-io}"
+CONTAINER="${SPACEIO_CONTAINER:-space-io}"
 BUILD_ONLY=0
 DETACH=0
 INSECURE_COOKIES=1   # plain HTTP by default; flip with --secure-cookies
-ENV_FILE="${HEARTH_ENV_FILE:-}"   # --env-file PATH; else auto-detect ./.env
+ENV_FILE="${SPACEIO_ENV_FILE:-}"   # --env-file PATH; else auto-detect ./.env
 NO_ENV=0             # --no-env: ignore ./.env even if present
 
 die() { echo "error: $*" >&2; exit 1; }
@@ -132,7 +132,7 @@ deploy_native() {
   echo ">> building release binary"
   cargo build --release
 
-  local bin="./target/release/hearth"
+  local bin="./target/release/space-io"
   [ -x "$bin" ] || die "build succeeded but $bin is missing"
 
   if [ "$BUILD_ONLY" -eq 1 ]; then
@@ -159,7 +159,7 @@ deploy_native() {
     . "$ENV_FILE_ABS"
     set +a
   fi
-  [ "$INSECURE_COOKIES" -eq 1 ] && export HEARTH_INSECURE_COOKIES=1
+  [ "$INSECURE_COOKIES" -eq 1 ] && export SPACEIO_INSECURE_COOKIES=1
   exec "$bin" serve --space-dir "$DATA_DIR" --listen "$HOST:$PORT"
 }
 
@@ -179,7 +179,7 @@ deploy_docker() {
 
   # Decide whether --data is a host bind mount or a named Docker volume.
   #   A filesystem path (starts with / ./ ../ ~ or contains a /) → bind mount.
-  #   A plain identifier (e.g. hearth-data)                       → named volume.
+  #   A plain identifier (e.g. space-io-data)                       → named volume.
   # A named volume is cwd-independent and survives 'docker rm' and image
   # rebuilds, so it's the safe default for CI/CD redeploys.
   local mount_src data_desc
@@ -218,7 +218,7 @@ deploy_docker() {
   # --env-file is read at run time, so secrets never get baked into the image.
   # A trailing -e wins over the file, keeping the deploy flag authoritative.
   [ -n "$ENV_FILE_ABS" ] && run+=(--env-file "$ENV_FILE_ABS")
-  [ "$INSECURE_COOKIES" -eq 1 ] && run+=(-e HEARTH_INSECURE_COOKIES=1)
+  [ "$INSECURE_COOKIES" -eq 1 ] && run+=(-e SPACEIO_INSECURE_COOKIES=1)
 
   if [ "$DETACH" -eq 1 ]; then
     run+=(-d)

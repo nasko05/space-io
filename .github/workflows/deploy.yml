@@ -11,7 +11,7 @@ name: Deploy
 #   3. SSHes in, syncs `main`, and rebuilds the container,
 #   4. verifies /healthz before declaring success — a bad deploy fails loudly
 #      and the previous container keeps serving.
-# All persistent state lives on the `hearth-data` named volume, so redeploys
+# All persistent state lives on the `space-io-data` named volume, so redeploys
 # never touch user notes, documents, or uploads.
 #
 # ---- Configuration lives entirely in GitHub (Settings -> Secrets and
@@ -27,18 +27,18 @@ name: Deploy
 #
 # Optional SECRETS (sensitive; leave unset to keep the AI assistant off and
 # nothing leaving the box):
-#   HEARTH_OPENROUTER_API_KEY - turns the in-app AI assistant on
-#   HEARTH_BRAVE_API_KEY      - direct Brave web search (else OpenRouter's plugin)
+#   SPACEIO_OPENROUTER_API_KEY - turns the in-app AI assistant on
+#   SPACEIO_BRAVE_API_KEY      - direct Brave web search (else OpenRouter's plugin)
 #
 # Optional VARIABLES (non-sensitive; edit in the UI, then re-run). Defaults
 # apply when unset:
 #   DOMAIN                 (default: personal-area.personal-drive-io.com) — the
-#                          subdomain the SHARED Caddy routes to hearth:7777. Set
+#                          subdomain the SHARED Caddy routes to space-io:7777. Set
 #                          the matching site block in the sibling app's Caddyfile
 #                          (see DEPLOYMENT.md); informational here.
-#   HEARTH_AGENT_MODEL     (default: qwen/qwen3.6-27b)
-#   HEARTH_AGENT_WEB_SEARCH(default: 1)
-#   HEARTH_AGENT_MAX_STEPS (default: 8)
+#   SPACEIO_AGENT_MODEL     (default: qwen/qwen3.6-27b)
+#   SPACEIO_AGENT_WEB_SEARCH(default: 1)
+#   SPACEIO_AGENT_MAX_STEPS (default: 8)
 #
 # See DEPLOYMENT.md for the one-time server setup.
 
@@ -66,13 +66,13 @@ jobs:
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           # --- Runtime config rendered into the server .env ---
           # Secrets (sensitive; optional — empty means the agent stays off):
-          HEARTH_OPENROUTER_API_KEY: ${{ secrets.HEARTH_OPENROUTER_API_KEY }}
-          HEARTH_BRAVE_API_KEY: ${{ secrets.HEARTH_BRAVE_API_KEY }}
+          SPACEIO_OPENROUTER_API_KEY: ${{ secrets.SPACEIO_OPENROUTER_API_KEY }}
+          SPACEIO_BRAVE_API_KEY: ${{ secrets.SPACEIO_BRAVE_API_KEY }}
           # Variables (non-sensitive; defaults applied when unset):
           DOMAIN: ${{ vars.DOMAIN || 'personal-area.personal-drive-io.com' }}
-          HEARTH_AGENT_MODEL: ${{ vars.HEARTH_AGENT_MODEL || 'qwen/qwen3.6-27b' }}
-          HEARTH_AGENT_WEB_SEARCH: ${{ vars.HEARTH_AGENT_WEB_SEARCH || '1' }}
-          HEARTH_AGENT_MAX_STEPS: ${{ vars.HEARTH_AGENT_MAX_STEPS || '8' }}
+          SPACEIO_AGENT_MODEL: ${{ vars.SPACEIO_AGENT_MODEL || 'qwen/qwen3.6-27b' }}
+          SPACEIO_AGENT_WEB_SEARCH: ${{ vars.SPACEIO_AGENT_WEB_SEARCH || '1' }}
+          SPACEIO_AGENT_MAX_STEPS: ${{ vars.SPACEIO_AGENT_MAX_STEPS || '8' }}
         run: |
           set -euo pipefail
 
@@ -92,20 +92,20 @@ jobs:
 
           # Render the .env from the values above (secrets are masked in logs).
           # Empty optional keys are written blank; the app treats blank as unset.
-          # No HEARTH_INSECURE_COOKIES line: production must keep cookies Secure.
+          # No SPACEIO_INSECURE_COOKIES line: production must keep cookies Secure.
           umask 077
           {
-            echo "HEARTH_OPENROUTER_API_KEY=${HEARTH_OPENROUTER_API_KEY}"
-            echo "HEARTH_BRAVE_API_KEY=${HEARTH_BRAVE_API_KEY}"
-            echo "HEARTH_AGENT_MODEL=${HEARTH_AGENT_MODEL}"
-            echo "HEARTH_AGENT_WEB_SEARCH=${HEARTH_AGENT_WEB_SEARCH}"
-            echo "HEARTH_AGENT_MAX_STEPS=${HEARTH_AGENT_MAX_STEPS}"
-          } > hearth.env
+            echo "SPACEIO_OPENROUTER_API_KEY=${SPACEIO_OPENROUTER_API_KEY}"
+            echo "SPACEIO_BRAVE_API_KEY=${SPACEIO_BRAVE_API_KEY}"
+            echo "SPACEIO_AGENT_MODEL=${SPACEIO_AGENT_MODEL}"
+            echo "SPACEIO_AGENT_WEB_SEARCH=${SPACEIO_AGENT_WEB_SEARCH}"
+            echo "SPACEIO_AGENT_MAX_STEPS=${SPACEIO_AGENT_MAX_STEPS}"
+          } > space-io.env
 
           # Ship the rendered env, then deploy.
           scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes \
-            hearth.env "$DEPLOY_USER@$DEPLOY_HOST:~/space-io/.env.new"
-          rm -f hearth.env
+            space-io.env "$DEPLOY_USER@$DEPLOY_HOST:~/space-io/.env.new"
+          rm -f space-io.env
 
           ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" 'bash -s' <<'REMOTE'
             set -euo pipefail
@@ -136,7 +136,7 @@ jobs:
             if [ -z "$ok" ]; then
               echo "::error::App did not become healthy after deploy"
               docker compose ps
-              docker compose logs --tail=80 hearth
+              docker compose logs --tail=80 space-io
               exit 1
             fi
 

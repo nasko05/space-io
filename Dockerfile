@@ -1,4 +1,4 @@
-# SpaceIO · Hearth — portable multi-stage build.
+# SpaceIO — portable multi-stage build.
 # Stage 1 builds the frontend, stage 2 compiles the Rust binary with the
 # bundle embedded (rust-embed), stage 3 is a slim runtime with just the
 # binary. Produces a single self-contained image that runs anywhere.
@@ -33,7 +33,7 @@ FROM debian:bookworm-slim AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates libssl3 curl \
     && rm -rf /var/lib/apt/lists/*
-COPY --from=build /app/target/release/hearth /usr/local/bin/hearth
+COPY --from=build /app/target/release/space-io /usr/local/bin/space-io
 
 # Run as a non-root user. Create /data and hand it to that user before the
 # VOLUME is declared, so the named volume inherits writable ownership when
@@ -53,9 +53,9 @@ EXPOSE 7777
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD curl -fsS http://127.0.0.1:7777/healthz || exit 1
 
-# No HEARTH_INSECURE_COOKIES here: in production the app runs behind the shared
+# No SPACEIO_INSECURE_COOKIES here: in production the app runs behind the shared
 # TLS proxy, so it must mark session cookies Secure. The cookie code only sets
 # Secure when the request arrived over HTTPS (read from X-Forwarded-Proto), so
 # plain-HTTP local runs still work. For local HTTP testing without a proxy, pass
-# HEARTH_INSECURE_COOKIES=1 explicitly (deploy.sh does this for you).
-ENTRYPOINT ["hearth", "serve", "--space-dir", "/data", "--listen", "0.0.0.0:7777"]
+# SPACEIO_INSECURE_COOKIES=1 explicitly (deploy.sh does this for you).
+ENTRYPOINT ["space-io", "serve", "--space-dir", "/data", "--listen", "0.0.0.0:7777"]
