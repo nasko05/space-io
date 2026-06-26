@@ -5,10 +5,13 @@ name: Deploy
 #
 # Trigger: runs ONLY after the CI workflow finishes successfully on `main`, so a
 # red build never reaches the server. The job then, with zero manual steps:
-#   1. renders the server's .env from GitHub Secrets + Variables (the single
-#      source of truth for runtime config),
-#   2. ships it to the VPS (atomic, mode 600),
-#   3. SSHes in, syncs `main`, and rebuilds the container,
+#   1. packs runtime config from GitHub Secrets + Variables (the single source of
+#      truth) into one base64 line — there is NO server-side .env file,
+#   2. SSHes in, syncs `main`, and pipes that config over the encrypted SSH stdin
+#      (never written to disk, never in argv) to scripts/remote-deploy.sh,
+#   3. which exports it into the `docker compose up` shell — anything unset falls
+#      back to the ${VAR:-default} defaults baked into docker-compose.yml —
+#      rebuilds the container, and
 #   4. verifies /healthz before declaring success — a bad deploy fails loudly
 #      and the previous container keeps serving.
 # All persistent state lives on the `space-io-data` named volume, so redeploys
@@ -64,7 +67,7 @@ jobs:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
-          # --- Runtime config rendered into the server .env ---
+          # --- Runtime config injected over SSH at deploy time (no server .env) ---
           # Secrets (sensitive; optional — empty means the agent stays off):
           SPACEIO_OPENROUTER_API_KEY: ${{ secrets.SPACEIO_OPENROUTER_API_KEY }}
           SPACEIO_BRAVE_API_KEY: ${{ secrets.SPACEIO_BRAVE_API_KEY }}
@@ -76,8 +79,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Guard: abort BEFORE touching the server if deploy access is missing,
-          # so a working .env on the box is never clobbered by a half-config run.
+          # Guard: abort BEFORE connecting if deploy access is missing.
           if [ -z "${DEPLOY_HOST}" ] || [ -z "${DEPLOY_USER}" ] || [ -z "${DEPLOY_SSH_KEY}" ]; then
             echo "::error::Set DEPLOY_HOST, DEPLOY_USER, and DEPLOY_SSH_KEY as repository secrets."
             exit 1
@@ -90,56 +92,34 @@ jobs:
           # VPS host key in a secret and write it to known_hosts instead.
           ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts 2>/dev/null
 
-          # Render the .env from the values above (secrets are masked in logs).
-          # Empty optional keys are written blank; the app treats blank as unset.
-          # No SPACEIO_INSECURE_COOKIES line: production must keep cookies Secure.
-          umask 077
-          {
-            echo "SPACEIO_OPENROUTER_API_KEY=${SPACEIO_OPENROUTER_API_KEY}"
-            echo "SPACEIO_BRAVE_API_KEY=${SPACEIO_BRAVE_API_KEY}"
-            echo "SPACEIO_AGENT_MODEL=${SPACEIO_AGENT_MODEL}"
-            echo "SPACEIO_AGENT_WEB_SEARCH=${SPACEIO_AGENT_WEB_SEARCH}"
-            echo "SPACEIO_AGENT_MAX_STEPS=${SPACEIO_AGENT_MAX_STEPS}"
-          } > space-io.env
+          # Pack the runtime config (Secrets + Variables above) into ONE base64
+          # line. There is NO server-side .env: this is sent over the encrypted
+          # SSH stdin (never argv, never disk) and exported only into the shell
+          # that runs `docker compose up`, which interpolates it. Anything not set
+          # here falls back to the ${VAR:-default} defaults in docker-compose.yml.
+          # No SPACEIO_INSECURE_COOKIES: production must keep cookies Secure.
+          env_b64="$(
+            {
+              printf 'SPACEIO_OPENROUTER_API_KEY=%s\n' "$SPACEIO_OPENROUTER_API_KEY"
+              printf 'SPACEIO_BRAVE_API_KEY=%s\n'      "$SPACEIO_BRAVE_API_KEY"
+              printf 'SPACEIO_AGENT_MODEL=%s\n'        "$SPACEIO_AGENT_MODEL"
+              printf 'SPACEIO_AGENT_WEB_SEARCH=%s\n'   "$SPACEIO_AGENT_WEB_SEARCH"
+              printf 'SPACEIO_AGENT_MAX_STEPS=%s\n'    "$SPACEIO_AGENT_MAX_STEPS"
+            } | base64 -w0
+          )"
 
-          # Ship the rendered env, then deploy.
-          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes \
-            space-io.env "$DEPLOY_USER@$DEPLOY_HOST:~/space-io/.env.new"
-          rm -f space-io.env
-
-          ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" 'bash -s' <<'REMOTE'
-            set -euo pipefail
-            cd ~/space-io
-
-            # Atomically replace the env with the freshly-rendered one.
-            chmod 600 .env.new
-            mv .env.new .env
-
-            # The shared proxy network must exist before compose references it.
-            # Idempotent: a no-op once it has been created (and once the sibling
-            # app's Caddy has joined it).
-            docker network create web 2>/dev/null || true
-
-            # Sync to the exact state of origin/main and (re)build the container.
-            git fetch origin main
-            git reset --hard origin/main
-            docker compose up -d --build
-            docker image prune -f
-
-            # Verify the app actually came up before calling this a success. If
-            # not, the previous container is still serving — fail loud.
-            ok=""
-            for i in $(seq 1 30); do
-              if curl -fsS http://127.0.0.1:8001/healthz >/dev/null 2>&1; then ok=1; break; fi
-              sleep 5
-            done
-            if [ -z "$ok" ]; then
-              echo "::error::App did not become healthy after deploy"
-              docker compose ps
-              docker compose logs --tail=80 space-io
-              exit 1
-            fi
-
-            echo "Deploy OK — app healthy."
-            docker compose ps
-          REMOTE
+          # One SSH: sync the repo to origin/main (which brings the latest
+          # scripts/remote-deploy.sh), purge any legacy .env, ensure the shared
+          # proxy network exists, then hand off to the committed deploy script
+          # with the packed config on its stdin. The inline command carries no
+          # secrets, so it is safe in argv; the secrets ride stdin only.
+          printf '%s\n' "$env_b64" | ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes \
+            "$DEPLOY_USER@$DEPLOY_HOST" '
+              set -euo pipefail
+              cd ~/space-io
+              rm -f .env .env.new
+              docker network create web 2>/dev/null || true
+              git fetch origin main
+              git reset --hard origin/main
+              exec bash scripts/remote-deploy.sh
+            '

@@ -15,9 +15,12 @@
 #     `web` network by container name (`space-io:7777`),
 #   - so nothing here touches the sibling's ports, volumes, or the TLS listener.
 #
-# Runtime config comes from ~/space-io/.env, which the deploy workflow renders
-# entirely from GitHub Secrets + Variables (compose auto-loads it for the
-# ${VAR:-default} interpolation below). Do NOT hand-edit it on the server.
+# Runtime config: there is NO server-side .env. The deploy workflow injects
+# values (from GitHub Secrets + Variables) into the shell that runs
+# `docker compose up`, and the ${VAR:-default} interpolation below supplies the
+# defaults for anything unset — which is also what a plain local `docker compose
+# up` uses. GitHub is the single source of truth; nothing is hand-edited on the
+# server.
 name: space-io
 
 services:

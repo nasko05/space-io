@@ -7,10 +7,10 @@ terminates HTTPS via Let's Encrypt. This document mirrors that app's deployment
 so day-2 ops are identical for both.
 
 The model is **zero manual server steps**: you push to `main`, CI runs, and on
-green CI the deploy workflow renders the server `.env` from GitHub config, ships
-it, rebuilds the container, and verifies `/healthz`. **All runtime config lives
-in GitHub** (Settings → Secrets and variables → Actions) — never hand-edit files
-on the box.
+green CI the deploy workflow injects runtime config from GitHub straight into the
+`docker compose up` shell (there is **no server-side `.env`**), rebuilds the
+container, and verifies `/healthz`. **All runtime config lives in GitHub**
+(Settings → Secrets and variables → Actions) — never hand-edit files on the box.
 
 ---
 
@@ -172,16 +172,18 @@ per-repo, so add them to this repo too (same values).
   integration), and a **docker-smoke** job that builds the image, runs the real
   compose file, and waits for `/healthz`.
 - **CD** (`.github/workflows/deploy.yml`) triggers on `workflow_run` **after CI
-  succeeds on `main`**. It:
+  succeeds on `main`**. There is **no server-side `.env`** — config is injected
+  per-deploy. It:
   1. **guards** that `DEPLOY_HOST`/`DEPLOY_USER`/`DEPLOY_SSH_KEY` exist and
-     aborts *before touching the server* if not (so a working `.env` is never
-     clobbered),
-  2. renders `.env` entirely from Secrets + Variables,
-  3. `scp`s it to `~/space-io/.env.new` (mode 600) and atomically `mv`s it into
-     place,
-  4. SSHes in: `docker network create web || true`, `git fetch` +
-     `git reset --hard origin/main`, `docker compose up -d --build`,
-     `docker image prune -f`,
+     aborts *before connecting* if not,
+  2. packs runtime config from Secrets + Variables into one base64 line,
+  3. SSHes in: `rm -f .env` (purge any legacy file), `docker network create web
+     || true`, `git fetch` + `git reset --hard origin/main`, then pipes the
+     packed config over the encrypted SSH **stdin** (never on disk, never in
+     argv) to `scripts/remote-deploy.sh`,
+  4. which **exports** it into the `docker compose up -d --build` shell —
+     anything unset falls back to the `${VAR:-default}` defaults in
+     `docker-compose.yml` — and runs `docker image prune -f`,
   5. polls `http://127.0.0.1:8001/healthz` (30×5s) and **fails the deploy** if
      the app doesn't come up — the previous container keeps serving.
 
@@ -212,8 +214,10 @@ docker compose up -d --build && docker image prune -f
 ```
 
 **Change config** — edit the GitHub Secret/Variable, then re-run the `Deploy`
-workflow. Do **not** edit `~/space-io/.env` by hand; the next deploy overwrites
-it from GitHub (single source of truth).
+workflow. There is no `~/space-io/.env` to edit: GitHub is the single source of
+truth, and every deploy injects the current values (with `docker-compose.yml`
+defaults as the fallback). A one-off manual `docker compose up` on the box uses
+those compose defaults — to apply a changed secret, run the workflow.
 
 ### Backups
 
@@ -256,8 +260,9 @@ Restore from a snapshot (stops the app, replaces the volume, restarts):
   (`node:24-slim`, `rust:1-slim`, `debian:bookworm-slim`, `alpine:3.20`). Avoid
   `latest`, and verify a tag still exists before pinning — EOL minor tags do get
   removed from registries (e.g. an old ClamAV minor).
-- **Config changes go through GitHub, not SSH.** The server `.env` is rendered
-  from Secrets + Variables on every deploy; hand-edits are overwritten.
+- **Config changes go through GitHub, not SSH.** There is no server-side `.env`;
+  each deploy injects config from Secrets + Variables over the SSH stdin, with
+  the `docker-compose.yml` defaults as the fallback.
 - **No port/volume/network collisions.** SpaceIO uses project `space-io`, container
   `space-io`, volume `space-io-data`, loopback `8001`, and the shared `web` network —
   none of which the sibling app uses for the same purpose.
