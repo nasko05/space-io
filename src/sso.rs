@@ -96,10 +96,7 @@ impl SsoConfig {
 
         let payload_bytes = URL_SAFE_NO_PAD.decode(payload_b64).ok()?;
         let claims: RawClaims = serde_json::from_slice(&payload_bytes).ok()?;
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .ok()?
-            .as_secs() as i64;
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).ok()?.as_secs() as i64;
         if claims.exp <= now {
             return None;
         }

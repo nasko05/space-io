@@ -15,6 +15,7 @@ use crate::error::{AppError, AppResult};
 use crate::routes::run_blocking;
 use crate::space::users::{normalise_email, UsersRegistry};
 use crate::space::Space;
+use crate::sso::SsoClaims;
 use crate::state::AppState;
 
 pub const SESSION_COOKIE: &str = "spaceio_session";
@@ -155,26 +156,33 @@ struct SsoResponse {
     sub: Option<String>,
 }
 
+impl SsoResponse {
+    /// Map verified SSO claims (if any) onto the wire response.
+    fn from_claims(claims: Option<SsoClaims>) -> Self {
+        match claims {
+            Some(c) => Self {
+                signed_in: true,
+                email: c.email,
+                sub: Some(c.sub),
+            },
+            None => Self {
+                signed_in: false,
+                email: None,
+                sub: None,
+            },
+        }
+    }
+}
+
 /// Report whether the visitor arrived with a valid cloud-drive SSO cookie, and
 /// who they are. Drives the editor's "signed in via Drive" affordance and, in a
 /// later phase, the passkey-derived unlock. Unauthenticated by design — it only
 /// reflects the token the browser already holds.
 async fn sso(State(state): State<AppState>, jar: CookieJar) -> Json<SsoResponse> {
-    match jar
+    let claims = jar
         .get(&state.sso.cookie_name)
-        .and_then(|c| state.sso.verify_token(c.value()))
-    {
-        Some(claims) => Json(SsoResponse {
-            signed_in: true,
-            email: claims.email,
-            sub: Some(claims.sub),
-        }),
-        None => Json(SsoResponse {
-            signed_in: false,
-            email: None,
-            sub: None,
-        }),
-    }
+        .and_then(|c| state.sso.verify_token(c.value()));
+    Json(SsoResponse::from_claims(claims))
 }
 
 #[derive(Deserialize)]
@@ -454,4 +462,28 @@ pub fn require_session(
     let session = state.sessions.get(&id).ok_or(AppError::Unauthorized)?;
     let space = state.space_for(&session.user_uuid)?;
     Ok((session.passphrase, space))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sso_response_reflects_signed_in_claims() {
+        let resp = SsoResponse::from_claims(Some(SsoClaims {
+            sub: "user-1".into(),
+            email: Some("ada@example.lan".into()),
+        }));
+        assert!(resp.signed_in);
+        assert_eq!(resp.sub.as_deref(), Some("user-1"));
+        assert_eq!(resp.email.as_deref(), Some("ada@example.lan"));
+    }
+
+    #[test]
+    fn sso_response_is_signed_out_without_claims() {
+        let resp = SsoResponse::from_claims(None);
+        assert!(!resp.signed_in);
+        assert!(resp.sub.is_none());
+        assert!(resp.email.is_none());
+    }
 }
