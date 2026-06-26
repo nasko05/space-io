@@ -14,15 +14,26 @@ six screens, search, upload/download, version history, and WebAuthn.
 
 ### Recommended: Docker Compose (CI/CD)
 
-The simplest durable deploy is [`docker-compose.yml`](./docker-compose.yml):
+[`docker-compose.yml`](./docker-compose.yml) is the **production** path: Hearth
+is co-hosted behind a shared, containerized Caddy that already owns 80/443, so
+the app publishes **no** public port — Caddy reaches it over an external `web`
+network by name. Full setup (DNS, GitHub Secrets/Variables, the shared-proxy
+wiring, backups) is in [`DEPLOYMENT.md`](./DEPLOYMENT.md); deploys are automated
+via GitHub Actions on merge to `main`.
 
 ```sh
+docker network create web        # once: the shared proxy network
 docker compose up -d --build
 ```
 
 This rebuilds the image from the current source and recreates the container,
 while the named volume `hearth-data` keeps every user's notes, documents, and
-uploads. Re-run the same command to ship new code — your data is reused.
+uploads. The app binds only `127.0.0.1:8001` (for health checks); public traffic
+arrives through the shared Caddy. Re-run the same command to ship new code — your
+data is reused.
+
+For a quick **local** run with no proxy, prefer [`./deploy.sh`](#one-script-deploysh)
+below — it uses `docker run` directly and needs no `web` network.
 
 ### One script: `deploy.sh`
 
