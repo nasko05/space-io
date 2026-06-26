@@ -63,13 +63,14 @@ pub struct AgentConfig {
 
 impl AgentConfig {
     pub fn from_env() -> Self {
-        let openrouter_api_key = env_nonempty("HEARTH_OPENROUTER_API_KEY");
-        let brave_api_key = env_nonempty("HEARTH_BRAVE_API_KEY");
-        let model = env_nonempty("HEARTH_AGENT_MODEL").unwrap_or_else(|| DEFAULT_MODEL.to_string());
-        let base_url = env_nonempty("HEARTH_OPENROUTER_BASE_URL")
+        let openrouter_api_key = env_nonempty("SPACEIO_OPENROUTER_API_KEY");
+        let brave_api_key = env_nonempty("SPACEIO_BRAVE_API_KEY");
+        let model =
+            env_nonempty("SPACEIO_AGENT_MODEL").unwrap_or_else(|| DEFAULT_MODEL.to_string());
+        let base_url = env_nonempty("SPACEIO_OPENROUTER_BASE_URL")
             .unwrap_or_else(|| DEFAULT_BASE_URL.to_string());
 
-        let web_enabled = std::env::var("HEARTH_AGENT_WEB_SEARCH")
+        let web_enabled = std::env::var("SPACEIO_AGENT_WEB_SEARCH")
             .ok()
             .map(|v| truthy(&v))
             .unwrap_or(true);
@@ -81,9 +82,9 @@ impl AgentConfig {
             WebSearch::OpenRouterPlugin
         };
 
-        let referer = env_nonempty("HEARTH_AGENT_REFERER");
-        let title = env_nonempty("HEARTH_AGENT_TITLE").or_else(|| Some("Hearth".to_string()));
-        let max_steps = env_nonempty("HEARTH_AGENT_MAX_STEPS")
+        let referer = env_nonempty("SPACEIO_AGENT_REFERER");
+        let title = env_nonempty("SPACEIO_AGENT_TITLE").or_else(|| Some("SpaceIO".to_string()));
+        let max_steps = env_nonempty("SPACEIO_AGENT_MAX_STEPS")
             .and_then(|v| v.parse::<usize>().ok())
             .filter(|n| (1..=24).contains(n))
             .unwrap_or(8);
@@ -111,7 +112,7 @@ impl AgentConfig {
     fn api_key(&self) -> AppResult<&str> {
         self.openrouter_api_key.as_deref().ok_or_else(|| {
             AppError::BadRequest(
-                "the AI agent is not configured on this server (set HEARTH_OPENROUTER_API_KEY)"
+                "the AI agent is not configured on this server (set SPACEIO_OPENROUTER_API_KEY)"
                     .into(),
             )
         })
@@ -293,7 +294,7 @@ fn system_prompt(cfg: &AgentConfig, today: &str) -> String {
         }
     };
     format!(
-        "You are the assistant built into Hearth, a private, encrypted personal note vault. \
+        "You are the assistant built into SpaceIO, a private, encrypted personal note vault. \
 You help the user find, understand, write, and reorganise their notes and files.
 
 The vault is a tree of files and folders. Paths are relative to the vault root and use '/'. \
@@ -495,7 +496,7 @@ mod tests {
         let out = with_system_prompt(incoming, &cfg, "Wednesday, 3 June 2026");
         let systems: Vec<_> = out.iter().filter(|m| m.role == Role::System).collect();
         assert_eq!(systems.len(), 1);
-        assert!(systems[0].content.as_deref().unwrap().contains("Hearth"));
+        assert!(systems[0].content.as_deref().unwrap().contains("SpaceIO"));
         assert_eq!(out[1].role, Role::User);
     }
 
@@ -661,7 +662,7 @@ mod tests {
             base_url: DEFAULT_BASE_URL.into(),
             web_search: WebSearch::OpenRouterPlugin,
             referer: None,
-            title: Some("Hearth".into()),
+            title: Some("SpaceIO".into()),
             max_steps: 8,
         }
     }

@@ -1,7 +1,7 @@
 import { memo } from 'react';
 import { Close, FolderOpen, HardDrive, Pencil } from '../icons/Icon';
 import { CalendarView, TodayEntry } from '../../lib/calendar';
-import styles from './HearthRail.module.css';
+import styles from './SpaceRail.module.css';
 
 interface Props {
   calendar: CalendarView;
@@ -25,7 +25,7 @@ interface Props {
 
 const WEEKDAYS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 
-function HearthRailImpl({
+function SpaceRailImpl({
   calendar,
   entries,
   entriesLabel,
@@ -206,4 +206,4 @@ function HearthRailImpl({
 
 /** Memoized so the rail doesn't re-render on every keystroke in the Reader;
  *  callers must keep callback props referentially stable for the memo to hit. */
-export const HearthRail = memo(HearthRailImpl);
+export const SpaceRail = memo(SpaceRailImpl);

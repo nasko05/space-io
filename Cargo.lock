@@ -854,42 +854,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
 
 [[package]]
-name = "hearth"
-version = "0.1.0"
-dependencies = [
- "age",
- "anyhow",
- "axum",
- "axum-extra",
- "clap",
- "dashmap 6.2.1",
- "git2",
- "hex",
- "http-body-util",
- "mime",
- "mime_guess",
- "rand 0.8.6",
- "reqwest",
- "rust-embed",
- "scrypt",
- "secrecy 0.10.3",
- "serde",
- "serde_json",
- "subtle",
- "tempfile",
- "thiserror 1.0.69",
- "time",
- "tokio",
- "toml 0.8.23",
- "tower",
- "tracing",
- "tracing-subscriber",
- "uuid",
- "walkdir",
- "zeroize",
-]
-
-[[package]]
 name = "heck"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2260,6 +2224,42 @@ checksum = "3a766e1110788c36f4fa1c2b71b387a7815aa65f88ce0229841826633d93723e"
 dependencies = [
  "libc",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "space-io"
+version = "0.1.0"
+dependencies = [
+ "age",
+ "anyhow",
+ "axum",
+ "axum-extra",
+ "clap",
+ "dashmap 6.2.1",
+ "git2",
+ "hex",
+ "http-body-util",
+ "mime",
+ "mime_guess",
+ "rand 0.8.6",
+ "reqwest",
+ "rust-embed",
+ "scrypt",
+ "secrecy 0.10.3",
+ "serde",
+ "serde_json",
+ "subtle",
+ "tempfile",
+ "thiserror 1.0.69",
+ "time",
+ "tokio",
+ "toml 0.8.23",
+ "tower",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+ "walkdir",
+ "zeroize",
 ]
 
 [[package]]

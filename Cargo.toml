@@ -1,14 +1,14 @@
 [package]
-name = "hearth"
+name = "space-io"
 version = "0.1.0"
 edition = "2021"
 
 [lib]
-name = "hearth"
+name = "space_io"
 path = "src/lib.rs"
 
 [[bin]]
-name = "hearth"
+name = "space-io"
 path = "src/main.rs"
 
 [dependencies]

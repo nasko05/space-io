@@ -7,8 +7,8 @@ import {
   useRef,
   useState,
 } from 'react';
-import { HearthShell } from '../Shell/HearthShell';
-import { HearthRail } from '../Rail/HearthRail';
+import { SpaceShell } from '../Shell/SpaceShell';
+import { SpaceRail } from '../Rail/SpaceRail';
 import { Markdown } from '../Markdown/Markdown';
 import { HistoryPanel } from '../History/HistoryPanel';
 import {
@@ -373,7 +373,7 @@ export function Reader({
   );
 
   /** Flush-then-select for the rail. Kept referentially stable (alongside
-   *  `railOpenVault`) so the memoized `HearthRail` doesn't re-render on every
+   *  `railOpenVault`) so the memoized `SpaceRail` doesn't re-render on every
    *  keystroke. */
   const railSelectFile = useCallback(
     (selectedPath: string) => {
@@ -476,14 +476,14 @@ export function Reader({
   );
 
   return (
-    <HearthShell
+    <SpaceShell
       mode={mode === 'preview' ? 'reading' : 'editing'}
       onLock={onLock}
       theme={theme}
       onToggleTheme={onToggleTheme}
     >
       <div className={styles.layout}>
-        <HearthRail
+        <SpaceRail
           calendar={calendar}
           entries={entries}
           entriesLabel={entriesLabel}
@@ -821,7 +821,7 @@ export function Reader({
           )}
         </main>
       </div>
-    </HearthShell>
+    </SpaceShell>
   );
 }
 

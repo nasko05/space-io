@@ -561,7 +561,7 @@ async fn drafts_do_not_create_history_but_checkpoints_do() {
         entries[0]["message"], "🔖 milestone",
         "newest first, user label"
     );
-    assert_eq!(entries[0]["author"], "hearth");
+    assert_eq!(entries[0]["author"], "space-io");
 }
 
 #[tokio::test]

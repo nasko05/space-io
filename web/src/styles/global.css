@@ -32,13 +32,13 @@
   background: transparent;
 }
 
-@keyframes hearthBlink {
+@keyframes spaceBlink {
   50% {
     opacity: 0;
   }
 }
 
-.hearthDragOverlay {
+.spaceDragOverlay {
   position: fixed;
   inset: 0;
   z-index: 60;
@@ -51,7 +51,7 @@
   font-family: var(--font-sans);
 }
 
-.hearthDragOverlayInner {
+.spaceDragOverlayInner {
   text-align: center;
   border: 2px dashed var(--accent);
   border-radius: 18px;
@@ -59,14 +59,14 @@
   background: var(--overlay-inner);
 }
 
-.hearthDragOverlayIcon {
+.spaceDragOverlayIcon {
   font-size: 42px;
   color: var(--accent);
   margin-bottom: 12px;
   font-weight: 300;
 }
 
-.hearthDragOverlayTitle {
+.spaceDragOverlayTitle {
   font-family: var(--font-serif);
   font-size: 28px;
   font-weight: 500;
@@ -74,7 +74,7 @@
   color: var(--ink);
 }
 
-.hearthDragOverlaySub {
+.spaceDragOverlaySub {
   margin-top: 8px;
   color: var(--mute);
   font-style: italic;
@@ -82,7 +82,7 @@
   font-size: 14px;
 }
 
-.hearthToast {
+.spaceToast {
   position: fixed;
   left: 50%;
   bottom: 28px;
@@ -96,10 +96,10 @@
   letter-spacing: 0.01em;
   z-index: 70;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18);
-  animation: hearthToastIn 0.2s ease;
+  animation: spaceToastIn 0.2s ease;
 }
 
-@keyframes hearthToastIn {
+@keyframes spaceToastIn {
   from {
     opacity: 0;
     transform: translate(-50%, 8px);
@@ -110,7 +110,7 @@
   }
 }
 
-.hearthAgentFab {
+.spaceAgentFab {
   position: fixed;
   right: 24px;
   bottom: 24px;
@@ -129,7 +129,7 @@
   transition: filter 0.15s ease, transform 0.15s ease;
 }
 
-.hearthAgentFab:hover {
+.spaceAgentFab:hover {
   filter: brightness(0.94);
   transform: translateY(-1px);
 }

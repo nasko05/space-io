@@ -17,20 +17,20 @@ use serde_json::Value;
 use tempfile::TempDir;
 use tower::ServiceExt;
 
-use hearth::config::SpaceConfig;
-use hearth::crypto::kdf;
-use hearth::routes;
-use hearth::space::rate_limit::RateLimiter;
-use hearth::space::session::SessionStore;
-use hearth::space::Space;
-use hearth::state::{AppConfig, AppState};
+use space_io::config::SpaceConfig;
+use space_io::crypto::kdf;
+use space_io::routes;
+use space_io::space::rate_limit::RateLimiter;
+use space_io::space::session::SessionStore;
+use space_io::space::Space;
+use space_io::state::{AppConfig, AppState};
 
 /// Cheap KDF params for tests (matches `space::test_helpers`).
 const TEST_LOG_N: u8 = 4;
 const TEST_R: u32 = 8;
 const TEST_P: u32 = 1;
 
-pub const SESSION_COOKIE: &str = "hearth_session";
+pub const SESSION_COOKIE: &str = "spaceio_session";
 
 pub struct Harness {
     pub tempdir: TempDir,
@@ -256,7 +256,7 @@ pub async fn get_authed(harness: &Harness, user: &RegisteredUser, uri: &str) -> 
 /// Build a `multipart/form-data` body for upload tests: a minimal hand-rolled
 /// serializer, just enough for axum's `Multipart` extractor.
 pub fn build_multipart(parts: &[MultipartPart]) -> (String, Vec<u8>) {
-    let boundary = format!("----hearth-test-boundary-{}", rand::random::<u32>());
+    let boundary = format!("----space-io-test-boundary-{}", rand::random::<u32>());
     let mut body = Vec::new();
     for part in parts {
         body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());

@@ -124,7 +124,7 @@ export function PasskeyModal({ open, email, owner, hasPasskey, onClose, onChange
 
         {!supported && (
           <div className={styles.warn}>
-            Your browser doesn't expose the WebAuthn PRF extension that Hearth needs to wrap your
+            Your browser doesn't expose the WebAuthn PRF extension that SpaceIO needs to wrap your
             passphrase. Try a recent Chrome, Edge, or Safari on a device with Touch ID or a
             FIDO2 key.
           </div>

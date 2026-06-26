@@ -8,8 +8,8 @@ import {
   useState,
 } from 'react';
 import { WindowChrome } from '../WindowChrome/WindowChrome';
-import { HearthRail } from '../Rail/HearthRail';
-import { HearthCard } from './HearthCard';
+import { SpaceRail } from '../Rail/SpaceRail';
+import { SpaceCard } from './SpaceCard';
 import {
   Chevron,
   ChevronDown,
@@ -32,9 +32,9 @@ import { DeleteConfirmDialog } from '../VaultDialogs/DeleteConfirmDialog';
 import { CreateFolderDialog } from '../VaultDialogs/CreateFolderDialog';
 import { ExcerptMap, MetaMap, TreeFile, TreeFolder, TreeNode } from '../../api/client';
 import { CalendarView, TodayEntry } from '../../lib/calendar';
-import styles from './HearthVault.module.css';
+import styles from './SpaceVault.module.css';
 
-const DRAG_MIME = 'application/x-hearth-path';
+const DRAG_MIME = 'application/x-space-io-path';
 const SHELF_VISIBLE_LIMIT = 12;
 const NESTED_VISIBLE_LIMIT = 6;
 
@@ -93,7 +93,7 @@ interface Shelf {
   totalCount: number;
 }
 
-export function HearthVault({
+export function SpaceVault({
   tree,
   excerpts,
   meta,
@@ -184,7 +184,7 @@ export function HearthVault({
   }, [meta]);
 
   /** Refs keep the card callbacks referentially stable (so `React.memo` on
-   *  `HearthCard` holds) while still reading the latest selection/anchor/order. */
+   *  `SpaceCard` holds) while still reading the latest selection/anchor/order. */
   const selectionRef = useRef(selection);
   selectionRef.current = selection;
   const anchorRef = useRef(anchor);
@@ -437,7 +437,7 @@ export function HearthVault({
         }
       />
       <div className={styles.layout}>
-        <HearthRail
+        <SpaceRail
           calendar={calendar}
           entries={entries}
           entriesLabel={entriesLabel}
@@ -636,7 +636,7 @@ function useFolderDropTarget(
 
   const dragProps = {
     onDragEnter(event: DragEvent<HTMLElement>) {
-      if (!hasHearthDrag(event)) {
+      if (!hasSpaceDrag(event)) {
         return;
       }
       event.preventDefault();
@@ -649,7 +649,7 @@ function useFolderDropTarget(
       }
     },
     onDragOver(event: DragEvent<HTMLElement>) {
-      if (!hasHearthDrag(event)) {
+      if (!hasSpaceDrag(event)) {
         return;
       }
       event.preventDefault();
@@ -757,7 +757,7 @@ const VaultShelf = memo(function VaultShelf({
           {visible.length > 0 && (
             <div className={styles.grid}>
               {visible.map((file) => (
-                <HearthCard
+                <SpaceCard
                   key={file.path}
                   file={file}
                   excerpt={excerpts[file.path]}
@@ -882,7 +882,7 @@ const NestedFolder = memo(function NestedFolder({
           {visibleFiles.length > 0 && (
             <div className={styles.grid}>
               {visibleFiles.map((file) => (
-                <HearthCard
+                <SpaceCard
                   key={file.path}
                   file={file}
                   excerpt={excerpts[file.path]}
@@ -926,7 +926,7 @@ const NestedFolder = memo(function NestedFolder({
   );
 });
 
-function hasHearthDrag(event: DragEvent<HTMLElement>): boolean {
+function hasSpaceDrag(event: DragEvent<HTMLElement>): boolean {
   const types = event.dataTransfer?.types;
   if (!types) {
     return false;

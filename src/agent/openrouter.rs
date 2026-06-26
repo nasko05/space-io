@@ -252,8 +252,8 @@ fn map_provider_error(status: reqwest::StatusCode) -> AppError {
     }
     if status.is_client_error() {
         return AppError::BadRequest(format!(
-            "the AI provider rejected the request ({status}). Check HEARTH_OPENROUTER_API_KEY \
-             and HEARTH_AGENT_MODEL."
+            "the AI provider rejected the request ({status}). Check SPACEIO_OPENROUTER_API_KEY \
+             and SPACEIO_AGENT_MODEL."
         ));
     }
     AppError::Internal(format!("AI provider error: {status}"))

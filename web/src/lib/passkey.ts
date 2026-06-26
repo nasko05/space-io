@@ -11,7 +11,7 @@
  * Safari 17.4+, FIDO2 authenticators with hmac-secret).
  */
 
-const HKDF_INFO = 'hearth-passkey-wrap';
+const HKDF_INFO = 'space-io-passkey-wrap';
 const IV_LENGTH = 12;
 const ES256_ALGORITHM = -7;
 const RS256_ALGORITHM = -257;
@@ -185,7 +185,7 @@ export async function registerPasskey(
   ensureWebAuthnUsable();
   const prfSalt = crypto.getRandomValues(new Uint8Array(32));
   const challenge = crypto.getRandomValues(new Uint8Array(32));
-  const userId = await sha256(new TextEncoder().encode(`hearth:${owner}`));
+  const userId = await sha256(new TextEncoder().encode(`space-io:${owner}`));
 
   const rp = { name: 'SpaceIO', id: getEffectiveRpId() };
 

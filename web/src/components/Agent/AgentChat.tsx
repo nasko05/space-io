@@ -258,8 +258,8 @@ export function AgentChat({ open, onClose, onVaultChanged }: Props) {
           <div className={styles.notice}>
             <strong>The assistant isn't configured.</strong>
             <p>
-              Set <code>HEARTH_OPENROUTER_API_KEY</code> on the server (optionally{' '}
-              <code>HEARTH_AGENT_MODEL</code> and <code>HEARTH_BRAVE_API_KEY</code>) and restart.
+              Set <code>SPACEIO_OPENROUTER_API_KEY</code> on the server (optionally{' '}
+              <code>SPACEIO_AGENT_MODEL</code> and <code>SPACEIO_BRAVE_API_KEY</code>) and restart.
             </p>
           </div>
         )}

@@ -5,16 +5,16 @@ use std::time::Duration;
 use anyhow::Context;
 use clap::{Parser, Subcommand};
 
-use hearth::routes;
-use hearth::space::rate_limit::RateLimiter;
-use hearth::space::session::SessionStore;
-use hearth::state::{AppConfig, AppState};
+use space_io::routes;
+use space_io::space::rate_limit::RateLimiter;
+use space_io::space::session::SessionStore;
+use space_io::state::{AppConfig, AppState};
 
 #[derive(Parser, Debug)]
 #[command(
-    name = "hearth",
+    name = "space-io",
     version,
-    about = "SpaceIO · Hearth — self-hosted personal repository"
+    about = "SpaceIO — self-hosted personal repository"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -37,7 +37,7 @@ fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info,hearth=debug")),
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info,space_io=debug")),
         )
         .init();
 
@@ -56,7 +56,7 @@ async fn cmd_serve(space_dir: PathBuf, listen: SocketAddr) -> anyhow::Result<()>
     let config = AppConfig::from_env();
     if !config.cookie_secure {
         tracing::warn!(
-            "HEARTH_INSECURE_COOKIES=1: session cookies will not be marked Secure. \
+            "SPACEIO_INSECURE_COOKIES=1: session cookies will not be marked Secure. \
              Acceptable for localhost dev only — any production deploy should run \
              behind TLS and leave this unset."
         );
