@@ -27,17 +27,35 @@ RUN cargo build --release
 
 # ---- stage 3: runtime ----------------------------------------------------
 FROM debian:bookworm-slim AS runtime
+# ca-certificates + libssl3 cover the binary's TLS/link needs; curl is only here
+# for the container HEALTHCHECK below (the Rust image has no python/wget to fall
+# back on, unlike the sibling FastAPI app).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        ca-certificates libssl3 \
+        ca-certificates libssl3 curl \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=build /app/target/release/hearth /usr/local/bin/hearth
+
+# Run as a non-root user. Create /data and hand it to that user before the
+# VOLUME is declared, so the named volume inherits writable ownership when
+# Docker first initialises it. uid 10001 matches the sibling app on this host.
+RUN useradd -r -u 10001 -m appuser \
+    && mkdir -p /data \
+    && chown -R appuser:appuser /data
+USER appuser
 
 # The vault lives here; mount a volume to persist it across container restarts.
 VOLUME /data
 EXPOSE 7777
 
-# This image serves plain HTTP; cookies can't be flagged Secure without TLS.
-# Front the container with a TLS proxy and unset this for production.
-ENV HEARTH_INSECURE_COOKIES=1
+# Liveness probe for `docker compose`/the orchestrator. Hits the unauthenticated
+# /healthz route; a boot that never binds or panics flips the container to
+# unhealthy instead of silently serving errors.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD curl -fsS http://127.0.0.1:7777/healthz || exit 1
 
+# No HEARTH_INSECURE_COOKIES here: in production the app runs behind the shared
+# TLS proxy, so it must mark session cookies Secure. The cookie code only sets
+# Secure when the request arrived over HTTPS (read from X-Forwarded-Proto), so
+# plain-HTTP local runs still work. For local HTTP testing without a proxy, pass
+# HEARTH_INSECURE_COOKIES=1 explicitly (deploy.sh does this for you).
 ENTRYPOINT ["hearth", "serve", "--space-dir", "/data", "--listen", "0.0.0.0:7777"]
