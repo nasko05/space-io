@@ -41,7 +41,7 @@ jobs:
       # compile time via rust-embed, so the directory must exist before
       # cargo touches it.
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '24'
           cache: npm
@@ -134,7 +134,7 @@ jobs:
         run: cargo audit
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '24'
           cache: npm
