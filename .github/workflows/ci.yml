@@ -6,14 +6,36 @@ on:
   push:
     branches: [main]
 
+# Least privilege by default: jobs get a read-only GITHUB_TOKEN and opt into more
+# only where they need it (see security-audit). Narrows the blast radius if any
+# third-party action is compromised.
+permissions:
+  contents: read
+
+# Don't burn runners on superseded commits: a newer push to the same ref cancels
+# the in-flight run. `main` is deliberately excluded from cancellation so a push
+# that triggers a deploy always finishes its checks.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 env:
   CARGO_TERM_COLOR: always
 
+# Third-party actions are referenced by their major version tag. For stronger
+# supply-chain hardening, pin each to a full commit SHA — enable Dependabot
+# (`.github/dependabot.yml`, package-ecosystem "github-actions") to pin and keep
+# them current automatically, since resolving the right SHA needs live GitHub
+# access this environment can't provide reliably.
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The build needs no credentials after checkout; don't leave the token
+          # persisted in .git/config where a later step could exfiltrate it.
+          persist-credentials: false
 
       # Frontend has to build first — the Rust crate embeds web/dist/ at
       # compile time via rust-embed, so the directory must exist before
@@ -40,7 +62,13 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt, clippy
+          # llvm-tools-preview backs the coverage instrumentation below.
+          components: rustfmt, clippy, llvm-tools-preview
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
 
       - name: Cache cargo
         uses: actions/cache@v4
@@ -59,24 +87,97 @@ jobs:
       - name: cargo clippy
         run: cargo clippy --all-targets -- -D warnings
 
-      # Split unit tests (in-module `#[cfg(test)]`) from HTTP integration
-      # tests so a failure in `tests/integration.rs` is immediately distinct
-      # from a regression inside `src/`. Both targets must pass for CI to
-      # go green.
-      - name: cargo test (unit, lib + bin)
-        run: cargo test --lib --bins
+      # One instrumented compile runs the WHOLE suite — in-module unit tests,
+      # the bins, and the HTTP integration tests (`--lib --bins --tests`) — AND
+      # enforces the coverage floor. Coverage needs its own instrumentation
+      # flags, so a separate coverage job could never reuse this build's objects
+      # anyway; folding the two together means the test suite is compiled and run
+      # exactly once instead of twice (plain test + instrumented coverage).
+      #
+      # Drops below 95% line coverage and the job — and so the whole CI run, and
+      # so the deploy that chains off it — fails. src/main.rs (the clap shim +
+      # serve loop that binds the socket) is excluded: it can't be exercised by
+      # an in-process test, and is covered end-to-end by the docker-smoke job,
+      # which boots the real binary and probes /healthz.
+      - name: cargo test + enforce 95% line coverage (unit + integration)
+        run: |
+          cargo llvm-cov --lib --bins --tests \
+            --ignore-filename-regex 'src/main\.rs' \
+            --fail-under-lines 95
 
-      - name: cargo test (integration)
-        run: cargo test --test integration
+  # Supply-chain / vulnerability gate. Independent of the build so a freshly
+  # disclosed advisory surfaces even when the code itself is unchanged.
+  security-audit:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # dependency-review-action posts its summary on the PR.
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+
+      # Scan the locked Rust dependency tree against the RUSTSEC advisory DB.
+      # Fails the build on an actual vulnerability; informational advisories
+      # (unmaintained / unsound, usually deep in the transitive tree and not
+      # fixable on the spot) are surfaced in the log but don't block a deploy.
+      - name: cargo audit
+        run: cargo audit
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      # Audit only the dependencies that actually ship in the browser bundle
+      # (`--omit=dev`): react, marked, pdfjs-dist, mammoth, and their transitive
+      # tree. Dev-only build tooling (vite/esbuild) runs on a developer's machine,
+      # never in production, so its advisories shouldn't gate a deploy. Fail on
+      # high/critical so a real vulnerability in shipped code blocks the release.
+      - name: npm audit (production deps)
+        working-directory: web
+        run: npm audit --omit=dev --audit-level=high
+
+      # On PRs, flag any newly introduced dependency carrying a known
+      # vulnerability or a disallowed licence. Best-effort: the action needs the
+      # repository's Dependency Graph feature enabled (Settings -> Code security)
+      # and errors out where it isn't, so `continue-on-error` keeps it from
+      # blocking CI on repos without it. Enable Dependency Graph to turn this into
+      # a hard, blocking gate (drop the `continue-on-error` line once it is on).
+      - name: Dependency review
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: high
+          comment-summary-in-pr: on-failure
 
   # Build the production image and prove the container actually boots and serves
   # /healthz through the same compose file that ships to the VPS. Catches
   # Dockerfile/compose regressions (bad base tag, non-root perms on /data, a
   # broken probe) that the cargo/npm jobs above can't see.
+  #
+  # Gated on `build`: the image bake + boot is the most expensive job in the
+  # pipeline, so there's no point spending it on a commit whose unit/integration
+  # tests, fmt, or clippy already failed.
   docker-smoke:
+    needs: build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Create the shared external network
         # In production this is created once on the host and the sibling app's

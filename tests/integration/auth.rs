@@ -3,12 +3,145 @@
 //! runs scrypt, cookies thread through as a browser's would). Tests that don't
 //! need that cost use `Harness::register`, which writes a cheap-KDF space.
 
+use axum::body::Body;
+use axum::http::header;
+use axum::http::Method;
 use axum::http::Request;
 use axum::http::StatusCode;
 
 use super::common::{
     body_json, expect_status, get, post_json, urlencode, with_cookie, Harness, SESSION_COOKIE,
 };
+
+/// A POST with a JSON body and an extra `X-Forwarded-Proto: https` header, the
+/// way the production reverse proxy presents a TLS request to the app.
+fn post_json_https(uri: &str, body: &serde_json::Value) -> Request<Body> {
+    Request::builder()
+        .method(Method::POST)
+        .uri(uri)
+        .header(header::CONTENT_TYPE, "application/json")
+        .header("x-forwarded-proto", "https")
+        .body(Body::from(serde_json::to_vec(body).unwrap()))
+        .unwrap()
+}
+
+fn set_cookie_of(res: &axum::http::Response<Body>) -> String {
+    res.headers()
+        .get(header::SET_COOKIE)
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_string)
+        .expect("a Set-Cookie header")
+}
+
+#[tokio::test]
+async fn init_registers_a_first_user_and_mints_a_session() {
+    let h = Harness::fresh();
+    let res = h
+        .send(post_json_https(
+            "/api/auth/init",
+            &serde_json::json!({
+                "email": "ada@example.lan",
+                "passphrase": "correct horse battery",
+                "owner": "Ada Lovelace",
+            }),
+        ))
+        .await;
+    assert_eq!(res.status(), StatusCode::CREATED);
+    let cookie = set_cookie_of(&res);
+    assert!(cookie.starts_with(SESSION_COOKIE), "got: {cookie}");
+    assert!(cookie.contains("HttpOnly"), "got: {cookie}");
+    let body = body_json(res).await;
+    assert!(
+        body["user_uuid"].as_str().is_some_and(|s| !s.is_empty()),
+        "init should return the new uuid: {body}"
+    );
+
+    // The freshly registered user can immediately unlock with the same secret.
+    let unlock = h
+        .send(post_json(
+            "/api/auth/unlock",
+            &serde_json::json!({ "email": "ada@example.lan", "passphrase": "correct horse battery" }),
+        ))
+        .await;
+    assert_eq!(unlock.status(), StatusCode::NO_CONTENT);
+}
+
+#[tokio::test]
+async fn unlock_over_https_sets_a_secure_cookie_when_enabled() {
+    let h = Harness::with_cookie_secure(true);
+    let user = h.register("ada@example.lan", "passphrase-9");
+    let res = h
+        .send(post_json_https(
+            "/api/auth/unlock",
+            &serde_json::json!({ "email": user.email, "passphrase": "passphrase-9" }),
+        ))
+        .await;
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+    let cookie = set_cookie_of(&res);
+    assert!(
+        cookie.contains("Secure"),
+        "expected Secure over https: {cookie}"
+    );
+}
+
+#[tokio::test]
+async fn unlock_without_https_leaves_cookie_insecure_even_when_enabled() {
+    let h = Harness::with_cookie_secure(true);
+    let user = h.register("ada@example.lan", "passphrase-9");
+    let res = h
+        .send(post_json(
+            "/api/auth/unlock",
+            &serde_json::json!({ "email": user.email, "passphrase": "passphrase-9" }),
+        ))
+        .await;
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+    let cookie = set_cookie_of(&res);
+    assert!(
+        !cookie.contains("Secure"),
+        "plain HTTP must not mark the cookie Secure, or dev refreshes log out: {cookie}"
+    );
+}
+
+#[tokio::test]
+async fn init_rejects_oversize_passphrase() {
+    let h = Harness::fresh();
+    let res = h
+        .send(post_json(
+            "/api/auth/init",
+            &serde_json::json!({ "email": "ada@example.lan", "passphrase": "p".repeat(2000) }),
+        ))
+        .await;
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn init_rejects_oversize_owner() {
+    let h = Harness::fresh();
+    let res = h
+        .send(post_json(
+            "/api/auth/init",
+            &serde_json::json!({
+                "email": "ada@example.lan",
+                "passphrase": "passphrase-9",
+                "owner": "o".repeat(300),
+            }),
+        ))
+        .await;
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn unlock_rejects_oversize_fields_as_wrong_passphrase() {
+    let h = Harness::fresh();
+    let _user = h.register("ada@example.lan", "passphrase-9");
+    for body in [
+        serde_json::json!({ "email": format!("{}@x.lan", "a".repeat(300)), "passphrase": "passphrase-9" }),
+        serde_json::json!({ "email": "ada@example.lan", "passphrase": "p".repeat(2000) }),
+    ] {
+        let res = h.send(post_json("/api/auth/unlock", &body)).await;
+        assert_eq!(res.status(), StatusCode::UNAUTHORIZED, "body: {body}");
+    }
+}
 
 #[tokio::test]
 async fn status_on_fresh_space_reports_no_users_no_session() {

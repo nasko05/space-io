@@ -396,4 +396,59 @@ mod tests {
         let p = build_pending(&call("create_folder", "")).unwrap();
         assert_eq!(p.tool, "create_folder");
     }
+
+    #[test]
+    fn list_files_on_empty_vault_says_so() {
+        let (_d, space, pass) = crate::space::test_helpers::make_space("p");
+        let out = execute_vault_tool(&space, &pass, "list_files", &json!({})).unwrap();
+        assert!(out.contains("the vault is empty"), "got: {out}");
+    }
+
+    #[test]
+    fn search_notes_with_no_match_reports_none() {
+        let (_d, space, pass) = make_space_with_note("p", "a.md", "# Hello\n\nworld");
+        let out = execute_vault_tool(
+            &space,
+            &pass,
+            "search_notes",
+            &json!({ "query": "zzzznomatch" }),
+        )
+        .unwrap();
+        assert!(out.contains("No notes match"), "got: {out}");
+    }
+
+    #[test]
+    fn summarize_renders_set_tags_and_unknown_tools() {
+        let tags = build_pending(&call("set_tags", r#"{"path":"a.md","tags":["x","y"]}"#)).unwrap();
+        assert!(
+            tags.summary.contains("Set tags on a.md to [x, y]"),
+            "got: {}",
+            tags.summary
+        );
+        // The catch-all arm keeps an unrecognised tool name from panicking.
+        let other = build_pending(&call("frobnicate", "{}")).unwrap();
+        assert!(
+            other.summary.contains("frobnicate"),
+            "got: {}",
+            other.summary
+        );
+    }
+
+    #[test]
+    fn read_file_truncates_an_oversized_note_on_a_char_boundary() {
+        // Place a 3-byte char straddling the 80 000-byte cap so truncation has to
+        // walk back to a UTF-8 boundary rather than slicing mid-character.
+        let content = format!("{}€{}", "a".repeat(79_999), "z".repeat(100));
+        let (_d, space, pass) = make_space_with_note("p", "big.md", &content);
+        let out =
+            execute_vault_tool(&space, &pass, "read_file", &json!({ "path": "big.md" })).unwrap();
+        assert!(
+            out.contains("truncated, note is longer"),
+            "expected a truncation marker"
+        );
+        assert!(
+            out.len() < content.len(),
+            "output should be shorter than the note"
+        );
+    }
 }

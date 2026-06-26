@@ -360,6 +360,17 @@ const BRAVE_ENDPOINT: &str = "https://api.search.brave.com/res/v1/web/search";
 const BRAVE_RESULT_COUNT: usize = 5;
 
 async fn brave_search(cfg: &AgentConfig, args: &serde_json::Value) -> AppResult<String> {
+    brave_search_at(BRAVE_ENDPOINT, cfg, args).await
+}
+
+/// The web-search body, with the endpoint injected so tests can point it at a
+/// local mock instead of the live Brave API. Production always passes
+/// [`BRAVE_ENDPOINT`].
+async fn brave_search_at(
+    endpoint: &str,
+    cfg: &AgentConfig,
+    args: &serde_json::Value,
+) -> AppResult<String> {
     let query = args
         .get("query")
         .and_then(serde_json::Value::as_str)
@@ -377,7 +388,7 @@ async fn brave_search(cfg: &AgentConfig, args: &serde_json::Value) -> AppResult<
         .map_err(|e| AppError::Internal(format!("build http client: {e}")))?;
 
     let resp = client
-        .get(BRAVE_ENDPOINT)
+        .get(endpoint)
         .query(&[("q", query), ("count", &BRAVE_RESULT_COUNT.to_string())])
         .header("Accept", "application/json")
         .header("X-Subscription-Token", key)
@@ -652,6 +663,204 @@ mod tests {
             !turn.pending_actions[0].tool_call_id.trim().is_empty(),
             "a tool_call_id must be present so the result can be correlated"
         );
+    }
+
+    /// Spin up a throwaway HTTP endpoint that answers a single `GET /search`
+    /// with the given status + JSON body, standing in for the Brave API.
+    async fn spawn_brave(status: axum::http::StatusCode, body: serde_json::Value) -> String {
+        use axum::extract::State;
+        use axum::routing::get;
+        use axum::{Json, Router};
+        use std::sync::Arc;
+
+        type S = Arc<(axum::http::StatusCode, serde_json::Value)>;
+        async fn handler(State(s): State<S>) -> (axum::http::StatusCode, Json<serde_json::Value>) {
+            (s.0, Json(s.1.clone()))
+        }
+        let state: S = Arc::new((status, body));
+        let app = Router::new()
+            .route("/search", get(handler))
+            .with_state(state);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app.into_make_service())
+                .await
+                .unwrap();
+        });
+        format!("http://{addr}/search")
+    }
+
+    fn brave_cfg() -> AgentConfig {
+        let mut cfg = test_cfg();
+        cfg.brave_api_key = Some("brave-key".into());
+        cfg.web_search = WebSearch::Brave;
+        cfg
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn brave_search_formats_the_top_results() {
+        let body = serde_json::json!({"web":{"results":[
+            {"title":"Rust","url":"https://rust-lang.org","description":"A language"},
+            {"title":"Tokio","url":"https://tokio.rs","description":"Async runtime"}
+        ]}});
+        let endpoint = spawn_brave(axum::http::StatusCode::OK, body).await;
+        let out = brave_search_at(
+            &endpoint,
+            &brave_cfg(),
+            &serde_json::json!({"query":"rust"}),
+        )
+        .await
+        .unwrap();
+        assert!(out.contains("Top web results for \"rust\""), "got: {out}");
+        assert!(out.contains("Rust — https://rust-lang.org"), "got: {out}");
+        assert!(out.contains("Async runtime"), "got: {out}");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn brave_search_reports_no_results() {
+        let endpoint = spawn_brave(
+            axum::http::StatusCode::OK,
+            serde_json::json!({"web":{"results":[]}}),
+        )
+        .await;
+        let out = brave_search_at(
+            &endpoint,
+            &brave_cfg(),
+            &serde_json::json!({"query":"obscure"}),
+        )
+        .await
+        .unwrap();
+        assert!(out.contains("No web results for \"obscure\""), "got: {out}");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn brave_search_maps_429_to_too_many_requests() {
+        let endpoint = spawn_brave(
+            axum::http::StatusCode::TOO_MANY_REQUESTS,
+            serde_json::json!({}),
+        )
+        .await;
+        let err = brave_search_at(&endpoint, &brave_cfg(), &serde_json::json!({"query":"x"}))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, AppError::TooManyRequests { .. }));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn brave_search_maps_other_status_to_internal() {
+        let endpoint = spawn_brave(
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            serde_json::json!({}),
+        )
+        .await;
+        let err = brave_search_at(&endpoint, &brave_cfg(), &serde_json::json!({"query":"x"}))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, AppError::Internal(_)));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn brave_search_requires_a_nonempty_query() {
+        let err = brave_search_at(
+            "http://127.0.0.1:9/unused",
+            &brave_cfg(),
+            &serde_json::json!({"query":"   "}),
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(err, AppError::BadRequest(_)));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn brave_search_without_a_key_is_internal_error() {
+        let mut cfg = brave_cfg();
+        cfg.brave_api_key = None;
+        let err = brave_search_at(
+            "http://127.0.0.1:9/unused",
+            &cfg,
+            &serde_json::json!({"query":"x"}),
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(err, AppError::Internal(_)));
+    }
+
+    #[test]
+    fn error_text_is_short_and_non_sensitive() {
+        assert_eq!(error_text(&AppError::NotFound), "not found");
+        assert_eq!(error_text(&AppError::Forbidden), "forbidden path");
+        assert_eq!(
+            error_text(&AppError::BadRequest("be specific".into())),
+            "be specific"
+        );
+        assert_eq!(
+            error_text(&AppError::TooManyRequests {
+                retry_after_secs: 3
+            }),
+            "rate limited"
+        );
+        assert_eq!(error_text(&AppError::Unauthorized), "not permitted");
+        assert_eq!(error_text(&AppError::WrongPassphrase), "not permitted");
+        assert_eq!(
+            error_text(&AppError::Internal("boom".into())),
+            "internal error"
+        );
+        let io = AppError::Io(std::io::Error::other("disk"));
+        assert_eq!(error_text(&io), "internal error");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn loop_stops_at_the_step_cap() {
+        use crate::space::test_helpers::make_space_with_note;
+        let base = spawn_mock(vec![serde_json::json!({"choices":[{"message":{
+            "role":"assistant","content":null,
+            "tool_calls":[{"id":"c1","type":"function","function":{
+                "name":"read_file","arguments":"{\"path\":\"a.md\"}"}}]}}]})])
+        .await;
+        let mut cfg = test_cfg();
+        cfg.base_url = base;
+        cfg.web_search = WebSearch::Disabled;
+        cfg.max_steps = 1;
+        let (_d, space, pass) = make_space_with_note("p", "a.md", "x");
+        let turn = run_turn(&cfg, space, pass, vec![user_msg("loop")])
+            .await
+            .unwrap();
+        assert!(turn.done);
+        assert_eq!(turn.assistant_text.as_deref(), Some(STEP_CAP_MESSAGE));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn loop_reports_invalid_mutating_args_back_to_the_model() {
+        use crate::space::test_helpers::make_space_with_note;
+        let base = spawn_mock(vec![
+            serde_json::json!({"choices":[{"message":{"role":"assistant","content":null,
+                "tool_calls":[{"id":"w1","type":"function","function":{
+                    "name":"write_file","arguments":"{not json"}}]}}]}),
+            serde_json::json!({"choices":[{"message":{"role":"assistant",
+                "content":"I hit an error and stopped. DONE"}}]}),
+        ])
+        .await;
+        let mut cfg = test_cfg();
+        cfg.base_url = base;
+        cfg.web_search = WebSearch::Disabled;
+        let (_d, space, pass) = make_space_with_note("p", "a.md", "x");
+        let turn = run_turn(&cfg, space, pass, vec![user_msg("write a bad note")])
+            .await
+            .unwrap();
+        assert!(turn.done);
+        assert!(turn.pending_actions.is_empty());
+        let tool_msg = turn
+            .messages
+            .iter()
+            .find(|m| m.role == Role::Tool)
+            .expect("an error tool result is fed back");
+        assert!(tool_msg
+            .content
+            .as_deref()
+            .unwrap()
+            .to_lowercase()
+            .contains("error"));
     }
 
     fn test_cfg() -> AgentConfig {

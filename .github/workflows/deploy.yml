@@ -49,6 +49,12 @@ on:
     types: [completed]
     branches: [main]
 
+# Least privilege: this job only SSHes out to the VPS and never touches the
+# GitHub API or the repo contents through the token, so a read-only token is
+# all it should hold.
+permissions:
+  contents: read
+
 # Never run two deploys at once; let an in-flight deploy finish.
 concurrency:
   group: deploy-production

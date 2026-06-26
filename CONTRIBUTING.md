@@ -63,6 +63,27 @@ Any of those four failing will fail the PR check. `cargo fmt` and
 `clippy` are pinned with `-D warnings`, so a new warning is a build
 break.
 
+Two further gates run in CI and are worth reproducing locally:
+
+```sh
+# Test coverage — must stay at or above 95% lines across unit + integration
+# tests. src/main.rs (the thin clap/serve shim) is excluded; it's covered
+# end-to-end by the docker-smoke job instead.
+cargo install cargo-llvm-cov   # once
+cargo llvm-cov --lib --bins --tests \
+  --ignore-filename-regex 'src/main\.rs' --fail-under-lines 95
+
+# Dependency advisories — fails on a known vulnerability in the shipped
+# Rust or npm dependency tree.
+cargo install cargo-audit && cargo audit
+cd web && npm audit --omit=dev --audit-level=high
+```
+
+New code needs tests to keep coverage above the floor — a PR that drops
+it below 95% fails the `coverage` job. The expensive `docker-smoke` job
+only runs after `build` is green, so a fmt/clippy/test failure won't burn
+a container build.
+
 ## Branch + PR convention
 
 - Branch off `main`. Branch name doesn't matter, but `topic/short-name`

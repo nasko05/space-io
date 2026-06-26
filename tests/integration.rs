@@ -18,3 +18,5 @@ mod health;
 mod persistence;
 #[path = "integration/security.rs"]
 mod security;
+#[path = "integration/static_files.rs"]
+mod static_files;

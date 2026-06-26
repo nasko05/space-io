@@ -371,6 +371,101 @@ mod tests {
         assert!(matches!(err, AppError::Internal(_)));
     }
 
+    #[test]
+    fn tool_call_type_defaults_to_function_when_absent() {
+        let call: ToolCall =
+            serde_json::from_str(r#"{"id":"c1","function":{"name":"read_file","arguments":"{}"}}"#)
+                .unwrap();
+        assert_eq!(call.kind, "function");
+    }
+
+    /// A throwaway OpenAI-compatible endpoint answering one POST with the given
+    /// status + JSON, so `chat` can be exercised without the network.
+    async fn spawn_chat_mock(status: axum::http::StatusCode, body: serde_json::Value) -> String {
+        use axum::extract::State;
+        use axum::routing::post;
+        use axum::{Json, Router};
+        use std::sync::Arc;
+
+        type S = Arc<(axum::http::StatusCode, serde_json::Value)>;
+        async fn handler(State(s): State<S>) -> (axum::http::StatusCode, Json<serde_json::Value>) {
+            (s.0, Json(s.1.clone()))
+        }
+        let state: S = Arc::new((status, body));
+        let app = Router::new()
+            .route("/chat/completions", post(handler))
+            .with_state(state);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app.into_make_service())
+                .await
+                .unwrap();
+        });
+        format!("http://{addr}")
+    }
+
+    fn cfg_with(base_url: String) -> AgentConfig {
+        AgentConfig {
+            openrouter_api_key: Some("sk-test".into()),
+            brave_api_key: None,
+            model: "test-model".into(),
+            base_url,
+            web_search: crate::agent::WebSearch::OpenRouterPlugin,
+            // Set so the optional HTTP-Referer/X-Title headers are exercised.
+            referer: Some("https://space.io".into()),
+            title: Some("SpaceIO".into()),
+            max_steps: 8,
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn chat_sends_headers_and_parses_the_reply() {
+        let base = spawn_chat_mock(
+            axum::http::StatusCode::OK,
+            serde_json::json!({"choices":[{"message":{"role":"assistant","content":"hello there"}}]}),
+        )
+        .await;
+        let cfg = cfg_with(base);
+        let client = OpenRouterClient::new(&cfg, "sk-test", false).unwrap();
+        let msg = client.chat(&[ChatMessage::system("s")], &[]).await.unwrap();
+        assert_eq!(msg.role, Role::Assistant);
+        assert_eq!(msg.content.as_deref(), Some("hello there"));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn chat_surfaces_a_provider_error_status() {
+        let base = spawn_chat_mock(
+            axum::http::StatusCode::UNAUTHORIZED,
+            serde_json::json!({"error":"bad key"}),
+        )
+        .await;
+        let cfg = cfg_with(base);
+        // web_plugin: true also serialises the `plugins` field on the wire.
+        let client = OpenRouterClient::new(&cfg, "sk-test", true).unwrap();
+        let err = client
+            .chat(&[ChatMessage::system("s")], &[])
+            .await
+            .unwrap_err();
+        assert!(matches!(err, AppError::BadRequest(_)));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn chat_errors_when_no_choices_are_returned() {
+        let base = spawn_chat_mock(
+            axum::http::StatusCode::OK,
+            serde_json::json!({"choices":[]}),
+        )
+        .await;
+        let cfg = cfg_with(base);
+        let client = OpenRouterClient::new(&cfg, "sk-test", false).unwrap();
+        let err = client
+            .chat(&[ChatMessage::system("s")], &[])
+            .await
+            .unwrap_err();
+        assert!(matches!(err, AppError::Internal(_)));
+    }
+
     /// Proves reqwest + rustls can complete a real TLS handshake against the
     /// provider. Ignored by default so CI (and offline dev) stay hermetic;
     /// run with `cargo test -- --ignored tls_smoke`.

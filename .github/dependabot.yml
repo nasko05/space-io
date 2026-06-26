@@ -1,0 +1,29 @@
+version: 2
+updates:
+  # Keep CI action versions current and pinned. With the workflow referencing
+  # actions by major-version tag, Dependabot opens PRs that pin each to a commit
+  # SHA and bumps them as new releases land — the supply-chain hardening that
+  # needs live GitHub access to resolve correctly.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: ci
+
+  # Rust crate advisories/updates, so a fix for something the security-audit job
+  # would flag lands as a PR instead of waiting on a manual bump.
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: deps
+
+  # Frontend dependency updates (the bundle that ships to the browser).
+  - package-ecosystem: npm
+    directory: /web
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: deps
