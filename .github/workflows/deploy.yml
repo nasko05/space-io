@@ -1,0 +1,145 @@
+name: Deploy
+
+# Fully automated continuous deployment to the shared Contabo VPS. Mirrors the
+# sibling cloud-storage app's deploy so day-2 ops are identical across both.
+#
+# Trigger: runs ONLY after the CI workflow finishes successfully on `main`, so a
+# red build never reaches the server. The job then, with zero manual steps:
+#   1. renders the server's .env from GitHub Secrets + Variables (the single
+#      source of truth for runtime config),
+#   2. ships it to the VPS (atomic, mode 600),
+#   3. SSHes in, syncs `main`, and rebuilds the container,
+#   4. verifies /healthz before declaring success — a bad deploy fails loudly
+#      and the previous container keeps serving.
+# All persistent state lives on the `hearth-data` named volume, so redeploys
+# never touch user notes, documents, or uploads.
+#
+# ---- Configuration lives entirely in GitHub (Settings -> Secrets and
+#      variables -> Actions). No manual editing of files on the server. ----
+#
+# Required SECRETS (deploy access; SHARED with the sibling app — same VPS, same
+# `deploy` user, same keypair):
+#   DEPLOY_HOST     - VPS IPv4 address (GitHub runners have NO IPv6 route, so an
+#                     IPv6 here will hang/fail — use the IPv4)
+#   DEPLOY_USER     - the deploy user on the VPS (e.g. deploy)
+#   DEPLOY_SSH_KEY  - PRIVATE key whose public half is in the deploy user's
+#                     ~/.ssh/authorized_keys on the VPS
+#
+# Optional SECRETS (sensitive; leave unset to keep the AI assistant off and
+# nothing leaving the box):
+#   HEARTH_OPENROUTER_API_KEY - turns the in-app AI assistant on
+#   HEARTH_BRAVE_API_KEY      - direct Brave web search (else OpenRouter's plugin)
+#
+# Optional VARIABLES (non-sensitive; edit in the UI, then re-run). Defaults
+# apply when unset:
+#   DOMAIN                 (default: personal-area.personal-drive-io.com) — the
+#                          subdomain the SHARED Caddy routes to hearth:7777. Set
+#                          the matching site block in the sibling app's Caddyfile
+#                          (see DEPLOYMENT.md); informational here.
+#   HEARTH_AGENT_MODEL     (default: qwen/qwen3.6-27b)
+#   HEARTH_AGENT_WEB_SEARCH(default: 1)
+#   HEARTH_AGENT_MAX_STEPS (default: 8)
+#
+# See DEPLOYMENT.md for the one-time server setup.
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+
+# Never run two deploys at once; let an in-flight deploy finish.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    # Only deploy when the CI run we are chaining off actually passed.
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy over SSH
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          # --- Runtime config rendered into the server .env ---
+          # Secrets (sensitive; optional — empty means the agent stays off):
+          HEARTH_OPENROUTER_API_KEY: ${{ secrets.HEARTH_OPENROUTER_API_KEY }}
+          HEARTH_BRAVE_API_KEY: ${{ secrets.HEARTH_BRAVE_API_KEY }}
+          # Variables (non-sensitive; defaults applied when unset):
+          DOMAIN: ${{ vars.DOMAIN || 'personal-area.personal-drive-io.com' }}
+          HEARTH_AGENT_MODEL: ${{ vars.HEARTH_AGENT_MODEL || 'qwen/qwen3.6-27b' }}
+          HEARTH_AGENT_WEB_SEARCH: ${{ vars.HEARTH_AGENT_WEB_SEARCH || '1' }}
+          HEARTH_AGENT_MAX_STEPS: ${{ vars.HEARTH_AGENT_MAX_STEPS || '8' }}
+        run: |
+          set -euo pipefail
+
+          # Guard: abort BEFORE touching the server if deploy access is missing,
+          # so a working .env on the box is never clobbered by a half-config run.
+          if [ -z "${DEPLOY_HOST}" ] || [ -z "${DEPLOY_USER}" ] || [ -z "${DEPLOY_SSH_KEY}" ]; then
+            echo "::error::Set DEPLOY_HOST, DEPLOY_USER, and DEPLOY_SSH_KEY as repository secrets."
+            exit 1
+          fi
+
+          mkdir -p ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          # Trust the host on first contact (TOFU). For stronger security, pin the
+          # VPS host key in a secret and write it to known_hosts instead.
+          ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+
+          # Render the .env from the values above (secrets are masked in logs).
+          # Empty optional keys are written blank; the app treats blank as unset.
+          # No HEARTH_INSECURE_COOKIES line: production must keep cookies Secure.
+          umask 077
+          {
+            echo "HEARTH_OPENROUTER_API_KEY=${HEARTH_OPENROUTER_API_KEY}"
+            echo "HEARTH_BRAVE_API_KEY=${HEARTH_BRAVE_API_KEY}"
+            echo "HEARTH_AGENT_MODEL=${HEARTH_AGENT_MODEL}"
+            echo "HEARTH_AGENT_WEB_SEARCH=${HEARTH_AGENT_WEB_SEARCH}"
+            echo "HEARTH_AGENT_MAX_STEPS=${HEARTH_AGENT_MAX_STEPS}"
+          } > hearth.env
+
+          # Ship the rendered env, then deploy.
+          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes \
+            hearth.env "$DEPLOY_USER@$DEPLOY_HOST:~/space-io/.env.new"
+          rm -f hearth.env
+
+          ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" 'bash -s' <<'REMOTE'
+            set -euo pipefail
+            cd ~/space-io
+
+            # Atomically replace the env with the freshly-rendered one.
+            chmod 600 .env.new
+            mv .env.new .env
+
+            # The shared proxy network must exist before compose references it.
+            # Idempotent: a no-op once it has been created (and once the sibling
+            # app's Caddy has joined it).
+            docker network create web 2>/dev/null || true
+
+            # Sync to the exact state of origin/main and (re)build the container.
+            git fetch origin main
+            git reset --hard origin/main
+            docker compose up -d --build
+            docker image prune -f
+
+            # Verify the app actually came up before calling this a success. If
+            # not, the previous container is still serving — fail loud.
+            ok=""
+            for i in $(seq 1 30); do
+              if curl -fsS http://127.0.0.1:8001/healthz >/dev/null 2>&1; then ok=1; break; fi
+              sleep 5
+            done
+            if [ -z "$ok" ]; then
+              echo "::error::App did not become healthy after deploy"
+              docker compose ps
+              docker compose logs --tail=80 hearth
+              exit 1
+            fi
+
+            echo "Deploy OK — app healthy."
+            docker compose ps
+          REMOTE
