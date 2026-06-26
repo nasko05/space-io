@@ -33,17 +33,15 @@ name: Deploy
 #   SPACEIO_OPENROUTER_API_KEY - turns the in-app AI assistant on
 #   SPACEIO_BRAVE_API_KEY      - direct Brave web search (else OpenRouter's plugin)
 #
-# Optional VARIABLES (non-sensitive; edit in the UI, then re-run). Defaults
-# apply when unset:
-#   DOMAIN                 (default: personal-area.personal-drive-io.com) — the
-#                          subdomain the SHARED Caddy routes to space-io:7777. Set
-#                          the matching site block in the sibling app's Caddyfile
-#                          (see DEPLOYMENT.md); informational here.
-#   SPACEIO_AGENT_MODEL     (default: qwen/qwen3.6-27b)
-#   SPACEIO_AGENT_WEB_SEARCH(default: 1)
-#   SPACEIO_AGENT_MAX_STEPS (default: 8)
+# Optional VARIABLES (non-sensitive; edit in the UI, then re-run). Set one to
+# override; the default for each lives in docker-compose.yml (${VAR:-default}),
+# the single source of truth:
+#   SPACEIO_AGENT_MODEL       (compose default: qwen/qwen3.6-27b)
+#   SPACEIO_AGENT_WEB_SEARCH  (compose default: 1)
+#   SPACEIO_AGENT_MAX_STEPS   (compose default: 8)
 #
-# See DEPLOYMENT.md for the one-time server setup.
+# The public domain is NOT an app setting — it lives in the sibling Caddy's site
+# block (see DEPLOYMENT.md). See DEPLOYMENT.md for the one-time server setup.
 
 on:
   workflow_run:
@@ -71,11 +69,15 @@ jobs:
           # Secrets (sensitive; optional — empty means the agent stays off):
           SPACEIO_OPENROUTER_API_KEY: ${{ secrets.SPACEIO_OPENROUTER_API_KEY }}
           SPACEIO_BRAVE_API_KEY: ${{ secrets.SPACEIO_BRAVE_API_KEY }}
-          # Variables (non-sensitive; defaults applied when unset):
-          DOMAIN: ${{ vars.DOMAIN || 'personal-area.personal-drive-io.com' }}
-          SPACEIO_AGENT_MODEL: ${{ vars.SPACEIO_AGENT_MODEL || 'qwen/qwen3.6-27b' }}
-          SPACEIO_AGENT_WEB_SEARCH: ${{ vars.SPACEIO_AGENT_WEB_SEARCH || '1' }}
-          SPACEIO_AGENT_MAX_STEPS: ${{ vars.SPACEIO_AGENT_MAX_STEPS || '8' }}
+          # Variables (non-sensitive). Deliberately NO `|| default` here: an unset
+          # Variable is passed through empty, and docker-compose.yml's
+          # ${VAR:-default} supplies the value — one source of truth for defaults
+          # (also what a plain local `docker compose up` uses). Set a Variable to
+          # override. (The public domain isn't an app setting — it lives in the
+          # sibling Caddy's site block; see DEPLOYMENT.md.)
+          SPACEIO_AGENT_MODEL: ${{ vars.SPACEIO_AGENT_MODEL }}
+          SPACEIO_AGENT_WEB_SEARCH: ${{ vars.SPACEIO_AGENT_WEB_SEARCH }}
+          SPACEIO_AGENT_MAX_STEPS: ${{ vars.SPACEIO_AGENT_MAX_STEPS }}
         run: |
           set -euo pipefail
 

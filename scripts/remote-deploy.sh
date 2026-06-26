@@ -12,16 +12,14 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 # Materialise the injected config into THIS shell only, so `docker compose`
-# interpolates it. Exporting the whole KEY=VALUE as a single argument keeps
-# values with spaces or '=' intact. A missing/empty line just leaves the
-# compose defaults in force.
+# interpolates it. Splitting on the FIRST '=' keeps values that themselves
+# contain '=' or spaces intact (`val` gets the remainder). A missing/empty line
+# leaves the compose defaults in force.
 read -r env_b64 || true
 if [ -n "${env_b64:-}" ]; then
-  set -a
-  while IFS= read -r line; do
-    if [ -n "$line" ]; then export "$line"; fi
+  while IFS='=' read -r key val; do
+    [ -n "$key" ] && export "$key=$val"
   done < <(printf '%s' "$env_b64" | base64 -d)
-  set +a
 fi
 
 docker compose up -d --build
@@ -30,7 +28,7 @@ docker image prune -f
 # Verify the app actually came up before calling this a success; otherwise the
 # previous container is still serving and we fail loud.
 ok=""
-for i in $(seq 1 30); do
+for _ in $(seq 1 30); do
   if curl -fsS http://127.0.0.1:8001/healthz >/dev/null 2>&1; then ok=1; break; fi
   sleep 5
 done

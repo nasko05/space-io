@@ -56,16 +56,21 @@ The only sensitive server value is the *optional* OpenRouter API key.
 
 ## One-time setup (manual, do once)
 
-### 1. DNS
+### 1. DNS — already covered by the wildcard
 
-Create an **A record** for the subdomain pointing at the VPS **IPv4**:
+The Contabo zone already has a wildcard A record:
 
 ```
-personal-area.personal-drive-io.com.   A   31.220.94.82
+*.personal-drive-io.com.   A   31.220.94.82
 ```
 
-Use the IPv4 — GitHub-hosted runners have no IPv6 route, and Caddy needs the
-name to resolve to the host for the ACME HTTP-01 challenge.
+That matches `personal-area.personal-drive-io.com` (a single label with no more
+specific record), so **no DNS change is needed** — and any other subdomain works
+too. Verify with `dig +short personal-area.personal-drive-io.com` → `31.220.94.82`.
+
+(If you ever move off the wildcard, add an explicit `A` record to the VPS
+**IPv4** — Caddy needs the name to resolve to the host for the ACME challenge,
+and runners have no IPv6 route.)
 
 ### 2. The `deploy` user and SSH key (shared with the sibling app)
 
@@ -151,14 +156,20 @@ Settings → Secrets and variables → Actions.
 | `SPACEIO_OPENROUTER_API_KEY` | ➖       | Turns the in-app AI assistant on. Omit → assistant stays hidden.    |
 | `SPACEIO_BRAVE_API_KEY`      | ➖       | Direct Brave web search. Omit → OpenRouter's built-in web plugin.   |
 
-**Variables** (non-sensitive; each has a workflow default via `${{ vars.X || '…' }}`):
+**Variables** (non-sensitive, all optional). Set one to override; the **default
+for each lives in `docker-compose.yml`** (`${VAR:-default}`) — the single source
+of truth, also used by a plain local `docker compose up`. The deploy passes a
+Variable through only when you set it.
 
-| Name                     | Default                              | What                                              |
-|--------------------------|--------------------------------------|---------------------------------------------------|
-| `DOMAIN`                 | `personal-area.personal-drive-io.com`| The subdomain the shared Caddy routes to SpaceIO.  |
-| `SPACEIO_AGENT_MODEL`     | `qwen/qwen3.6-27b`                    | Any tool-calling OpenRouter model id.             |
-| `SPACEIO_AGENT_WEB_SEARCH`| `1`                                  | `0` disables agent web search.                    |
-| `SPACEIO_AGENT_MAX_STEPS` | `8`                                  | Max tool rounds per agent message.                |
+| Name                     | Default (in compose) | What                                  |
+|--------------------------|----------------------|---------------------------------------|
+| `SPACEIO_AGENT_MODEL`     | `qwen/qwen3.6-27b`   | Any tool-calling OpenRouter model id. |
+| `SPACEIO_AGENT_WEB_SEARCH`| `1`                  | `0` disables agent web search.        |
+| `SPACEIO_AGENT_MAX_STEPS` | `8`                  | Max tool rounds per agent message.    |
+
+The public **domain is not a SpaceIO Variable** — it's configured in the sibling
+Caddy's site block (§4), and DNS is already covered by the `*.personal-drive-io.com`
+wildcard A record.
 
 The `DEPLOY_*` trio is **shared** with the sibling app — but GitHub secrets are
 per-repo, so add them to this repo too (same values).

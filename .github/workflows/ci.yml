@@ -81,8 +81,8 @@ jobs:
       - name: Create the shared external network
         # In production this is created once on the host and the sibling app's
         # Caddy joins it; CI just needs it to exist so the external network
-        # reference resolves.
-        run: docker network create web
+        # reference resolves. Idempotent so a re-run can't fail here.
+        run: docker network create web 2>/dev/null || true
 
       - name: Build and start the stack
         run: docker compose up -d --build
@@ -91,7 +91,7 @@ jobs:
         run: |
           set -euo pipefail
           ok=""
-          for i in $(seq 1 30); do
+          for _ in $(seq 1 30); do
             if curl -fsS http://127.0.0.1:8001/healthz >/dev/null 2>&1; then ok=1; break; fi
             sleep 5
           done

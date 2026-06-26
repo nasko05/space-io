@@ -50,14 +50,21 @@ docker run --rm \
 
 echo ">> wrote $(du -h "$archive" | cut -f1) to $archive"
 
-# Prune local snapshots beyond the retention count (newest kept).
+# Prune local snapshots beyond the retention count (newest kept). The timestamp
+# names sort lexically == chronologically, so a plain glob is oldest-first; drop
+# everything except the last $BACKUP_RETENTION. A glob array avoids parsing `ls`.
 echo ">> pruning local snapshots, keeping newest $BACKUP_RETENTION"
-ls -1t "$BACKUP_DIR"/space-io-*.tar.gz 2>/dev/null \
-  | tail -n +"$((BACKUP_RETENTION + 1))" \
-  | while read -r old; do
-      echo "   removing $old"
-      rm -f "$old"
-    done
+shopt -s nullglob
+snapshots=("$BACKUP_DIR"/space-io-*.tar.gz)
+shopt -u nullglob
+count=${#snapshots[@]}
+if [ "$count" -gt "$BACKUP_RETENTION" ]; then
+  prune=$(( count - BACKUP_RETENTION ))
+  for old in "${snapshots[@]:0:prune}"; do
+    echo "   removing $old"
+    rm -f "$old"
+  done
+fi
 
 # Off-site copy. Without a remote this is a same-disk backup only — not DR.
 if [ -n "$RCLONE_REMOTE" ]; then
