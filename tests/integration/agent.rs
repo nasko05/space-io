@@ -81,6 +81,39 @@ async fn chat_rejects_a_trailing_assistant_message() {
 }
 
 #[tokio::test]
+async fn chat_rejects_too_many_messages() {
+    let h = Harness::fresh();
+    let u = h.register("ada@example.lan", "passphrase-9");
+    let msgs: Vec<_> = (0..201)
+        .map(|_| serde_json::json!({ "role": "user", "content": "hi" }))
+        .collect();
+    let res = post_authed(
+        &h,
+        &u,
+        "/api/agent/chat",
+        &serde_json::json!({ "messages": msgs }),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(body_json(res).await["error"]["code"], "bad_request");
+}
+
+#[tokio::test]
+async fn chat_rejects_an_oversize_conversation() {
+    let h = Harness::fresh();
+    let u = h.register("ada@example.lan", "passphrase-9");
+    let big = "x".repeat(600_001);
+    let res = post_authed(
+        &h,
+        &u,
+        "/api/agent/chat",
+        &serde_json::json!({ "messages": [{ "role": "user", "content": big }] }),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
 async fn chat_is_unconfigured_without_a_key() {
     let h = Harness::fresh();
     let u = h.register("ada@example.lan", "passphrase-9");

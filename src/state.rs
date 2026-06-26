@@ -128,3 +128,116 @@ impl AppState {
         self.spaces.insert(uuid, space);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::SpaceConfig;
+    use crate::crypto::kdf;
+    use rand::RngCore;
+    use tempfile::TempDir;
+
+    fn cheap_state() -> (TempDir, AppState) {
+        let dir = TempDir::new().expect("tempdir");
+        let state = AppState::new(
+            dir.path().to_path_buf(),
+            SessionStore::new(),
+            RateLimiter::new(),
+            AppConfig {
+                cookie_secure: true,
+            },
+        )
+        .expect("AppState::new");
+        (dir, state)
+    }
+
+    /// Materialise a cheap-KDF space on disk at `<root>/<uuid>` so `space_for`
+    /// can open it the way a real registration would.
+    fn seed_space(root: &std::path::Path, uuid: &Uuid) {
+        let user_dir = root.join(uuid.to_string());
+        let space_root = SpaceConfig::space_root(&user_dir);
+        std::fs::create_dir_all(&space_root).expect("mkdir space root");
+        let mut salt = [0u8; 16];
+        rand::thread_rng().fill_bytes(&mut salt);
+        let verifier = kdf::derive_verifier("passphrase-9", &salt, 4, 8, 1).expect("kdf");
+        let cfg = SpaceConfig {
+            owner: "tester@home.lan".into(),
+            salt_verify_hex: hex::encode(salt),
+            verifier_hash_hex: hex::encode(verifier),
+            kdf_log_n: 4,
+            kdf_r: 8,
+            kdf_p: 1,
+            passkey: None,
+        };
+        cfg.save(&user_dir).expect("save config");
+        git2::Repository::init(&space_root).expect("git init");
+    }
+
+    #[test]
+    fn from_env_defaults_secure_and_honours_insecure_flag() {
+        std::env::remove_var("SPACEIO_INSECURE_COOKIES");
+        assert!(AppConfig::from_env().cookie_secure, "secure by default");
+        std::env::set_var("SPACEIO_INSECURE_COOKIES", "1");
+        assert!(!AppConfig::from_env().cookie_secure, "1 opts out");
+        std::env::set_var("SPACEIO_INSECURE_COOKIES", "TRUE");
+        assert!(!AppConfig::from_env().cookie_secure, "TRUE opts out");
+        std::env::set_var("SPACEIO_INSECURE_COOKIES", "0");
+        assert!(AppConfig::from_env().cookie_secure, "0 stays secure");
+        std::env::remove_var("SPACEIO_INSECURE_COOKIES");
+    }
+
+    #[test]
+    fn register_find_and_snapshot_users() {
+        let (_d, state) = cheap_state();
+        assert!(!state.any_users());
+        let entry = state.register_user("ada@example.lan").expect("register");
+        assert!(state.any_users());
+        let found = state
+            .find_user_by_email("ada@example.lan")
+            .expect("user is findable by email");
+        assert_eq!(found.uuid, entry.uuid);
+        assert!(state.find_user_by_email("nobody@nowhere.lan").is_none());
+        assert_eq!(state.users_snapshot().users.len(), 1);
+    }
+
+    #[test]
+    fn space_for_missing_dir_is_not_found() {
+        let (_d, state) = cheap_state();
+        let entry = state.register_user("ada@example.lan").expect("register");
+        assert!(matches!(
+            state.space_for(&entry.uuid),
+            Err(AppError::NotFound)
+        ));
+    }
+
+    #[test]
+    fn space_for_opens_from_disk_then_serves_from_cache() {
+        let (dir, state) = cheap_state();
+        let entry = state.register_user("ada@example.lan").expect("register");
+        seed_space(dir.path(), &entry.uuid);
+        let opened = state.space_for(&entry.uuid).expect("opens from disk");
+        let cached = state.space_for(&entry.uuid).expect("served from cache");
+        assert_eq!(opened.config().owner, cached.config().owner);
+    }
+
+    #[test]
+    fn cache_space_short_circuits_disk_lookup() {
+        let (_d, state) = cheap_state();
+        let id = Uuid::new_v4();
+        // Prime the cache with a space living in its own tempdir; `space_for`
+        // must return it without consulting <root>/<uuid>, which never exists.
+        let (_sd, space, _pass) = crate::space::test_helpers::make_space("p");
+        state.cache_space(id, space);
+        assert!(state.space_for(&id).is_ok());
+    }
+
+    #[test]
+    fn unregister_user_rolls_back_the_registry() {
+        let (_d, state) = cheap_state();
+        let entry = state.register_user("ada@example.lan").expect("register");
+        assert!(state.any_users());
+        state.unregister_user(&entry.uuid);
+        assert!(!state.any_users());
+        assert!(state.find_user_by_email("ada@example.lan").is_none());
+    }
+}

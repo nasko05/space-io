@@ -40,17 +40,22 @@ pub struct Harness {
 
 impl Harness {
     /// Spin up a fresh server-in-a-process. No users yet — call `register` or
-    /// `register_via_http` to create one.
+    /// `register_via_http` to create one. Cookies are non-`Secure` so dev-style
+    /// plain-HTTP requests keep their session.
     pub fn fresh() -> Self {
+        Self::with_cookie_secure(false)
+    }
+
+    /// Like [`fresh`](Self::fresh) but lets a test opt into production cookie
+    /// behaviour, where `Secure` is set once the request also arrives over HTTPS.
+    pub fn with_cookie_secure(cookie_secure: bool) -> Self {
         let tempdir = TempDir::new().expect("tempdir");
         std::fs::create_dir_all(tempdir.path()).expect("mkdir root");
         let state = AppState::new(
             tempdir.path().to_path_buf(),
             SessionStore::new(),
             RateLimiter::new(),
-            AppConfig {
-                cookie_secure: false,
-            },
+            AppConfig { cookie_secure },
         )
         .expect("AppState::new");
         let router = routes::build_router(state.clone());
