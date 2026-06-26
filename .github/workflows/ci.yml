@@ -22,14 +22,16 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
 
-# Third-party actions are pinned to a full commit SHA (supply-chain hardening) —
-# a moving tag like @v4 could be repointed at malicious code. The trailing
-# comment records the human-readable version each SHA corresponds to.
+# Third-party actions are referenced by their major version tag. For stronger
+# supply-chain hardening, pin each to a full commit SHA — enable Dependabot
+# (`.github/dependabot.yml`, package-ecosystem "github-actions") to pin and keep
+# them current automatically, since resolving the right SHA needs live GitHub
+# access this environment can't provide reliably.
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@9c789ac803e4d3b99463037d0ada654b79d8b863 # v4
+      - uses: actions/checkout@v4
         with:
           # The build needs no credentials after checkout; don't leave the token
           # persisted in .git/config where a later step could exfiltrate it.
@@ -39,7 +41,7 @@ jobs:
       # compile time via rust-embed, so the directory must exist before
       # cargo touches it.
       - name: Set up Node
-        uses: actions/setup-node@0abcfe38175c65168c4c9c3e7d03849e718d5217 # v4
+        uses: actions/setup-node@v4
         with:
           node-version: '24'
           cache: npm
@@ -58,12 +60,12 @@ jobs:
         run: npm run build
 
       - name: Set up Rust
-        uses: dtolnay/rust-toolchain@c5c7528ffae0b8f3e98fb34b7502210f0c45b00f # stable
+        uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
 
       - name: Cache cargo
-        uses: actions/cache@b2753b595c04053bc631c82fc970315ac7927c83 # v4
+        uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
@@ -101,12 +103,12 @@ jobs:
   coverage:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@9c789ac803e4d3b99463037d0ada654b79d8b863 # v4
+      - uses: actions/checkout@v4
         with:
           persist-credentials: false
 
       - name: Set up Node
-        uses: actions/setup-node@0abcfe38175c65168c4c9c3e7d03849e718d5217 # v4
+        uses: actions/setup-node@v4
         with:
           node-version: '24'
           cache: npm
@@ -123,17 +125,17 @@ jobs:
         run: npm run build
 
       - name: Set up Rust
-        uses: dtolnay/rust-toolchain@c5c7528ffae0b8f3e98fb34b7502210f0c45b00f # stable
+        uses: dtolnay/rust-toolchain@stable
         with:
           components: llvm-tools-preview
 
       - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@ab2eb71afe82bc9fbedbfbac600daf333836c52f # v2
+        uses: taiki-e/install-action@v2
         with:
           tool: cargo-llvm-cov
 
       - name: Cache cargo
-        uses: actions/cache@b2753b595c04053bc631c82fc970315ac7927c83 # v4
+        uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
@@ -160,15 +162,15 @@ jobs:
       # dependency-review-action posts its summary on the PR.
       pull-requests: write
     steps:
-      - uses: actions/checkout@9c789ac803e4d3b99463037d0ada654b79d8b863 # v4
+      - uses: actions/checkout@v4
         with:
           persist-credentials: false
 
       - name: Set up Rust
-        uses: dtolnay/rust-toolchain@c5c7528ffae0b8f3e98fb34b7502210f0c45b00f # stable
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Install cargo-audit
-        uses: taiki-e/install-action@ab2eb71afe82bc9fbedbfbac600daf333836c52f # v2
+        uses: taiki-e/install-action@v2
         with:
           tool: cargo-audit
 
@@ -180,7 +182,7 @@ jobs:
         run: cargo audit
 
       - name: Set up Node
-        uses: actions/setup-node@0abcfe38175c65168c4c9c3e7d03849e718d5217 # v4
+        uses: actions/setup-node@v4
         with:
           node-version: '24'
           cache: npm
@@ -199,7 +201,7 @@ jobs:
       # vulnerability or a disallowed licence before it ever lands on main.
       - name: Dependency review
         if: github.event_name == 'pull_request'
-        uses: actions/dependency-review-action@2320d610367b32f7622ab0aca1993e015c3f0433 # v4
+        uses: actions/dependency-review-action@v4
         with:
           fail-on-severity: high
           comment-summary-in-pr: on-failure
@@ -216,7 +218,7 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@9c789ac803e4d3b99463037d0ada654b79d8b863 # v4
+      - uses: actions/checkout@v4
         with:
           persist-credentials: false
 
