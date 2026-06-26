@@ -33,6 +33,11 @@ rand = "0.8"
 subtle = "2"
 secrecy = { version = "0.10", features = ["serde"] }
 zeroize = "1"
+# Verifying the cloud-drive single sign-on token (HS256 JWT). Kept to small,
+# audited primitives so we don't pull a full JWT/ring stack into the binary.
+hmac = "0.12"
+sha2 = "0.10"
+base64 = "0.22"
 
 # storage
 walkdir = "2"

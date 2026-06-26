@@ -15,6 +15,15 @@ export interface InitResult {
   user_uuid: string;
 }
 
+export interface SsoStatus {
+  /** A valid cloud-drive SSO cookie is present. */
+  signed_in: boolean;
+  /** Email carried by the SSO token, when signed in. */
+  email: string | null;
+  /** The drive's stable user id, when signed in. */
+  sub: string | null;
+}
+
 export interface PasskeyInfo {
   credential_id_b64: string;
   prf_salt_b64: string;
@@ -160,6 +169,11 @@ async function sendJson<T>(method: string, url: string, body: unknown): Promise<
 export const api = {
   async status(): Promise<AuthStatus> {
     return requestJson('/api/auth/status');
+  },
+  /** Whether the visitor arrived with a valid cloud-drive SSO cookie, and who
+   *  they are. Used to surface "signed in via Drive" and prefill the email. */
+  async sso(): Promise<SsoStatus> {
+    return requestJson('/api/auth/sso');
   },
   async unlock(email: string, passphrase: string): Promise<void> {
     await sendJson('POST', '/api/auth/unlock', { email, passphrase });

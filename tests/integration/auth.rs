@@ -103,6 +103,32 @@ async fn unlock_without_https_leaves_cookie_insecure_even_when_enabled() {
 }
 
 #[tokio::test]
+async fn sso_reports_signed_out_without_a_trusted_cookie() {
+    let h = Harness::fresh();
+
+    // No SSO cookie at all -> signed out.
+    let res = h.send(get("/api/auth/sso")).await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = body_json(res).await;
+    assert_eq!(body["signed_in"], serde_json::json!(false));
+    assert!(body["email"].is_null());
+    assert!(body["sub"].is_null());
+
+    // A present-but-unverifiable cookie still reports signed out: tests configure
+    // no shared secret, so no token can be trusted. This also exercises the
+    // cookie-present branch of the handler.
+    let mut req = get("/api/auth/sso");
+    req.headers_mut().insert(
+        header::COOKIE,
+        "drive_sso=not-a-real-token".parse().unwrap(),
+    );
+    let res = h.send(req).await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = body_json(res).await;
+    assert_eq!(body["signed_in"], serde_json::json!(false));
+}
+
+#[tokio::test]
 async fn init_rejects_oversize_passphrase() {
     let h = Harness::fresh();
     let res = h

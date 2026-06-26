@@ -1,9 +1,12 @@
-import { FormEvent, useState } from 'react';
+import { FormEvent, useEffect, useState } from 'react';
 import { WindowChrome } from '../WindowChrome/WindowChrome';
 import { Chevron, Eye } from '../icons/Icon';
 import { api, ApiError } from '../../api/client';
 import { isPasskeySupported, unlockWithPasskey } from '../../lib/passkey';
 import styles from './Auth.module.css';
+
+/** Full URL of the co-hosted cloud drive, for the "back to drive" link. */
+const DRIVE_URL = (import.meta.env.VITE_DRIVE_URL as string | undefined) ?? '';
 
 interface Props {
   /** Whether a "Create another account" link should appear at the bottom. */
@@ -23,6 +26,24 @@ export function Auth({ showRegisterLink = false, onUnlocked, onRegister }: Props
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [passkeyBusy, setPasskeyBusy] = useState(false);
+  const [driveEmail, setDriveEmail] = useState<string | null>(null);
+
+  // If the visitor arrived with a cloud-drive SSO cookie, greet them by name
+  // and prefill the email so they only need to unlock their space.
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .sso()
+      .then((sso) => {
+        if (cancelled || !sso.signed_in || !sso.email) { return; }
+        setDriveEmail(sso.email);
+        setEmail((current) => current || sso.email!);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -115,7 +136,11 @@ export function Auth({ showRegisterLink = false, onUnlocked, onRegister }: Props
             <div className={styles.brand}>S</div>
 
             <h1 className={styles.welcome}>Welcome back.</h1>
-            <div className={styles.subhead}>Sign in to your space.</div>
+            <div className={styles.subhead}>
+              {driveEmail
+                ? `Signed in as ${driveEmail} via the drive — unlock your space.`
+                : 'Sign in to your space.'}
+            </div>
 
             <div className={styles.field}>
               <label className={styles.label} htmlFor="email">
@@ -223,6 +248,12 @@ export function Auth({ showRegisterLink = false, onUnlocked, onRegister }: Props
               <button type="button" className={styles.registerAlt} onClick={onRegister}>
                 Need a new account? Register
               </button>
+            )}
+
+            {DRIVE_URL && (
+              <a className={styles.driveBack} href={DRIVE_URL}>
+                ← Back to the cloud drive
+              </a>
             )}
 
             <div className={styles.security}>
