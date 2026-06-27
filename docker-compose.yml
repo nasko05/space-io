@@ -25,7 +25,13 @@ name: space-io
 
 services:
   space-io:
-    build: .
+    build:
+      context: .
+      args:
+        # Baked into the frontend bundle at build time (see Dockerfile). Empty =
+        # standalone editor; set both to pair with the cloud drive.
+        VITE_DRIVE_URL: ${VITE_DRIVE_URL:-}
+        VITE_WEBAUTHN_RP_ID: ${VITE_WEBAUTHN_RP_ID:-}
     image: space-io
     container_name: space-io
     restart: unless-stopped
@@ -44,6 +50,10 @@ services:
       SPACEIO_AGENT_MODEL: ${SPACEIO_AGENT_MODEL:-qwen/qwen3.6-27b}
       SPACEIO_AGENT_WEB_SEARCH: ${SPACEIO_AGENT_WEB_SEARCH:-1}
       SPACEIO_AGENT_MAX_STEPS: ${SPACEIO_AGENT_MAX_STEPS:-8}
+      # --- Cloud drive SSO (plug-in mode). Unset = standalone editor. ---
+      # Must equal the drive's DRIVE_SECRET_KEY so the editor verifies its token.
+      SPACEIO_SSO_JWT_SECRET: ${SPACEIO_SSO_JWT_SECRET:-}
+      SPACEIO_SSO_COOKIE_NAME: ${SPACEIO_SSO_COOKIE_NAME:-drive_sso}
     volumes:
       - space-io-data:/data
     # Loopback only: lets the deploy poll http://127.0.0.1:8001/healthz over SSH

@@ -36,6 +36,7 @@ type View =
   | { kind: 'loading' }
   | { kind: 'registration'; anyUsers: boolean }
   | { kind: 'auth'; anyUsers: boolean }
+  | { kind: 'driveSignIn' }
   | { kind: 'sso'; email: string | null }
   | { kind: 'unlocked'; owner: string; email: string; surface: Surface }
   | { kind: 'fatal'; message: string };
@@ -183,7 +184,16 @@ export function App() {
       setView({ kind: 'sso', email: sso.email });
       return;
     }
-    if (!status.any_users && !DRIVE_URL) {
+    // Plug-in mode: the drive owns login and it's passkey-only / email-less.
+    // Never fall back to the editor's own email+passphrase form here — send the
+    // visitor to the drive to sign in with their passkey; the SSO cookie then
+    // brings them back to the one-tap unlock. The email+passphrase / registration
+    // screens are only for a standalone editor (no drive configured).
+    if (DRIVE_URL) {
+      setView({ kind: 'driveSignIn' });
+      return;
+    }
+    if (!status.any_users) {
       setView({ kind: 'registration', anyUsers: false });
     } else {
       setView({ kind: 'auth', anyUsers: status.any_users });
@@ -690,6 +700,9 @@ export function App() {
       />
     );
   }
+  if (view.kind === 'driveSignIn') {
+    return <DriveSignInScreen />;
+  }
   if (view.kind === 'sso') {
     return <SsoScreen email={view.email} onUnlocked={onSsoUnlocked} />;
   }
@@ -925,6 +938,67 @@ function LoadingScreen() {
       }}
     >
       Opening the door…
+    </div>
+  );
+}
+
+/** Plug-in entry screen for a visitor who isn't signed into the drive yet. The
+ *  drive owns login and it's passkey-only, so there's no email/passphrase form
+ *  here — just a route to the drive's passkey sign-in, after which the SSO
+ *  cookie brings them straight to the one-tap unlock. */
+function DriveSignInScreen() {
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        inset: 0,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: 'var(--paper)',
+        color: 'var(--ink)',
+        fontFamily: 'var(--font-serif)',
+        padding: 32,
+      }}
+    >
+      <div style={{ maxWidth: 420, textAlign: 'center' }}>
+        <div
+          style={{
+            fontSize: 11,
+            letterSpacing: '0.18em',
+            textTransform: 'uppercase',
+            color: 'var(--accent)',
+            marginBottom: 14,
+            fontWeight: 600,
+          }}
+        >
+          My Space
+        </div>
+        <div style={{ fontSize: 24, fontWeight: 500, letterSpacing: '-0.015em', marginBottom: 8 }}>
+          Sign in to open your space.
+        </div>
+        <div style={{ fontSize: 14, color: 'var(--mute)', marginBottom: 24 }}>
+          Use your passkey — no email, no password.
+        </div>
+        <a
+          href={DRIVE_URL}
+          style={{
+            display: 'inline-block',
+            height: 44,
+            lineHeight: '44px',
+            padding: '0 24px',
+            borderRadius: 999,
+            background: 'var(--ink)',
+            color: 'var(--paper)',
+            fontFamily: 'var(--font-sans)',
+            fontSize: 14,
+            fontWeight: 500,
+            textDecoration: 'none',
+          }}
+        >
+          Sign in with your passkey
+        </a>
+      </div>
     </div>
   );
 }
