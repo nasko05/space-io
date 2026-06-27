@@ -27,6 +27,12 @@ standalone app.**
 The server only ever holds the passphrase in its in-memory session (exactly as
 the standalone unlock does); the key is derived client-side from the passkey.
 
+**Login is passkey-only.** In plug-in mode the editor never shows an
+email/password form. Open it without a drive session and it routes you to the
+drive's email-less passkey login; the SSO cookie then brings you back to the
+one-tap unlock. The editor's own email + passphrase login only appears in the
+**standalone** editor (no `VITE_DRIVE_URL` configured).
+
 ## Environment knobs (editor side)
 
 All optional; unset = standalone editor.
