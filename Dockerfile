@@ -9,7 +9,13 @@ WORKDIR /web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci
 COPY web/ ./
-RUN npm run build
+# Build-time UI config, baked into the bundle. Optional: empty = standalone
+# editor (own login, no drive link). In plug-in mode set VITE_DRIVE_URL to the
+# cloud drive's URL and VITE_WEBAUTHN_RP_ID to the shared registrable parent
+# domain (== the drive's DRIVE_WEBAUTHN_RP_ID). Passed from compose build.args.
+ARG VITE_DRIVE_URL=""
+ARG VITE_WEBAUTHN_RP_ID=""
+RUN VITE_DRIVE_URL="$VITE_DRIVE_URL" VITE_WEBAUTHN_RP_ID="$VITE_WEBAUTHN_RP_ID" npm run build
 
 # ---- stage 2: rust binary ------------------------------------------------
 FROM rust:1-slim AS build
