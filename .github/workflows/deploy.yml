@@ -84,6 +84,14 @@ jobs:
           SPACEIO_AGENT_MODEL: ${{ vars.SPACEIO_AGENT_MODEL }}
           SPACEIO_AGENT_WEB_SEARCH: ${{ vars.SPACEIO_AGENT_WEB_SEARCH }}
           SPACEIO_AGENT_MAX_STEPS: ${{ vars.SPACEIO_AGENT_MAX_STEPS }}
+          # --- Cloud-drive plug-in (pairs the editor with cloud-storage). ---
+          # The secret MUST equal the drive's DRIVE_SECRET_KEY; leave it unset to
+          # keep the editor standalone. The two VITE_* values are baked into the
+          # bundle at build time (compose build.args); they default to the
+          # production domain below when the secret is present.
+          SPACEIO_SSO_JWT_SECRET: ${{ secrets.SPACEIO_SSO_JWT_SECRET }}
+          VITE_DRIVE_URL: ${{ vars.VITE_DRIVE_URL }}
+          VITE_WEBAUTHN_RP_ID: ${{ vars.VITE_WEBAUTHN_RP_ID }}
         run: |
           set -euo pipefail
 
@@ -100,6 +108,17 @@ jobs:
           # VPS host key in a secret and write it to known_hosts instead.
           ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts 2>/dev/null
 
+          # Plug-in mode (pair with the cloud drive) activates ONLY when the SSO
+          # secret is set — otherwise the editor would route an unauthenticated
+          # visitor to the drive and loop, since it can't verify the SSO cookie.
+          # When the secret is present, default the drive URL and the shared
+          # WebAuthn parent (registrable) domain to production; both are
+          # overridable via repository Variables.
+          if [ -n "${SPACEIO_SSO_JWT_SECRET}" ]; then
+            VITE_DRIVE_URL="${VITE_DRIVE_URL:-https://personal-drive-io.com}"
+            VITE_WEBAUTHN_RP_ID="${VITE_WEBAUTHN_RP_ID:-personal-drive-io.com}"
+          fi
+
           # Pack the runtime config (Secrets + Variables above) into ONE base64
           # line. There is NO server-side .env: this is sent over the encrypted
           # SSH stdin (never argv, never disk) and exported only into the shell
@@ -113,6 +132,9 @@ jobs:
               printf 'SPACEIO_AGENT_MODEL=%s\n'        "$SPACEIO_AGENT_MODEL"
               printf 'SPACEIO_AGENT_WEB_SEARCH=%s\n'   "$SPACEIO_AGENT_WEB_SEARCH"
               printf 'SPACEIO_AGENT_MAX_STEPS=%s\n'    "$SPACEIO_AGENT_MAX_STEPS"
+              printf 'SPACEIO_SSO_JWT_SECRET=%s\n'     "$SPACEIO_SSO_JWT_SECRET"
+              printf 'VITE_DRIVE_URL=%s\n'             "$VITE_DRIVE_URL"
+              printf 'VITE_WEBAUTHN_RP_ID=%s\n'        "$VITE_WEBAUTHN_RP_ID"
             } | base64 -w0
           )"
 
